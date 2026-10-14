@@ -18,56 +18,52 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * The machine-definition schema: reading a definition and every rule it has to satisfy.
+ * 机器定义的<strong>schema</strong>：读取一份定义，并承载它必须满足的每一条规则。
  *
- * <p>This class exists because there is now more than one way to hand this mod a machine definition. Until
- * 0.28.0 the only producer was {@link MachineLoader}, which parses the JSON files of
- * {@code data/<namespace>/machinery/}, so every rule — "must be one of …", "Write …" — lived inside that
- * parse. A KubeJS script is the second producer (D7/v2a), and a programmatic path that skimmed the fields it
- * cared about would give script authors <b>strictly worse errors for the same schema</b> than data-pack
- * authors get. That is the class of inconsistency this project has paid for repeatedly, so the rules were
- * lifted out of the loader instead: both paths hand a {@link JsonObject} to {@link #read} and get the same
- * {@link JsonParseException} with the same sentence in it.
+ * <p>这个类存在的原因是：现在有<strong>不止一条</strong>路可以把机器定义交给本模组。0.28.0 之前唯一的产出者是
+ * {@link MachineLoader}，它解析 {@code data/<namespace>/machinery/} 下的 JSON 文件，于是每一条规则
+ * （「必须是其中之一……」「请写……」）都长在那段解析里。KubeJS 脚本是第二个产出者（D7/v2a）——
+ * 如果另写一条「只挑自己关心的字段看看」的路径，脚本作者就会为<strong>同一份 schema 拿到严格更差的报错</strong>，
+ * 比数据包作者差。这正是本项目反复付过代价的那一类不一致，所以规则被<strong>从 loader 里抬了出来</strong>：
+ * 两条路都把 {@link JsonObject} 交给 {@link #read}，拿到同一个 {@link JsonParseException}，连句子都一样。
  *
- * <p>The KubeJS side is therefore a <b>JSON builder</b> and nothing else: {@code MachineRegisterEventJS} and
- * {@code MachineBuilderJS} append the fields a script asked for to a {@code JsonObject} and call
- * {@link #read} — the writer of a script and the writer of a data pack are answered by the same code.
- * {@code mmverify} asserts that with two stacks: a script-shaped and a data-pack-shaped object with the same
- * defect must produce byte-identical messages.
+ * <p>因此 KubeJS 那一侧只是个 <strong>JSON 构建器</strong>，别的什么都不是：{@code MachineRegisterEventJS} 与
+ * {@code MachineBuilderJS} 把脚本要求的字段追加到一个 {@code JsonObject} 上，然后调用 {@link #read}——
+ * 写脚本的人和写数据包的人由同一段代码回答。{@code mmverify} 用两组输入断言了这件事：
+ * 一个脚本形状的对象和一个数据包形状的对象，带着<strong>同样的缺陷</strong>，必须产出逐字节相同的消息。
  *
- * <h2>The two paths, and the one difference left between them</h2>
+ * <h2>两条路，以及它们之间剩下的那一处差别</h2>
  *
  * <ol>
- *   <li><b>{@code strict}</b>. A data pack is parsed tolerantly for one reason only: backwards compatibility
- *       with definitions written before a field existed. The loader reports an unknown root field and carries
- *       on, which is what {@link #read(JsonElement, Object, Map)} does. A script has no such history — it is
- *       written against this API today — so {@link #read(JsonElement, Object, Map, boolean)} in strict mode
- *       <b>rejects</b> an unknown field instead. That closes the gap the survey named: through the loader the
- *       message for an unknown field is a warning, and through KubeJS the identical mistake can now be an
- *       error that names every field that does exist.</li>
- *   <li><b>{@code deferred} — gone as of 0.31.0.</b> Through 0.30.1 the script API implemented the core fields
- *       only, and a field the loader evaluated but the script API did not was <b>refused by name</b> rather than
- *       accepted and ignored, so "the script said {@code has-factory} and nothing happened" could not occur.
- *       {@code MachineBuilderJS} now has a method for all eleven, so there is nothing left to defer and the
- *       refusal path is deleted ({@link #DEFERRED_ROOT_FIELDS} survives as an empty list with a contract on it).
- *       The two paths therefore read the same set of fields, and the only difference between them is strictness
- *       about fields <i>neither</i> of them knows.</li>
+ *   <li><strong>{@code strict}</strong>（严格模式）。数据包被宽容地解析，只为一个理由：与「字段还不存在时写下的
+ *       定义」保持向后兼容。loader 报出一个未知根字段然后继续走，这正是 {@link #read(JsonElement, Object, Map)}
+ *       做的。脚本没有这段历史——它是<strong>今天</strong>照这套 API 写的——所以
+ *       {@link #read(JsonElement, Object, Map, boolean)} 在严格模式下<strong>拒绝</strong>未知字段。
+ *       这就补上了勘测指出的缺口：走 loader 时未知字段只是一条警告，走 KubeJS 时同样的错误现在可以是
+ *       一个<strong>错误</strong>，并且把所有确实存在的字段都列出来。</li>
+ *   <li><strong>{@code deferred}（延迟字段）—— 0.31.0 起已消失。</strong>直到 0.30.1，脚本 API 只实现了核心字段，
+ *       而「loader 会求值、脚本 API 却写不了」的字段会被<strong>按名拒绝</strong>，而不是接受后忽略，
+ *       这样「脚本写了 {@code has-factory} 却什么都没发生」就不可能发生。
+ *       {@code MachineBuilderJS} 现在对全部十一个字段都有方法，所以没有东西可延迟，拒绝路径也删掉了
+ *       （{@link #DEFERRED_ROOT_FIELDS} 作为一份<strong>空列表</strong>留着，但身上有一份契约）。
+ *       于是两条路读的是<strong>同一组字段</strong>，它们之间唯一的差别只剩「对<strong>双方都不认识</strong>的
+ *       字段有多严格」。</li>
  * </ol>
  *
- * <p>Nothing here touches a registry, a level or a config file, which is what lets the offline harness drive
- * the whole schema — including the KubeJS builder — without a game.
+ * <p>这里不碰注册表、不碰 level、不碰配置文件——正因如此，离线复现器才能在没有游戏的情况下驱动整套 schema，
+ * 包括 KubeJS 构建器。
  */
 public final class MachineSchema {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
-     * Every root field this loader reads, for the unknown-field message. {@code has-factory} and
-     * {@code factory-only} are the original's own schema ({@code DynamicMachinePreDeserializer:77-89});
-     * {@code max-parallelism} / {@code internal-parallelism} / {@code parallelizable} (D12),
-     * {@code max-threads} / {@code core-threads} (D15) and {@code smart-interfaces} (D16) are this project's
-     * documented extensions, each for the same reason: the original's values lived on {@code AbstractMachine}
-     * and only a CraftTweaker script could set them, and this project's authors have no script.
+     * 本 loader 会读取的<strong>全部根字段</strong>，用于「未知字段」那条消息。
+     * {@code has-factory} 与 {@code factory-only} 是旧版自己的 schema（{@code DynamicMachinePreDeserializer:77-89}）；
+     * {@code max-parallelism} / {@code internal-parallelism} / {@code parallelizable}（D12）、
+     * {@code max-threads} / {@code core-threads}（D15）与 {@code smart-interfaces}（D16）是本项目有文档记录的扩展，
+     * 理由都一样：旧版把这些值放在 {@code AbstractMachine} 上，且只有 CraftTweaker 脚本能设置它们，
+     * 而本项目的作者没有脚本可用。
      */
     public static final List<String> KNOWN_ROOT_FIELDS = List.of(
             "registryname", "localizedname", "parts", "failure-action", "requires-blueprint",
@@ -78,49 +74,46 @@ public final class MachineSchema {
      * Root fields the loader evaluates but the script API cannot yet write — <b>empty as of 0.31.0</b>, and kept
      * as an empty list on purpose.
      *
-     * <h2>What this list was</h2>
+     * <h2>这份列表曾经是什么</h2>
      *
-     * <p>Through 0.30.1 it named eleven fields — {@code modifiers}, {@code smart-interfaces}, {@code has-factory},
-     * {@code factory-only}, {@code max-threads}, {@code core-threads}, {@code max-parallelism},
-     * {@code internal-parallelism}, {@code parallelizable}, {@code failure-action} and
-     * {@code requires-blueprint} — and a script that spelled one was <b>refused by name</b>. The alternative,
-     * accepting it and ignoring it, is the failure mode this project keeps paying for: a definition that looks
-     * like it said something and did nothing.
+     * <p>直到 0.30.1，它列出十一个字段——{@code modifiers}、{@code smart-interfaces}、{@code has-factory}、
+     * {@code factory-only}、{@code max-threads}、{@code core-threads}、{@code max-parallelism}、
+     * {@code internal-parallelism}、{@code parallelizable}、{@code failure-action} 与
+     * {@code requires-blueprint}——脚本只要写出其中一个，就会被<strong>按名拒绝</strong>。另一种做法
+     * （接受它然后忽略它）是本项目一直在付代价的那种失败模式：一份看起来说了什么、实际什么都没做的定义。
      *
-     * <h2>Why it is empty rather than deleted</h2>
+     * <h2>为什么是置空而不是删除</h2>
      *
-     * <p>0.31.0 (v2b) gave {@code MachineBuilderJS} a method for every one of them, so the deferral has nothing
-     * left to describe and the refusal path is gone — {@link #read} no longer calls a reject step at all.
+     * <p>0.31.0（v2b）给 {@code MachineBuilderJS} 把十一个字段都补上了方法，于是「延迟」这件事没有东西可描述，
+     * 拒绝路径也没了——{@link #read} 已经不再调用任何拒绝步骤。
      *
-     * <p>The constant stays because <b>two callers still depend on it as a contract</b>, and deleting it would
-     * remove a test rather than a behaviour: section Z3 of the offline harness asserts that this list never names
-     * a field {@link #KNOWN_ROOT_FIELDS} does not know (a refusal naming a non-existent field would be a lie) and
-     * never names a core field (that would break the API), and it asserts that nothing is deferred any more. A
-     * future slice that defers a field again must therefore re-add the refusal <i>and</i> the {@code rejectDeferred}
-     * call; section Z3 carries the same reminder next to its assertion.
+     * <p>这个常量留着，是因为<strong>仍有两个调用者把它当作契约</strong>，删掉它等于删掉一个测试而不是一个行为：
+     * 离线复现器的 Z3 段断言这份列表<strong>永不</strong>点名一个 {@link #KNOWN_ROOT_FIELDS} 不认识的字段
+     * （拒绝一个不存在的字段等于撒谎），并且<strong>永不</strong>点名一个核心字段（那会破坏 API），
+     * 同时断言已经没有任何字段被延迟。因此，将来若有某一版重新开始延迟某个字段，它必须<strong>同时</strong>
+     * 把拒绝路径和 {@code rejectDeferred} 调用加回来；Z3 段在那条断言旁边也写着同样的提醒。
      *
-     * <p>An empty list is also the honest shape: {@code DEFERRED_ROOT_FIELDS.contains(x)} is {@code false} for
-     * everything, which is exactly the state of the world.
+     * <p>空列表同时也是最诚实的形状：{@code DEFERRED_ROOT_FIELDS.contains(x)} 对任何 {@code x} 都是
+     * {@code false}，这正是世界的现状。
      */
     public static final List<String> DEFERRED_ROOT_FIELDS = List.of();
 
     private MachineSchema() {
     }
 
-    /** The original's tolerance: an unknown root field is reported and skipped. */
+    /** 旧版的宽容做法：未知根字段被报告出来，然后跳过。 */
     public static MachineDefinition read(JsonElement element, Object where, Map<String, List<String>> variables) {
         return read(element, where, variables, false);
     }
 
     /**
-     * Reads a machine definition.
+     * 读取一份机器定义。
      *
-     * @param element   the definition, as a JSON object
-     * @param where     what to name in an error message — a file id for a data pack, {@code machine 'foo'} for
-     *                  a script
-     * @param variables the {@code *.var.json} variable sets, empty when the caller has none
-     * @param strict    {@code true} to reject an unknown root field instead of reporting it and carrying on
-     * @throws JsonParseException when the definition is malformed, with a sentence saying what to write
+     * @param element   那份定义，作为一个 JSON 对象
+     * @param where     出错消息里用来指代它的名字 —— 数据包用文件 id，脚本用 {@code machine 'foo'}
+     * @param variables {@code *.var.json} 变量集；调用者没有时为空
+     * @param strict    {@code true} 表示<strong>拒绝</strong>未知根字段，而不是报告后继续
+     * @throws JsonParseException 当定义格式错误时抛出，消息里写明「应该怎么写」
      */
     public static MachineDefinition read(JsonElement element, Object where, Map<String, List<String>> variables,
                                          boolean strict) {
@@ -302,16 +295,16 @@ public final class MachineSchema {
     // re-introduces the call together with the list entry; section Z3 asserts the list's invariants either way.
 
     /**
-     * {@code failure-action}: the original's root string, one of {@code reset} / {@code still} /
-     * {@code decrease} ({@code RecipeFailureActions.java:15-18}), read exactly where the original read it
-     * ({@code DynamicMachinePreDeserializer.java:44-51}) and carried on the definition
-     * ({@code DynamicMachine.java:630-633}).
+     * {@code failure-action}：旧版的根级字符串，取值是 {@code reset} / {@code still} / {@code decrease} 之一
+     * （{@code RecipeFailureActions.java:15-18}），读取位置与旧版一致
+     * （{@code DynamicMachinePreDeserializer.java:44-51}），并挂在定义上
+     * （{@code DynamicMachine.java:630-633}）。
      *
-     * <p>Two deliberate differences from the original, both this project's convention for a field a person
-     * writes. A value that is not a string is reported <b>as such</b> — the original's type check existed, but
-     * its message named the three values instead of the type, so `"failure-action": true` was answered with a
-     * sentence about the vocabulary. And an unknown <b>name</b> is refused rather than silently becoming the
-     * default, which is what {@code RecipeFailureActions#getFailureAction:49-56} did: a typo was invisible.
+     * <p>与旧版有两处刻意不同，都遵循本项目对「由人手写的字段」的惯例。第一，值不是字符串时会被
+     * <strong>如实</strong>报告成类型错误——旧版也有类型检查，但它的消息里写的是那三个取值而不是类型，
+     * 于是 `"failure-action": true` 收到的是关于取值范围的话。第二，未知的<strong>名字</strong>会被拒绝，
+     * 而不是静默地变成默认值——这正是 {@code RecipeFailureActions#getFailureAction:49-56} 的做法：
+     * 打错一个字是看不见的。
      */
     private static FailureAction readFailureAction(JsonObject root, Object where) {
         JsonElement element = root.get("failure-action");
@@ -335,8 +328,8 @@ public final class MachineSchema {
     }
 
     /**
-     * {@code max-threads}: a non-negative whole number, reported rather than clamped so a typo cannot silently
-     * make a factory single-threaded.
+     * {@code max-threads}：一个非负整数。取值非法时<strong>报告</strong>而不是夹取，这样打错一个字不会静默地
+     * 把一台工厂变成单线程。
      */
     private static int readThreadCount(JsonObject root, String key, Object where) {
         JsonElement element = root.get(key);
@@ -356,9 +349,9 @@ public final class MachineSchema {
     }
 
     /**
-     * One of the two factory booleans. The original threw {@code JsonParseException("'has-factory' has to be
-     * either 'true' or 'false'!")} ({@code DynamicMachinePreDeserializer:77-89}); the message here keeps that
-     * shape and adds what the field actually does, which the original's did not.
+     * 两个工厂布尔值之一。旧版抛的是 {@code JsonParseException("'has-factory' has to be
+     * either 'true' or 'false'!")}（{@code DynamicMachinePreDeserializer:77-89}）；这里的消息保留那个形状，
+     * 并补上这个字段到底是干什么的——旧版的消息没有这一半。
      */
     private static boolean readBoolean(JsonObject root, String key, Object where, String advice) {
         JsonElement element = root.get(key);
@@ -369,16 +362,15 @@ public final class MachineSchema {
     }
 
     /**
-     * {@code core-threads}: the preset of threads that always exist.
+     * {@code core-threads}：<strong>始终存在</strong>的那组预设线程。
      *
      * <pre>{@code "core-threads": [ { "name": "smelter", "recipes": ["alloy_smelter_diamond"] } ] }</pre>
      *
-     * <p>The original had no JSON for this either: {@code DynamicMachine#addCoreThread} was called from a
-     * CraftTweaker script, and {@code FactoryRecipeThread#createCoreThread(threadName)} built the thread. Two
-     * fields are all it needs — the name it is keyed by (the original's {@code threadName}) and the fixed recipe
-     * set ({@code recipeSet}); an omitted or empty {@code recipes} means the thread may run anything the machine
-     * offers, which is how the original read an empty set
-     * ({@code FactoryRecipeThread.java:161-163}).
+     * <p>旧版同样没有对应的 JSON：{@code DynamicMachine#addCoreThread} 是被 CraftTweaker 脚本调用的，而
+     * {@code FactoryRecipeThread#createCoreThread(threadName)} 负责造出线程。它只需要两个字段——它被索引的名字
+     * （旧版的 {@code threadName}）与固定的配方集（{@code recipeSet}）；{@code recipes} 省略或为空表示这条线程
+     * 可以跑这台机器提供的任何配方，这也是旧版读到一个空集时的行为
+     * （{@code FactoryRecipeThread.java:161-163}）。
      */
     private static List<FactoryThreadModel.CoreThreadSpec> readCoreThreads(JsonObject root, Object where) {
         JsonElement element = root.get(FactoryThreadModel.JSON_CORE_THREADS);
@@ -442,8 +434,8 @@ public final class MachineSchema {
     }
 
     /**
-     * {@code smart-interfaces}: the interface types this machine declares — the JSON entry point the original
-     * never had (see the class comment of {@link SmartInterfaceType} and the D16 record).
+     * {@code smart-interfaces}：这台机器声明的接口类型——旧版从来没有过的那个 JSON 入口
+     * （见 {@link SmartInterfaceType} 的类注释与 D16 记录）。
      *
      * <pre>{@code
      * "smart-interfaces": [
@@ -452,11 +444,10 @@ public final class MachineSchema {
      * ]
      * }</pre>
      *
-     * <p>Every field except {@code type} is optional, and {@code type} is the one thing the original also
-     * required ({@code smartInterfaces} was a {@code Map<String, SmartInterfaceType>}, so a type with no name
-     * could never be looked up). The loud half is that a malformed value says what to write instead — the
-     * original had no schema here at all, so there is nothing to be faithful to but this project's own
-     * convention (D12's "a definition file is read by a person").
+     * <p>除 {@code type} 外每个字段都是可选的，而 {@code type} 正是旧版也要求的唯一一项
+     * （{@code smartInterfaces} 是一个 {@code Map<String, SmartInterfaceType>}，所以没有名字的类型根本无法被查到）。
+     * 这里「吵闹」的那一半是：取值格式错误时消息会告诉你应该怎么写——旧版在这里<strong>完全没有 schema</strong>，
+     * 所以没有旧版可对齐，只有本项目自己的惯例（D12 那句「定义文件是给人读的」）。
      */
     private static List<SmartInterfaceType> readSmartInterfaces(JsonObject root, Object where) {
         JsonElement element = root.get("smart-interfaces");
@@ -526,9 +517,8 @@ public final class MachineSchema {
     }
 
     /**
-     * One of the three optional display strings, or {@code null} when absent. Present but not a string is an
-     * error rather than a silently stringified number, because these are translation keys and a number here is
-     * always a mistake.
+     * 三个可选显示字符串之一，缺失时为 {@code null}。写了但不是字符串会报错，而不是静默地把数字转成字符串——
+     * 因为这些是翻译键，这里出现一个数字永远是错的。
      */
     @javax.annotation.Nullable
     private static String readOptionalText(JsonObject entry, String key, String name, Object where) {
@@ -545,9 +535,9 @@ public final class MachineSchema {
     }
 
     /**
-     * A float that has to survive the JSON parser's own number handling. Gson answers {@code getAsFloat} for
-     * anything numeric, but a literal {@code true} is not numeric even though {@code getAsFloat} would happily
-     * read it as 1 — hence the primitive-and-number test before the read, like {@code readParallelism}'s.
+     * 一个必须扛得住 JSON 解析器自身数字处理的浮点数。Gson 对任何数字都能答出 {@code getAsFloat}，
+     * 但字面量 {@code true} 并不是数字——尽管 {@code getAsFloat} 会乐意把它读成 1。所以在读取之前先做
+     * 「是原始值且是数字」的检查，与 {@code readParallelism} 一样。
      */
     private static float readFloat(JsonElement element, String where) {
         try {
@@ -558,8 +548,8 @@ public final class MachineSchema {
     }
 
     /**
-     * One of the two parallelism integers. Both are non-negative and both are reported rather than clamped when
-     * malformed, so a typo in a definition cannot silently disable or unbound a machine.
+     * 两个并行度整数之一。两者都要求非负，且格式错误时都是<strong>报告</strong>而不是夹取，
+     * 这样定义里打错一个字不会静默地把一台机器变成不能并行、或变成无上限。
      */
     private static int readParallelism(JsonObject root, String key, Object where) {
         JsonElement element = root.get(key);
@@ -577,11 +567,10 @@ public final class MachineSchema {
     }
 
     /**
-     * The {@code modifiers} array: the original's {@code BlockArray}-positioned recipe modifiers.
+     * {@code modifiers} 数组：旧版那套<strong>按方块位置</strong>生效的配方修改器。
      *
-     * <p>Each entry names one position (the original's {@code addModifierWithPattern} also accepted coordinate
-     * arrays, which are expanded here the same way {@code parts} are) plus the blocks that may sit there and the
-     * modifiers those blocks contribute.
+     * <p>每一项点明一个位置（旧版的 {@code addModifierWithPattern} 也接受坐标数组，这里按 {@code parts}
+     * 同样的方式展开），再加上「哪些方块可以放在那里」以及那些方块贡献的修改器。
      */
     private static List<MachineModifier> readModifiers(JsonObject root, Map<String, List<String>> variables,
                                                        Object where) {
@@ -649,14 +638,13 @@ public final class MachineSchema {
     }
 
     /**
-     * Original root fields that the schema recognises but this project does not act on yet. They are reported at
-     * load time instead of being silently dropped.
+     * 本 schema <strong>认得、但本项目还没作用</strong>的旧版根字段。它们在加载时被报告出来，而不是被静默丢弃。
      *
-     * <p>{@code modifiers} left this list in 0.19.0 (M6c): structure positions now really do contribute their
-     * recipe modifiers. {@code has-factory} / {@code factory-only} left it in 0.22.0 (M6e) together with the two
-     * new thread fields. {@code failure-action} left it in 0.25.0 (D17). What remains has no consumer at all yet:
-     * {@code color} is only visual, and {@code prefix} / {@code hide-components-when-formed} /
-     * {@code controller-bounding-box} / {@code dynamic-patterns} belong to slices that have not been scheduled.
+     * <p>{@code modifiers} 在 0.19.0（M6c）离开了这份列表：结构位置现在真的会贡献它的配方修改器。
+     * {@code has-factory} / {@code factory-only} 在 0.22.0（M6e）连同两个新线程字段一起离开。
+     * {@code failure-action} 在 0.25.0（D17）离开。剩下这些<strong>完全还没有消费者</strong>：
+     * {@code color} 只是视觉的，而 {@code prefix} / {@code hide-components-when-formed} /
+     * {@code controller-bounding-box} / {@code dynamic-patterns} 属于尚未排期的批次。
      */
     private static final String[] UNIMPLEMENTED_ROOT_FIELDS = {
             "dynamic-patterns", "color", "prefix",
@@ -733,8 +721,7 @@ public final class MachineSchema {
     }
 
     /**
-     * The "expected an object" check, shared with {@link MachineLoader}'s variable-set reader so both name the
-     * offending place the same way.
+     * 「期望一个对象」的检查，与 {@link MachineLoader} 的变量集读取器共用，好让两边用同样的方式指出出错的位置。
      */
     public static JsonObject asObject(JsonElement element, Object where) {
         if (element == null || !element.isJsonObject()) {
