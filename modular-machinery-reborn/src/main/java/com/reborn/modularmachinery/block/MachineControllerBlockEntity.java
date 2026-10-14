@@ -452,11 +452,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // 现在：如果这台机器**确实**有配方、只是此刻付不起，就把那条配方给出的原因显示出来。
             String blockedReason = be.unaffordableStartFailure(level);
             be.status = blockedReason == null ? ControllerStatus.NO_RECIPE : ControllerStatus.IDLE;
-            if (blockedReason == null) {
-                be.clearStartFailure();
-            } else {
-                be.startFailureKey = blockedReason;
-            }
+            // **必须走 recordStartFailureKey，不能直接写字段。** 那个方法除了赋值还负责
+            // `clientStartFailure` 的镜像与 `sendBlockUpdated`——失败文案是同步到客户端才显示得出来的。
+            // 第一版这里直接写 `be.startFailureKey = ...`，于是状态确实变成了 IDLE，
+            // 但文案从来没离开服务端：实机看到的就是「闲置」而没有任何原因。
+            be.recordStartFailureKey(blockedReason);
             be.abortCraft();
             be.maxProgress = 1;
             be.parallelCeiling = be.machineCeiling();
