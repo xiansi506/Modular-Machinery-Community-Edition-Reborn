@@ -363,37 +363,45 @@ public final class MachineRecipe implements Recipe<Container> {
      * Routes a requirement to its modifier-aware method. The original had one implementation per requirement
      * class reading the context's modifier appliers directly; this mod has to pass the set in, and the
      * {@code instanceof} ladder here is the single place that knows which overload to call.
+     *
+     * <p><b>这是 {@code selector-tag} 的落点。</b>每个需求的四个阶段（能不能开工 / 开工结算 / 每 tick 检查 /
+     * 结束时结算）都要经过这里或 {@link #applyPhase}，所以在这一处把端口换成
+     * {@link MachineRequirement#visiblePorts} 的筛选视图，就同时覆盖了全部阶段——
+     * 不会有「能开工但料消耗到别的仓」这种某一阶段漏筛的不一致。
      */
     private static boolean canSatisfy(MachineRequirement requirement, HatchCollection ports,
                                       RecipeModifiers modifiers) {
+        HatchCollection visible = requirement.visiblePorts(ports);
         if (requirement instanceof ItemRequirement item) {
-            return item.canSatisfy(ports, modifiers);
+            return item.canSatisfy(visible, modifiers);
         }
         if (requirement instanceof FluidRequirement fluid) {
-            return fluid.canSatisfy(ports, modifiers);
+            return fluid.canSatisfy(visible, modifiers);
         }
         if (requirement instanceof EnergyRequirement energy) {
-            return energy.canSatisfy(ports, modifiers);
+            return energy.canSatisfy(visible, modifiers);
         }
-        return requirement.canSatisfy(ports);
+        return requirement.canSatisfy(visible);
     }
 
+    /** {@link #canSatisfy} 的副作用那一半，所以它同样要把端口筛成需求能看见的那部分。 */
     private static boolean applyPhase(MachineRequirement requirement, HatchCollection ports, RandomSource random,
                                       RecipeModifiers modifiers) {
+        HatchCollection visible = requirement.visiblePorts(ports);
         if (requirement instanceof ItemRequirement item) {
-            return item.apply(ports, random, modifiers);
+            return item.apply(visible, random, modifiers);
         }
         if (requirement instanceof FluidRequirement fluid) {
             return requirement.isTickPhase()
-                    ? fluid.tick(ports, random, modifiers)
-                    : fluid.apply(ports, random, modifiers);
+                    ? fluid.tick(visible, random, modifiers)
+                    : fluid.apply(visible, random, modifiers);
         }
         if (requirement instanceof EnergyRequirement energy) {
-            return energy.tick(ports, random, modifiers);
+            return energy.tick(visible, random, modifiers);
         }
         return requirement.isTickPhase()
-                ? requirement.tick(ports, random)
-                : requirement.apply(ports, random);
+                ? requirement.tick(visible, random)
+                : requirement.apply(visible, random);
     }
 
     // ------------------------------------------------------------ Recipe<Container>

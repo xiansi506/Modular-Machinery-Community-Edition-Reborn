@@ -137,6 +137,44 @@ public abstract class MachineRequirement {
 
     // ------------------------------------------------------------------ lifecycle
 
+    /**
+     * 这条需求绑定的结构部件（旧版的 {@code selector-tag}），没绑定时为 {@code null}。
+     *
+     * <p>旧版把它放在 {@code ComponentRequirement} 上（{@code ComponentRequirement.java:39}），由配方 JSON 的
+     * {@code selector-tag} 字段设入（{@code MachineRecipe.java:474}），运行时用于在候选端口里
+     * <strong>筛出属于那个部件的那几个</strong>（{@code RecipeCraftingContext.java:222} 的
+     * {@code tag.equals(typeComponent.getTag())}）。
+     *
+     * <p>没有它，「原料送进装配线第 3 段」就无法表达——需求只能看到整个结构的全部输入仓。
+     * 所以它不是可选的装饰：它是 {@code dynamic-patterns} 这个特性能够<strong>用起来</strong>的前提。
+     *
+     * <p>{@code setSelectorTag} 存在而不是走构造器，理由与旧版相同：需求有十来个子类、每个都有自己的工厂方法，
+     * 把标签塞进每个构造器会改动所有调用点，而它的语义是「在这条需求建好之后挂上去的一个限定」。
+     */
+    @javax.annotation.Nullable
+    private String selectorTag;
+
+    /** 这条需求绑定的部件标签，或 {@code null}（表示只作用于没有标签的端口）。 */
+    @javax.annotation.Nullable
+    public String selectorTag() {
+        return this.selectorTag;
+    }
+
+    /** 绑定部件标签；空串与 {@code null} 同义，都表示「没有标签」。 */
+    public void setSelectorTag(@javax.annotation.Nullable String selectorTag) {
+        this.selectorTag = (selectorTag == null || selectorTag.isEmpty()) ? null : selectorTag;
+    }
+
+    /**
+     * 这条需求能看到的那部分端口。
+     *
+     * <p>配方生命周期的四个阶段都必须走这里，而不是直接用传进来的 {@code ports}——
+     * 否则「筛端口」会在某个阶段被漏掉，表现为「能开工但料消耗到了别的仓」这类极难查的不一致。
+     */
+    public HatchCollection visiblePorts(HatchCollection ports) {
+        return ports.withTag(this.selectorTag);
+    }
+
     /** Pure check: could this requirement be met right now? Never mutates the ports. */
     public abstract boolean canSatisfy(HatchCollection ports);
 

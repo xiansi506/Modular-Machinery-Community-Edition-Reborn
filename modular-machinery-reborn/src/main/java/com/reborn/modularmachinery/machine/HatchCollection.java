@@ -33,7 +33,17 @@ import java.util.List;
 public final class HatchCollection {
 
     public static final HatchCollection EMPTY = new HatchCollection(List.of(), List.of(), List.of(),
-            List.of(), List.of(), List.of(), () -> SmartInterfaceValueSource.NONE, () -> null);
+            List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+            () -> SmartInterfaceValueSource.NONE, () -> null);
+
+    /**
+     * 「这个端口没有标签」的哨兵值。
+     *
+     * <p>为什么不用 {@code null}：{@code List} 与 {@code List.copyOf} 都<strong>接受</strong> {@code null} 元素，
+     * 所以一个漏打了标签的端口会安静地混进去，直到某次筛选把它当成「没标签」而<strong>错误地</strong>交给一个
+     * 无标签的需求。一个显式哨兵让这种遗漏无处可藏——{@link #withTag} 里两个分支都只认这两种值之一。
+     */
+    private static final String UNTAGGED = "\u0000untagged";
 
     private final List<IItemHandler> itemInputs;
     private final List<IItemHandler> itemOutputs;
@@ -41,6 +51,23 @@ public final class HatchCollection {
     private final List<IFluidHandler> fluidOutputs;
     private final List<IEnergyStorage> energyInputs;
     private final List<IEnergyStorage> energyOutputs;
+
+    /**
+     * 每个端口来自哪个打了标签的结构位置，与上面六个桶<strong>逐个对应</strong>。
+     *
+     * <p>这是旧版 {@code ProcessingComponent} 携带 {@code ComponentSelectorTag} 的对应层
+     * （{@code ProcessingComponent.java:41}），也是 {@code selector-tag} 能起作用的全部依据：
+     * 需求通过标签筛选端口，靠的就是「每个端口知道自己属于哪个部件」。
+     *
+     * <p>与端口桶分开存而不是把端口包成一个带标签的记录，是为了不惊动已有的六个访问器——
+     * {@link #itemInputs()} 这些方法是整个配方引擎的读取面，它们的形状不变，标签只是多出来的一层筛选。
+     */
+    private final List<String> itemInputTags;
+    private final List<String> itemOutputTags;
+    private final List<String> fluidInputTags;
+    private final List<String> fluidOutputTags;
+    private final List<String> energyInputTags;
+    private final List<String> energyOutputTags;
 
     /**
      * Where a smart-interface requirement reads its value. Never {@code null}: {@link
@@ -59,6 +86,9 @@ public final class HatchCollection {
     private HatchCollection(List<IItemHandler> itemInputs, List<IItemHandler> itemOutputs,
                             List<IFluidHandler> fluidInputs, List<IFluidHandler> fluidOutputs,
                             List<IEnergyStorage> energyInputs, List<IEnergyStorage> energyOutputs,
+                            List<String> itemInputTags, List<String> itemOutputTags,
+                            List<String> fluidInputTags, List<String> fluidOutputTags,
+                            List<String> energyInputTags, List<String> energyOutputTags,
                             java.util.function.Supplier<SmartInterfaceValueSource> smartInterfaces,
                             java.util.function.Supplier<MachineDefinition> machine) {
         this.itemInputs = List.copyOf(itemInputs);
@@ -67,8 +97,24 @@ public final class HatchCollection {
         this.fluidOutputs = List.copyOf(fluidOutputs);
         this.energyInputs = List.copyOf(energyInputs);
         this.energyOutputs = List.copyOf(energyOutputs);
+        // 断言而不是信任：一个长度不匹配的标签列表会让「端口 i 的标签」整体错位，
+        // 而错位是静默的——它只会让某个需求读到另一个部件的端口。与其在世界里查，不如在这里就炸。
+        this.itemInputTags = checkedTags(itemInputTags, this.itemInputs.size(), "itemInputs");
+        this.itemOutputTags = checkedTags(itemOutputTags, this.itemOutputs.size(), "itemOutputs");
+        this.fluidInputTags = checkedTags(fluidInputTags, this.fluidInputs.size(), "fluidInputs");
+        this.fluidOutputTags = checkedTags(fluidOutputTags, this.fluidOutputs.size(), "fluidOutputs");
+        this.energyInputTags = checkedTags(energyInputTags, this.energyInputs.size(), "energyInputs");
+        this.energyOutputTags = checkedTags(energyOutputTags, this.energyOutputs.size(), "energyOutputs");
         this.smartInterfaces = smartInterfaces;
         this.machine = machine;
+    }
+
+    private static List<String> checkedTags(List<String> tags, int ports, String bucket) {
+        if (tags.size() != ports) {
+            throw new IllegalStateException("HatchCollection." + bucket + " has " + ports + " ports but "
+                    + tags.size() + " tags; the two lists are positional and must line up");
+        }
+        return List.copyOf(tags);
     }
 
     public List<IItemHandler> itemInputs() {
@@ -93,6 +139,67 @@ public final class HatchCollection {
 
     public List<IEnergyStorage> energyOutputs() {
         return this.energyOutputs;
+    }
+
+    /**
+     * 只看属于 {@code selectorTag} 那个部件的端口；{@code null} 表示只看<strong>没有标签</strong>的端口。
+     *
+     * <p>这是 {@code selector-tag} 生效的地方，也是旧版 {@code RecipeCraftingContext} 里那行
+     * {@code tag.equals(typeComponent.getTag())}（{@code RecipeCraftingContext.java:222}）的对应实现。
+     *
+     * <p><strong>为什么「没有标签」是「只看无标签的端口」而不是「全都看」</strong>：旧版的比较是
+     * {@code tag.equals(...)}，而 {@code ComponentSelectorTag} 把 {@code null}/空串归一成一个空标签
+     * （{@code ComponentSelectorTag.java:26-29}）。于是<strong>无标签需求与无标签部件互相匹配</strong>，
+     * 而一个指定了标签的需求<strong>看不到</strong>无标签的端口。这个区分正是这个特性的意义所在：
+     * 装配线上「原料进第 3 段」必须真的只进第 3 段，而不是「随便进哪个输入仓都行」。
+     *
+     * <p>六个桶各自筛选，未知的桶（智能接口与机器定义）原样带过去——它们不是位置性的端口，
+     * 没有标签可言，也从不参与筛选。
+     *
+     * @param selectorTag 要筛的标签名，或 {@code null} 表示只看无标签的端口
+     */
+    public HatchCollection withTag(@javax.annotation.Nullable String selectorTag) {
+        String wanted = (selectorTag == null || selectorTag.isEmpty()) ? UNTAGGED : selectorTag;
+        return new HatchCollection(
+                filter(this.itemInputs, this.itemInputTags, wanted),
+                filter(this.itemOutputs, this.itemOutputTags, wanted),
+                filter(this.fluidInputs, this.fluidInputTags, wanted),
+                filter(this.fluidOutputs, this.fluidOutputTags, wanted),
+                filter(this.energyInputs, this.energyInputTags, wanted),
+                filter(this.energyOutputs, this.energyOutputTags, wanted),
+                filterTags(this.itemInputTags, wanted),
+                filterTags(this.itemOutputTags, wanted),
+                filterTags(this.fluidInputTags, wanted),
+                filterTags(this.fluidOutputTags, wanted),
+                filterTags(this.energyInputTags, wanted),
+                filterTags(this.energyOutputTags, wanted),
+                this.smartInterfaces,
+                this.machine);
+    }
+
+    /** 这个位置上的端口在筛选后是否仍然可见。 */
+    private static boolean keeps(String tag, String wanted) {
+        return tag.equals(wanted);
+    }
+
+    private static <T> List<T> filter(List<T> ports, List<String> tags, String wanted) {
+        List<T> kept = new ArrayList<>(ports.size());
+        for (int i = 0; i < ports.size(); i++) {
+            if (keeps(tags.get(i), wanted)) {
+                kept.add(ports.get(i));
+            }
+        }
+        return kept;
+    }
+
+    private static List<String> filterTags(List<String> tags, String wanted) {
+        List<String> kept = new ArrayList<>(tags.size());
+        for (String tag : tags) {
+            if (keeps(tag, wanted)) {
+                kept.add(tag);
+            }
+        }
+        return kept;
     }
 
     /**
@@ -164,6 +271,14 @@ public final class HatchCollection {
         private final List<IEnergyStorage> energyInputs = new ArrayList<>();
         private final List<IEnergyStorage> energyOutputs = new ArrayList<>();
 
+        /** 与上面六个桶逐个对应，见 {@link HatchCollection#itemInputTags} 的说明。 */
+        private final List<String> itemInputTags = new ArrayList<>();
+        private final List<String> itemOutputTags = new ArrayList<>();
+        private final List<String> fluidInputTags = new ArrayList<>();
+        private final List<String> fluidOutputTags = new ArrayList<>();
+        private final List<String> energyInputTags = new ArrayList<>();
+        private final List<String> energyOutputTags = new ArrayList<>();
+
         /** Defaults to "nothing", so a collection built without a controller keeps behaving as it always did. */
         private SmartInterfaceValueSource smartInterfaces = SmartInterfaceValueSource.NONE;
 
@@ -186,36 +301,59 @@ public final class HatchCollection {
             return this;
         }
 
-        /** Routes one hatch's storage into the bucket its kind and direction call for. */
+        /**
+         * Routes one hatch's storage into the bucket its kind and direction call for, under the
+         * {@code selector-tag} of the structure position it was found at.
+         *
+         * @param selectorTag the position's {@code selector-tag}, or {@code null} when the position has none —
+         *                    which is every position of a structure that declares no tags at all
+         */
         public Builder add(com.reborn.modularmachinery.block.HatchKind kind,
-                           IItemHandler items, IFluidHandler fluids, IEnergyStorage energy) {
+                           IItemHandler items, IFluidHandler fluids, IEnergyStorage energy,
+                           @javax.annotation.Nullable String selectorTag) {
+            String tag = (selectorTag == null || selectorTag.isEmpty()) ? UNTAGGED : selectorTag;
             switch (kind.family()) {
                 case ITEM -> {
                     if (items != null) {
                         (kind.isInput() ? this.itemInputs : this.itemOutputs).add(items);
+                        (kind.isInput() ? this.itemInputTags : this.itemOutputTags).add(tag);
                     }
                 }
                 case FLUID -> {
                     if (fluids != null) {
                         (kind.isInput() ? this.fluidInputs : this.fluidOutputs).add(fluids);
+                        (kind.isInput() ? this.fluidInputTags : this.fluidOutputTags).add(tag);
                     }
                 }
                 case ENERGY -> {
                     if (energy != null) {
                         (kind.isInput() ? this.energyInputs : this.energyOutputs).add(energy);
+                        (kind.isInput() ? this.energyInputTags : this.energyOutputTags).add(tag);
                     }
                 }
             }
             return this;
         }
 
+        /** {@link #add} for a position that declares no {@code selector-tag}. */
+        public Builder add(com.reborn.modularmachinery.block.HatchKind kind,
+                           IItemHandler items, IFluidHandler fluids, IEnergyStorage energy) {
+            return add(kind, items, fluids, energy, null);
+        }
+
         /**
          * Registers a bare handler as a port. Used to fold the controller's own slots and buffer in as fallback
          * ports so the recipe engine sees a single uniform set of ports.
+         *
+         * <p>These are always <b>untagged</b>, and that is deliberate rather than incidental: the controller is
+         * not a structure position, so it belongs to no {@code selector-tag} and must stay invisible to every
+         * tagged requirement. Folding it into a tagged bucket would let a recipe that asked for "the input at
+         * line segment 3" be satisfied by the controller's own slot.
          */
         public Builder addItemHandler(IItemHandler handler, boolean input) {
             if (handler != null) {
                 (input ? this.itemInputs : this.itemOutputs).add(handler);
+                (input ? this.itemInputTags : this.itemOutputTags).add(UNTAGGED);
             }
             return this;
         }
@@ -223,6 +361,7 @@ public final class HatchCollection {
         public Builder addFluidHandler(IFluidHandler handler, boolean input) {
             if (handler != null) {
                 (input ? this.fluidInputs : this.fluidOutputs).add(handler);
+                (input ? this.fluidInputTags : this.fluidOutputTags).add(UNTAGGED);
             }
             return this;
         }
@@ -230,13 +369,17 @@ public final class HatchCollection {
         public Builder addEnergyStorage(IEnergyStorage storage, boolean input) {
             if (storage != null) {
                 (input ? this.energyInputs : this.energyOutputs).add(storage);
+                (input ? this.energyInputTags : this.energyOutputTags).add(UNTAGGED);
             }
             return this;
         }
 
         public HatchCollection build() {
             return new HatchCollection(this.itemInputs, this.itemOutputs, this.fluidInputs, this.fluidOutputs,
-                    this.energyInputs, this.energyOutputs, () -> this.smartInterfaces, this.machine);
+                    this.energyInputs, this.energyOutputs,
+                    this.itemInputTags, this.itemOutputTags, this.fluidInputTags, this.fluidOutputTags,
+                    this.energyInputTags, this.energyOutputTags,
+                    () -> this.smartInterfaces, this.machine);
         }
     }
 }

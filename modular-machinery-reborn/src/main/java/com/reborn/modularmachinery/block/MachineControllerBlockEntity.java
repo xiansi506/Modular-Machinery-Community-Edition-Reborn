@@ -920,7 +920,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         HatchCollection.Builder builder = HatchCollection.builder();
         for (BlockPos relative : machine.pattern().positions().keySet()) {
             if (level.getBlockEntity(pos.offset(relative)) instanceof MachineHatchBlockEntity hatch) {
-                builder.add(hatch.kind(), hatch.itemHandler(), hatch.fluidTank(), hatch.energyStorage());
+                    // 把结构位置上的 `selector-tag` 一起交给端口：配方需求靠它筛出「属于那个部件」的仓口。
+                    // 绝大多数结构没有标签，此时 tag() 答 null，端口就按「无标签」入桶。
+                    builder.add(hatch.kind(), hatch.itemHandler(), hatch.fluidTank(), hatch.energyStorage(),
+                            machine.pattern().tag(relative));
             }
         }
         // M6d-b: the smart-interface values travel with the ports (see HatchCollection's class comment). The

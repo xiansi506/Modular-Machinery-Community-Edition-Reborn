@@ -76,7 +76,13 @@ public final class ModRecipeSerializers {
                 if (!element.isJsonObject()) {
                     throw new JsonParseException("A requirement of " + id + " is not a JSON object");
                 }
-                requirements.add(parseRequirement(element.getAsJsonObject(), id));
+                JsonObject requirementJson = element.getAsJsonObject();
+                MachineRequirement requirement = parseRequirement(requirementJson, id);
+                // `selector-tag`（旧版的同一字段，`MachineRecipe.java:474`）：把这条需求绑定到结构里某个打了标签的
+                // 部件，于是它只看得到那个部件上的端口。解析放在 parseRequirement 之外，是因为它对每种需求类型
+                // 含义完全相同——把同一条规则写进十来个 parse 分支，就会有一份迟早分叉的副本。
+                requirement.setSelectorTag(readSelectorTag(requirementJson, id));
+                requirements.add(requirement);
             }
             return new MachineRecipe(id, machine, registryName, recipeTime, requirements,
                     parseMaxParallelism(json, id));
@@ -252,11 +258,49 @@ public final class ModRecipeSerializers {
         } else {
             throw new IllegalStateException("Unsupported requirement " + requirement.getClass());
         }
+        // `selector-tag` 写在**每条需求的末尾**，与 `readRequirement` 的读取顺序一一对应。空串代表「没有标签」，
+        // 而不是写一个可空值：`FriendlyByteBuf#writeUtf` 不接受 null，而「没有标签」是这个字段的常态。
+        buf.writeUtf(requirement.selectorTag() == null ? "" : requirement.selectorTag());
     }
 
+    /**
+     * 一条需求的 {@code selector-tag}，没写时为 {@code null}。
+     *
+     * <p>旧版在这里只确认它是字符串（{@code MachineRecipe.java:470-476}）。这里沿用本项目对「人手写字段」的惯例，
+     * 把该写什么一并说清；空串被归一成「没有标签」，与 {@code MachineRequirement#setSelectorTag} 一致。
+     */
+    @javax.annotation.Nullable
+    private static String readSelectorTag(JsonObject requirement, ResourceLocation id) {
+        if (!requirement.has("selector-tag")) {
+            return null;
+        }
+        JsonElement element = requirement.get("selector-tag");
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+            throw new JsonParseException("'selector-tag' of a requirement in " + id + " must be a string, but it "
+                    + "is " + element + ". Write the name a part of the machine's structure declares, for example "
+                    + "\"selector-tag\": \"input\".");
+        }
+        String tag = element.getAsString();
+        return tag.isEmpty() ? null : tag;
+    }
+
+    /**
+     * 从网络读一条需求。
+     *
+     * <p>拆成「读 kind 与 ioType → 交给 {@link #readRequirementBody} → 设标签」三步而不是在各分支里各设一次：
+     * 八个分支都是早期返回，逐支去设就是八份可能分叉的副本。{@code selector-tag} 对每种需求类型含义完全相同，
+     * 所以它就该只有一处。
+     */
     private static MachineRequirement readRequirement(FriendlyByteBuf buf) {
         String kind = buf.readUtf();
         IOType ioType = IOType.valueOf(buf.readUtf());
+        MachineRequirement requirement = readRequirementBody(buf, kind, ioType);
+        String selectorTag = buf.readUtf();
+        requirement.setSelectorTag(selectorTag.isEmpty() ? null : selectorTag);
+        return requirement;
+    }
+
+    private static MachineRequirement readRequirementBody(FriendlyByteBuf buf, String kind, IOType ioType) {
         switch (kind) {
             case KIND_ITEM -> {
                 int min = buf.readVarInt();

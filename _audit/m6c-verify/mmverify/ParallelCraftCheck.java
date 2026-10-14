@@ -6,6 +6,7 @@ import com.reborn.modularmachinery.recipe.IOType;
 import com.reborn.modularmachinery.recipe.InterfaceNumberInputRequirement;
 import com.reborn.modularmachinery.recipe.FluidRequirement;
 import com.reborn.modularmachinery.recipe.ItemRequirement;
+import com.reborn.modularmachinery.recipe.MachineRequirement;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
 import com.reborn.modularmachinery.recipe.RecipeModifier;
 import com.reborn.modularmachinery.recipe.RecipeModifiers;
@@ -240,6 +241,7 @@ public final class ParallelCraftCheck {
         loaderErrors();
 
         parallelControllerLimit();
+        selectorTags();
         shippedContentMatches();
         packetRoundTrip();
         upgradeBusEffects();
@@ -898,12 +900,23 @@ public final class ParallelCraftCheck {
         } else {
             Path copy = null;
             try {
-                String before = Files.readString(existing);
+                String onDisk = Files.readString(existing);
+                // 这个检查要证明的是「旧版本写下的配置文件会被新 spec 接受，且修正纯粹是新增」。
+                //
+                // 它**不能**假定磁盘上那份文件还是旧的：实例一旦用新版本启动过，Forge 就已经把新键补写进去了，
+                // 于是 `isCorrect()` 直接为真、没有修正可做。那会让这个检查变成一台「取决于你的实例启动过没有」
+                // 的仪器，而项目规矩是「从未失败过的断言不算证据」——时灵时不灵的断言更糟。
+                //
+                // 所以这里自己造前提：从磁盘那份的真实字节里**去掉本版新增的那一节**，得到一个「上一版写下的
+                // 文件」，再让新 spec 去读它。这样无论实例处于哪个状态，被断言的输入都是已知的。
+                String before = stripNewestSection(onDisk);
                 boolean hadNewSection = before.contains("factory-system");
                 Path work = Path.of("C:/mmwork/.tmp-m6c-verify/config-roundtrip");
                 Files.createDirectories(work);
                 copy = work.resolve("modular_machinery_reborn-common.toml");
-                Files.copy(existing, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Files.writeString(copy, before);
+                report("造出的「旧版本配置文件」确实不含本版新增的 display.energy 一节",
+                        !before.contains("display.energy"));
 
                 Object spec = configSpec();
                 // Phase 1: read the old file's exact bytes through Forge's own path — a file config built the way
@@ -922,13 +935,24 @@ public final class ParallelCraftCheck {
                 invokeOn(spec, "setConfig", fileConfig);
                 report("after the correction the file is correct", (Boolean) invokeOn(spec, "isCorrect", fileConfig));
                 int readable = 0;
+                StringBuilder missing = new StringBuilder();
                 for (String[] pair : expected) {
+                    // display.energy 这一节用**文本**断言，不走这里的路径取值：它的节名含点，
+                    // Forge 把它写成 `[["display.energy"]]`，NightConfig 按字符串路径取它下面的键会答 null。
+                    // 换一种取法而不是放宽断言——下面那条 contains 检查同样能发现「键丢了」，
+                    // 而且它检查的是磁盘上真实写出的字节。
+                    if (pair[0].startsWith("display.energy")) {
+                        continue;
+                    }
                     if (com.electronwill.nightconfig.core.Config.class
                             .getMethod("get", String.class).invoke(fileConfig, pair[0]) != null) {
                         readable++;
+                    } else {
+                        missing.append(' ').append(pair[0]);
                     }
                 }
-                check("every key, old and new, is readable from that file", 13, readable);
+                check("every key with a plain path is readable from that file (missing:" + missing + ")",
+                        13, readable);
                 report("the spec reports itself loaded after setConfig",
                         (Boolean) invokeOn(spec, "isLoaded"));
 
@@ -937,8 +961,10 @@ public final class ParallelCraftCheck {
                 invokeOn(spec, "save");
                 flush(fileConfig);
                 String after = Files.readString(copy);
-                report("saving writes both factory-system keys — and M6d-b's smart-interface key — into the file",
-                        after.contains("default-factory-max-thread")
+                report("saving writes the display.energy section this release adds, and keeps the "
+                                + "factory-system and smart-interface sections the file already had",
+                        after.contains("display.energy") && after.contains("Display_Energy_Type")
+                                && after.contains("default-factory-max-thread")
                                 && after.contains("enable-factory-controller-bydefault")
                                 && after.contains("[smart-interface]")
                                 && after.contains("enable-smart-interface-bydefault"));
@@ -1521,10 +1547,157 @@ public final class ParallelCraftCheck {
     private record FakeController(int maxParallelism, int parallelism) implements ParallelController {
     }
 
+    /**
+     * Section L2 —— 波 3a：{@code selector-tag}（部件标签）与它驱动的端口筛选。
+     *
+     * <p>这个特性存在的理由：装配线是<strong>动态</strong>结构，同一台机器在不同世界里长短不同，配方必须能说
+     * 「原料进第 3 段」而不是「随便进哪个输入仓」。旧版靠 {@code ComponentSelectorTag} 实现——
+     * 结构位置带标签，需求带标签，运行时两者相等才可见
+     * （{@code RecipeCraftingContext.java:222}）。这里是那一层的对应实现。
+     *
+     * <p>断言的重点不是「可能返回了正确的桶」，而是三条<strong>可观察</strong>的性质：
+     * 标签跟着结构旋转走（不跟就会静默串位）、无标签需求看不到打了标签的端口（否则「进第 3 段」形同虚设）、
+     * 控制器自己的槽位永远不算任何部件的端口。
+     */
+    private static void selectorTags() {
+        section("L2. selector-tag：结构位置标签、旋转、以及需求按标签筛端口");
+
+        // ---- (1) 结构上的标签 --------------------------------------------------------------
+        MachinePattern.Builder builder = MachinePattern.builder();
+        builder.add(new BlockPos(1, 0, 0), List.of(BlockMatcher.parse("minecraft:stone")));
+        builder.add(new BlockPos(2, 0, 0), List.of(BlockMatcher.parse("minecraft:stone")));
+        builder.add(new BlockPos(3, 0, 0), List.of(BlockMatcher.parse("minecraft:stone")));
+        builder.tag(new BlockPos(1, 0, 0), "input");
+        MachinePattern pattern = builder.build();
+
+        check("打了标签的位置读回它的标签", "input", String.valueOf(pattern.tag(new BlockPos(1, 0, 0))));
+        check("没打标签的位置读回 null", "null", String.valueOf(pattern.tag(new BlockPos(2, 0, 0))));
+        report("hasTags() 报出这个结构有标签", pattern.hasTags());
+        check("只有被标记的那一个位置进了标签表", 1, pattern.tags().size());
+
+        // 空串与 null 都要归一成「没有标签」：作者写 `"selector-tag": ""` 的部件，
+        // 行为必须与完全没写这个字段一致，否则会凭空多出一个「空标签」的桶。
+        MachinePattern.Builder blank = MachinePattern.builder();
+        blank.add(new BlockPos(1, 0, 0), List.of(BlockMatcher.parse("minecraft:stone")));
+        blank.tag(new BlockPos(1, 0, 0), "");
+        blank.tag(new BlockPos(1, 0, 0), null);
+        report("空串标签与 null 都归一成「没有标签」，不会造出一个空标签桶",
+                !blank.build().hasTags());
+
+        // ---- (2) 旋转必须把标签一起转 ------------------------------------------------------
+        // rotateYCCW 是 (z, y, -x)。(1,0,0) 因此应当落到 (0,0,-1)。
+        MachinePattern rotated = pattern.rotateYCounterClockwise();
+        check("绕 Y 逆时针旋转后，标签落在 (z, y, -x) 变换到的那个坐标上", "input",
+                String.valueOf(rotated.tag(new BlockPos(0, 0, -1))));
+        report("旋转前的那个坐标在旋转后不再带标签（标签确实跟着位置走了，而不是留在原地）",
+                rotated.tag(new BlockPos(1, 0, 0)) == null);
+        check("旋转后仍然只有一个带标签的位置", 1, rotated.tags().size());
+
+        // ---- (3) 端口按标签筛选 ------------------------------------------------------------
+        net.minecraftforge.items.ItemStackHandler smelterIn =
+                new net.minecraftforge.items.ItemStackHandler(1);
+        net.minecraftforge.items.ItemStackHandler lineIn =
+                new net.minecraftforge.items.ItemStackHandler(1);
+        net.minecraftforge.items.ItemStackHandler plainIn =
+                new net.minecraftforge.items.ItemStackHandler(1);
+        HatchCollection tagged = HatchCollection.builder()
+                .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, smelterIn, null, null, "input")
+                .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, lineIn, null, null, "line")
+                .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, plainIn, null, null)
+                .build();
+
+        check("无标签的集合里有三个输入端口", 3, tagged.itemInputs().size());
+        check("按 input 筛只剩一个", 1, tagged.withTag("input").itemInputs().size());
+        report("...而且剩的正是那个部件自己的仓", tagged.withTag("input").itemInputs().get(0) == smelterIn);
+        report("按 line 筛到的是另一个仓，两者没有混淆",
+                tagged.withTag("line").itemInputs().get(0) == lineIn);
+        report("筛一个结构里不存在的标签得到空集合（配方引用了不存在的部件不会崩，只是永远不满足）",
+                tagged.withTag("no_such_part").itemInputs().isEmpty());
+        check("没有标签的需求只看到没打标签的端口", 1, tagged.withTag(null).itemInputs().size());
+        report("...也就是那个无标签的仓，而不是「全都能看到」",
+                tagged.withTag(null).itemInputs().get(0) == plainIn);
+
+        // 控制器自己的槽位永远不算任何部件的端口：否则「进第 3 段」会被控制器自己的槽位满足，
+        // 这个特性就形同虚设。
+        net.minecraftforge.items.ItemStackHandler controllerOwn =
+                new net.minecraftforge.items.ItemStackHandler(1);
+        HatchCollection withController = HatchCollection.builder()
+                .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, smelterIn, null, null, "input")
+                .addItemHandler(controllerOwn, true)
+                .build();
+        check("控制器自己的槽位进了无标签桶", 1, withController.withTag(null).itemInputs().size());
+        report("...并且对任何打了标签的需求都不可见",
+                withController.withTag("input").itemInputs().size() == 1
+                        && withController.withTag("input").itemInputs().get(0) == smelterIn);
+
+        // ---- (4) 需求带着标签，整条配方就只认那个部件的料 -----------------------------------
+        net.minecraftforge.items.ItemStackHandler taggedSlot =
+                new net.minecraftforge.items.ItemStackHandler(1);
+        net.minecraftforge.items.ItemStackHandler untaggedSlot =
+                new net.minecraftforge.items.ItemStackHandler(1);
+        HatchCollection twoInputs = HatchCollection.builder()
+                .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, taggedSlot, null, null, "input")
+                .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, untaggedSlot, null, null)
+                .build();
+
+        MachineRequirement requirement = ItemRequirement.input(Ingredient.of(Items.COBBLESTONE), 1);
+        report("新建的需求没有标签", requirement.selectorTag() == null);
+        requirement.setSelectorTag("input");
+        check("设入的标签读得回来", "input", String.valueOf(requirement.selectorTag()));
+
+        untaggedSlot.setStackInSlot(0, new ItemStack(Items.COBBLESTONE, 8));
+        report("料只在无标签仓里时，带 input 标签的需求不满足（它看不到那个仓）",
+                !requirement.canSatisfy(requirement.visiblePorts(twoInputs)));
+        taggedSlot.setStackInSlot(0, new ItemStack(Items.COBBLESTONE, 8));
+        report("料进了它自己的仓之后就满足了",
+                requirement.canSatisfy(requirement.visiblePorts(twoInputs)));
+
+        // 同一条需求去掉标签，就该重新看得到无标签的那个仓——证明上面那次「不满足」真的来自筛选，
+        // 而不是因为料不够或别的原因。
+        requirement.setSelectorTag(null);
+        report("同一个配方去掉标签后，无标签的仓又能被看到（对照，证明上一条的失败确实来自筛选）",
+                requirement.canSatisfy(requirement.visiblePorts(twoInputs)));
+    }
+
+    /**
+     * 去掉本版新增的那一节，得到一个「上一版写下的配置文件」。
+     *
+     * <p>为什么要有这个方法：配置迁移检查要证明的是「旧文件被新 spec 接受、修正纯粹是新增」，
+     * 而实例一旦用新版本启动过，磁盘上那份就已经被 Forge 补全了——那时的检查<strong>无法</strong>证明任何事，
+     * 只会报一条取决于「你启动过没有」的结果。自己造出一个已知的旧输入，这个检查才有意义，
+     * 而且它在任何机器上跑都一样。
+     *
+     * <p>做法是从 <b>{@code [display.energy]}</b> 这一节的开头切成两半，其余字节原样保留：
+     * 被断言的仍然是真实文件，只是少了这一版才加的那一段。节首（{@code [display.energy]}）与节尾
+     * （下一个 {@code [} 开头的行）之间的所有内容，包括注释，都一起被去掉——注释是 Forge 从 spec 重新写出来的，
+     * 留着它反而会让「这一节不存在」这条断言变成假话。
+     */
+    private static String stripNewestSection(String config) {
+        // Forge 写含点号的分类名时会加引号、并用双括号（数组表）：实际字节是 `[["display.energy"]]`，
+        // 而不是 `[display.energy]`。锚点必须用真实写法，否则这里会把整份文件原样返回，
+        // 而「这个文件是旧的」这条前提就悄悄不成立了。
+        String[] headers = {"[[\"display.energy\"]]", "[\"display.energy\"]", "[display.energy]"};
+        int start = -1;
+        for (String header : headers) {
+            start = config.indexOf(header);
+            if (start >= 0) {
+                break;
+            }
+        }
+        if (start < 0) {
+            // 磁盘上那份本来就没有这一节（例如从未用本版启动过）：原样返回，这才是真实的「旧文件」。
+            return config;
+        }
+        int nextSection = config.indexOf("\n[", start + 1);
+        if (nextSection < 0) {
+            return config.substring(0, start);
+        }
+        return config.substring(0, start) + config.substring(nextSection + 1);
+    }
+
     /** A definition with a one-position pattern, so the arithmetic can be driven without a world. */
     private static MachineDefinition definition(String path, int maxParallelism, int internalParallelism,
-                                                boolean parallelizable) {
-        MachinePattern pattern = MachinePattern.builder()
+                                                boolean parallelizable) {        MachinePattern pattern = MachinePattern.builder()
                 .add(new BlockPos(1, -1, 0), List.of(BlockMatcher.parse("minecraft:stone")))
                 .build();
         return new MachineDefinition(new ResourceLocation("mmverify", path), "Verify " + path, pattern,

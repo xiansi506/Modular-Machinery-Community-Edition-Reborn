@@ -219,8 +219,9 @@ public final class MachineSchema {
             List<Integer> ys = readCoordinates(part, "y", where);
             List<Integer> zs = readCoordinates(part, "z", where);
             List<BlockMatcher> accepted = readElements(part, variables, where);
+            String selectorTag = readSelectorTag(part, where);
 
-            if (part.has("nbt") || part.has("preview-nbt") || part.has("selector-tag")) {
+            if (part.has("nbt") || part.has("preview-nbt")) {
                 ignoredExtras = true;
             }
 
@@ -231,7 +232,13 @@ public final class MachineSchema {
                             // The controller occupies the origin and is not part of the pattern.
                             continue;
                         }
-                        builder.add(new BlockPos(x, y, z), accepted);
+                        BlockPos pos = new BlockPos(x, y, z);
+                        builder.add(pos, accepted);
+                        // 一个部件展开了多个坐标时，每个坐标都拿到同一个标签——旧版也是这样：
+                        // `selector-tag` 是**部件**的属性，坐标数组只是把同一个部件写在多处
+                        // （`DynamicMachine.addParts` 对每个 permutation 设的是同一个 selector，
+                        // `DynamicMachine.java:296-305`）。
+                        builder.tag(pos, selectorTag);
                     }
                 }
             }
@@ -650,6 +657,31 @@ public final class MachineSchema {
             "dynamic-patterns", "color", "prefix",
             "hide-components-when-formed", "controller-bounding-box"
     };
+
+    /**
+     * 一个部件的 {@code selector-tag}，没写时为 {@code null}。
+     *
+     * <p>旧版在这里只做了一件事：确认它是字符串，否则抛
+     * {@code JsonParseException("The 'selector-tag' in an element must be a string!")}
+     * （{@code DynamicMachine.java:289-292}）。这里保留那条规则，并沿用本项目对「人手写字段」的惯例把该写什么说清楚。
+     *
+     * <p>写成空串会被归一成「没有标签」，理由见 {@link MachinePattern.Builder#tag}：旧版的
+     * {@code ComponentSelectorTag} 构造器也这么归一。
+     */
+    @javax.annotation.Nullable
+    private static String readSelectorTag(JsonObject part, Object where) {
+        if (!part.has("selector-tag")) {
+            return null;
+        }
+        JsonElement element = part.get("selector-tag");
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+            throw new JsonParseException("'selector-tag' of " + where + " must be a string, but it is "
+                    + element + ". Write it as a name a recipe can name back, for example "
+                    + "\"selector-tag\": \"input\".");
+        }
+        String tag = element.getAsString();
+        return tag.isEmpty() ? null : tag;
+    }
 
     private static List<BlockMatcher> readElements(JsonObject part, Map<String, List<String>> variables,
                                                    Object where) {
