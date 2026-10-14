@@ -1,0 +1,311 @@
+package com.reborn.modularmachinery.command;
+
+import com.reborn.modularmachinery.block.MachineControllerBlockEntity;
+import com.reborn.modularmachinery.machine.HatchCollection;
+import com.reborn.modularmachinery.machine.MachineDefinition;
+import com.reborn.modularmachinery.machine.MachinePattern;
+import com.reborn.modularmachinery.machine.MachineRegistry;
+import com.reborn.modularmachinery.recipe.MachineRecipe;
+import com.reborn.modularmachinery.recipe.MachineRequirement;
+import com.reborn.modularmachinery.recipe.ModRecipeTypes;
+import com.mojang.brigadier.CommandDispatcher;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+
+import javax.annotation.Nullable;
+import java.util.Map;
+
+/**
+ * {@code /mm-diagnose} —— 把脚下（或最近）的那台控制器**实际看到的东西**打印出来。
+ *
+ * <h2>为什么需要这条命令</h2>
+ *
+ * <p>{@code selector-tag} 是<strong>看不见</strong>的：结构成型之后，世界里只有一堆长得一样的仓口方块，
+ * 没有任何东西告诉玩家某个仓叫 {@code input_line_0} 还是 {@code input_line_1}——而配方的成败完全取决于
+ * 这个看不见的名字。实测时正好卡在这里：一台<strong>成型且配方已加载</strong>的机器不开工，
+ * 而唯一的线索是状态行上一句「没有相匹配的配方」，它同时覆盖了好几种完全不同的原因：
+ *
+ * <ul>
+ *   <li>这台机器**没有**任何配方（定义里的 {@code registryname} 与配方的 {@code machine} 对不上）；</li>
+ *   <li>有配方，但**每条都开工不了**（料放错了段、输出仓没地方、标签拼错）。</li>
+ * </ul>
+ *
+ * <p>这条命令把这两种情况分开：它列出结构里<strong>每个位置</strong>的标签、控制器实际收集到的
+ * <strong>每个端口</strong>及其标签，然后<strong>逐条</strong>列出这台机器的配方各自能不能开工、以及不能时
+ * 缺什么。看一次就能定位，不必再数坐标。
+ *
+ * <p>这也是本项目对「日志里没有报错不提供任何信息」那条教训的同一套应对：一个看不见的状态，
+ * 就必须有办法把它<strong>问出来</strong>。
+ */
+public final class DiagnoseCommand {
+
+    private DiagnoseCommand() {
+    }
+
+    public static void onRegisterCommands(net.minecraftforge.event.RegisterCommandsEvent event) {
+        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+        dispatcher.register(Commands.literal("mm-diagnose")
+                .requires(source -> source.hasPermission(2))
+                .executes(context -> run(context.getSource())));
+    }
+
+    private static int run(CommandSourceStack source) {
+        Level level = source.getLevel();
+        MachineControllerBlockEntity controller = findController(source, level);
+        if (controller == null) {
+            source.sendFailure(Component.literal("附近没有机器控制器。站到控制器旁边（8 格内）再执行。"));
+            return 0;
+        }
+
+        BlockPos pos = controller.getBlockPos();
+        source.sendSuccess(() -> Component.literal("=== 控制器 " + pos.toShortString()
+                + " ==="), false);
+        source.sendSuccess(() -> Component.literal("成型: " + controller.isFormed()
+                + "   状态: " + controller.status().name()
+                + " (" + controller.status().translationKey() + ")"), false);
+        if (!controller.isFormed()) {
+            source.sendSuccess(() -> Component.literal(
+                    "机器没有成型，下面没有可诊断的端口。先确认结构搭对了。"), false);
+            return 1;
+        }
+
+        var machineId = controller.machineId();
+        MachineDefinition machine = machineId == null ? null : MachineRegistry.byId(machineId).orElse(null);
+        source.sendSuccess(() -> Component.literal("机器: " + machineId
+                + (machine == null ? "  (注册表里找不到这台机器！)" : "")), false);
+        if (machine == null) {
+            return 1;
+        }
+
+        // ---- 结构里的标签（定义展开之后的，也就是运行时真正用的那一份）--------------------------
+        source.sendSuccess(() -> Component.literal("--- 结构的标签（selector-tag）---"), false);
+        MachinePattern pattern = machine.pattern();
+        if (!machine.hasDynamicPatterns()) {
+            source.sendSuccess(() -> Component.literal("  （这台机器没有动态结构）"), false);
+        } else {
+            source.sendSuccess(() -> Component.literal("  动态结构 " + controller.dynamicPatterns().size()
+                    + " 个模式（节数/朝向如下；下面列出的位置标签是它们展开之后的）"), false);
+            for (var status : controller.dynamicPatterns()) {
+                source.sendSuccess(() -> Component.literal("    模式 '" + status.patternName()
+                        + "' 节数=" + status.size() + " 朝向=" + status.face().getName()), false);
+            }
+        }
+        if (!pattern.hasTags() && !machine.hasDynamicPatterns()) {
+            source.sendSuccess(() -> Component.literal("  没有任何位置带标签"), false);
+        }
+        for (Map.Entry<BlockPos, String> entry : new java.util.TreeMap<>(runtimeTags(controller, machine)).entrySet()) {
+            source.sendSuccess(() -> Component.literal("  " + entry.getKey().toShortString()
+                    + " -> " + entry.getValue()), false);
+        }
+
+        // ---- 实际收集到的端口及其标签 ---------------------------------------------------------
+        HatchCollection hatches = controller.hatches();
+        source.sendSuccess(() -> Component.literal("--- 收集到的端口（共 " + hatches.hatchCount() + " 个）---"),
+                false);
+        for (String line : hatches.describePorts()) {
+            source.sendSuccess(() -> Component.literal("  " + line), false);
+        }
+
+        // ---- 结构展开后**带标签**的每一格，以及那一格里实际是什么 --------------------------------
+        //
+        // 这一段是「0 个端口」时的定位手段：把**相对坐标、世界坐标、标签、实际方块**并排打出来。
+        // 仓口没被收集到只有两种可能——要么它们不在结构认为的位置上（这里一眼可见），
+        // 要么它们在、但那一格不是本模组的仓口方块（这里会显示成别的东西）。
+        Map<BlockPos, String> tags = runtimeTags(controller, machine);
+        Map<BlockPos, ?> positions = runtimePositions(controller, machine);
+        source.sendSuccess(() -> Component.literal("--- 带标签的结构位置（相对 / 世界 / 标签 / 实际方块）---"),
+                false);
+        for (Map.Entry<BlockPos, String> entry : new java.util.TreeMap<>(tags).entrySet()) {
+            BlockPos at = pos.offset(entry.getKey());
+            String block = String.valueOf(net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                    .getKey(level.getBlockState(at).getBlock()));
+            boolean isHatch = level.getBlockEntity(at)
+                    instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity;
+            source.sendSuccess(() -> Component.literal("  相对" + entry.getKey().toShortString()
+                    + " 世界" + at.toShortString() + " 标签=" + entry.getValue()
+                    + " 方块=" + block + (isHatch ? "  ← 仓口" : "")), false);
+        }
+        if (tags.isEmpty()) {
+            source.sendSuccess(() -> Component.literal(
+                    "  （没有任何带标签的位置——这本身就是异常：动态段应当生成标签）"), false);
+        }
+
+        // ---- 不带标签的结构位置，好确认「带标签的格子」到底落在世界里的哪儿 -----------------------
+        source.sendSuccess(() -> Component.literal("--- 不带标签的结构位置（最多 24 个）---"), false);
+        int plainShown = 0;
+        for (BlockPos relative : new java.util.TreeMap<>(
+                runtimePositions(controller, machine)).keySet()) {
+            if (tags.containsKey(relative)) {
+                continue;
+            }
+            if (plainShown++ >= 24) {
+                break;
+            }
+            BlockPos at = pos.offset(relative);
+            String block = String.valueOf(net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                    .getKey(level.getBlockState(at).getBlock()));
+            source.sendSuccess(() -> Component.literal("  相对" + relative.toShortString()
+                    + " 世界" + at.toShortString() + " 方块=" + block), false);
+        }
+
+        // ---- 直接扫描世界，找出**真实存在**的仓口，不管结构怎么算 --------------------------------
+        //
+        // 这一段是这套诊断里最可靠的一块：它不依赖任何位置推算。成型之后仓口必然在控制器附近
+        // （结构最多十几格），所以直接把范围内所有 `MachineHatchBlockEntity` 找出来，
+        // 用它自己的位置去和结构的位置对表——如果结构与世界对不上，这里会立刻显示成
+        // 「某个仓口不在结构的任何位置上」。
+        source.sendSuccess(() -> Component.literal("--- 世界里实际存在的仓口（扫描 ±16 格）---"), false);
+        int foundHatches = 0;
+        for (int dx = -16; dx <= 16; dx++) {
+            for (int dy = -16; dy <= 16; dy++) {
+                for (int dz = -16; dz <= 16; dz++) {
+                    BlockPos at = pos.offset(dx, dy, dz);
+                    if (!(level.getBlockEntity(at)
+                            instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)) {
+                        continue;
+                    }
+                    foundHatches++;
+                    BlockPos relative = at.subtract(pos);
+                    String tag = tags.get(relative);
+                    boolean inStructure = tag != null || positions.containsKey(relative);
+                    final String describe = "  相对" + relative.toShortString() + " 世界" + at.toShortString()
+                            + " 种类=" + hatch.kind()
+                            + " 标签=" + (tag == null ? "-" : tag)
+                            + (inStructure ? "" : "   ← 不在结构的任何位置上！");
+                    source.sendSuccess(() -> Component.literal(describe), false);
+                }
+            }
+        }
+        final int hatchTotal = foundHatches;
+        source.sendSuccess(() -> Component.literal("  共找到 " + hatchTotal + " 个仓口方块；"
+                + "控制器收集到 " + hatches.hatchCount() + " 个端口"), false);
+        if (foundHatches > 0 && hatches.hatchCount() == 0) {
+            source.sendSuccess(() -> Component.literal(
+                    "  ⚠ 世界里有仓口但一个都没被收集——这是本模组的缺陷，请把上面几行发回来"), false);
+        }
+
+        // ---- 这台机器的配方，逐条说清能不能开工 ------------------------------------------------
+        source.sendSuccess(() -> Component.literal("--- 这台机器的配方 ---"), false);
+        int total = 0;
+        int runnable = 0;
+        for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
+            if (!machine.id().equals(recipe.machineId())) {
+                continue;
+            }
+            total++;
+            boolean canStart = recipe.canStart(hatches, controller.modifiers());
+            boolean canTick = recipe.canTick(hatches, controller.modifiers());
+            String failure = recipe.startFailure(hatches, controller.modifiers());
+            boolean ok = canStart && canTick;
+            if (ok) {
+                runnable++;
+            }
+            final boolean okFinal = ok;
+            final boolean startFinal = canStart;
+            final boolean tickFinal = canTick;
+            source.sendSuccess(() -> Component.literal("  " + recipe.getId()
+                    + "  可开工=" + okFinal
+                    + (okFinal ? "" : "  (canStart=" + startFinal + " canTick=" + tickFinal
+                            + " 原因=" + (failure == null ? "无（料不够但没给出具体原因）" : failure) + ")")),
+                    false);
+            // 每条需求单独说：它绑了哪个标签、在那个标签下能不能满足。这是定位「料放错段」最快的一条。
+            for (MachineRequirement requirement : recipe.requirements()) {
+                String tag = requirement.selectorTag();
+                String satisfied = String.valueOf(requirement.canSatisfy(requirement.visiblePorts(hatches)));
+                source.sendSuccess(() -> Component.literal("      " + requirement.getClass().getSimpleName()
+                        + " [" + requirement.ioType() + "] tag=" + (tag == null ? "(无)" : tag)
+                        + " 满足=" + satisfied), false);
+            }
+        }
+        if (total == 0) {
+            source.sendSuccess(() -> Component.literal(
+                    "  （没有任何配方的 machine 指向这台机器——检查配方的 \"machine\" 与定义的 \"registryname\"）"),
+                    false);
+        } else {
+            final int t = total;
+            final int r = runnable;
+            source.sendSuccess(() -> Component.literal("  小结: " + t + " 条配方，其中 " + r + " 条此刻可开工"),
+                    false);
+        }
+        return 1;
+    }
+
+    /**
+     * 运行时真正生效的位置标签：把基座与量出来的各段合并之后的那一份。
+     *
+     * <p>直接读 {@code machine.pattern().tags()} 对动态机器是**不完整**的（那只是基座），
+     * 而诊断要回答的正是「动态段的标签是什么」，所以这里按控制器定格下来的节数重新展开一次。
+     */
+    private static Map<BlockPos, String> runtimeTags(MachineControllerBlockEntity controller,
+                                                     MachineDefinition machine) {
+        return runtimeStructure(controller, machine).tags();
+    }
+
+    /** 同上，但要的是位置集合（用于列出不带标签的格子）。 */
+    private static Map<BlockPos, ?> runtimePositions(MachineControllerBlockEntity controller,
+                                                     MachineDefinition machine) {
+        return runtimeStructure(controller, machine).positions();
+    }
+
+    /**
+     * 重塑这台机器在当前朝向下<strong>实际生效</strong>的结构。
+     *
+     * <p><b>两条必须遵守的规则，而第一版这里两条都错了：</b>
+     *
+     * <ol>
+     *   <li><b>从定义的基座出发，不要从 {@code machine.pattern()} 出发。</b>注册表里的 {@code MachinePattern}
+     *       是**按控制器朝向预先旋转好**的那一份（{@code MachineRegistry.rotations[steps]}）。第一版拿它当起点，
+     *       又把动态段按同一个朝向转了一次——旋转被应用了两遍，动态段落到了错的位置上，
+     *       于是合并时标签全丢。诊断表与实际不符，比没有诊断更糟：它把排查引向了错误的方向。</li>
+     *   <li><b>先把各段在朝向 0 下合并，再整体旋转。</b>否则动态段的局部坐标（朝向 0 下写的）与
+     *       基座的坐标（已旋转）不在同一个坐标系里相加。</li>
+     * </ol>
+     */
+    private static MachinePattern runtimeStructure(MachineControllerBlockEntity controller,
+                                                   MachineDefinition machine) {
+        MachinePattern assembled = machine.pattern();
+        for (var dynamic : machine.dynamicPatterns()) {
+            int size = dynamic.minSize();
+            for (var status : controller.dynamicPatterns()) {
+                if (status.patternName().equals(dynamic.name())) {
+                    size = status.size();
+                }
+            }
+            // 朝向 0 下合并，因为段自己的坐标就是按朝向 0 写的。
+            assembled = assembled.withMerged(dynamic.expand(size, 0));
+        }
+        // 合并完整之后，整体按控制器朝向旋转。
+        for (int i = 0; i < controller.rotationSteps(); i++) {
+            assembled = assembled.rotateYCounterClockwise();
+        }
+        return assembled;
+    }
+
+    /** 找到离命令执行者最近的控制器：先看脚下 8 格内，再看准星指向的方块。 */
+    @Nullable
+    private static MachineControllerBlockEntity findController(CommandSourceStack source, Level level) {
+        BlockPos origin = BlockPos.containing(source.getPosition());
+        MachineControllerBlockEntity best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int dx = -8; dx <= 8; dx++) {
+            for (int dy = -8; dy <= 8; dy++) {
+                for (int dz = -8; dz <= 8; dz++) {
+                    BlockPos at = origin.offset(dx, dy, dz);
+                    BlockEntity entity = level.getBlockEntity(at);
+                    if (entity instanceof MachineControllerBlockEntity controller) {
+                        double distance = at.distSqr(origin);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            best = controller;
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+}

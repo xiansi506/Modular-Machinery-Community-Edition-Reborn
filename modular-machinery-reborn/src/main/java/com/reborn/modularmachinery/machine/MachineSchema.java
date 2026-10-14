@@ -217,7 +217,7 @@ public final class MachineSchema {
         MachinePattern.Builder builder = MachinePattern.builder();
         boolean ignoredExtras = false;
 
-        ignoredExtras |= readParts(parts, builder, variables, where);
+        ignoredExtras |= readParts(parts, builder, variables, where, true);
 
         if (builder.isEmpty()) {
             throw new JsonParseException("Machine definition " + where + " has no parts besides the controller");
@@ -665,11 +665,23 @@ public final class MachineSchema {
      * 读一段 {@code parts} 数组，写进 {@code builder}，返回「是否遇到了本项目还不求值的字段」。
      *
      * <p>抽出来是因为波 3b 之后同一个解析要跑三处：根的 {@code parts}（固定基座）、
-     * {@code dynamic-patterns[].parts}（重复单元）与 {@code parts-end}（收尾段）。三处的规则必须完全一样——
-     * 复制三份就是三份迟早分叉的副本，而分叉的表现是「基座里的坐标数组能用、动态段里不能用」这种怪事。
+     * {@code dynamic-patterns[].parts}（重复单元）与 {@code parts-end}（收尾段）。
+     *
+     * <p><b>{@code skipOrigin} 是这三处唯一的差别，而它曾经是一个真实缺陷。</b>根 {@code parts} 里的
+     * {@code (0,0,0)} 是<strong>控制器自己站的那一格</strong>，所以必须跳过；但动态段的 {@code parts}
+     * 是<strong>相对每一段自己</strong>的坐标，{@code (0,0,0)} 就是「这一段的那一格」，是完全合法的位置——
+     * 而它恰恰是作者会用来放 {@code selector-tag} 的那一格（装配线正中央的输入总线）。
+     *
+     * <p>第一版把「跳过原点」这条规则同时用在了三处，于是<strong>动态段的正中央那一格连同它的标签被
+     * 整个丢掉</strong>，而症状是「仓口都在、机器也成型，但一个端口都收集不到」——诊断命令的世界扫描
+     * 才把它抓出来。当时的离线断言没覆盖到，是因为那些测试定义把重复段的坐标写成了 {@code (0,0,1)}
+     * 而不是 {@code (0,0,0)}，<strong>刚好绕过了这个分支</strong>。
+     *
+     * @param skipOrigin 仅根 {@code parts} 为 {@code true}：跳过控制器所在的原点
      */
     private static boolean readParts(JsonArray parts, MachinePattern.Builder builder,
-                                     Map<String, List<String>> variables, Object where) {
+                                     Map<String, List<String>> variables, Object where,
+                                     boolean skipOrigin) {
         boolean ignoredExtras = false;
         for (JsonElement partElement : parts) {
             JsonObject part = asObject(partElement, where + " part");
@@ -686,8 +698,8 @@ public final class MachineSchema {
             for (int x : xs) {
                 for (int y : ys) {
                     for (int z : zs) {
-                        if (x == 0 && y == 0 && z == 0) {
-                            // The controller occupies the origin and is not part of the pattern.
+                        if (skipOrigin && x == 0 && y == 0 && z == 0) {
+                            // 控制器占据原点，它不是结构的一部分。**只对根 parts 成立**。
                             continue;
                         }
                         BlockPos pos = new BlockPos(x, y, z);
@@ -751,7 +763,7 @@ public final class MachineSchema {
             MachinePattern.Builder partBuilder = MachinePattern.builder();
             readParts(asArray(pattern.get("parts"),
                     "dynamic pattern '" + name + "' 'parts' in " + where), partBuilder, variables,
-                    where + " dynamic pattern '" + name + "'");
+                    where + " dynamic pattern '" + name + "'", false);
             if (partBuilder.isEmpty()) {
                 throw new JsonParseException("dynamic pattern '" + name + "' of " + where + " has no parts "
                         + "besides the origin; a repeating section cannot be empty.");
@@ -762,7 +774,7 @@ public final class MachineSchema {
                 MachinePattern.Builder endBuilder = MachinePattern.builder();
                 readParts(asArray(pattern.get("parts-end"),
                         "dynamic pattern '" + name + "' 'parts-end' in " + where), endBuilder, variables,
-                        where + " dynamic pattern '" + name + "'");
+                        where + " dynamic pattern '" + name + "'", false);
                 if (!endBuilder.isEmpty()) {
                     endPart = endBuilder.build();
                 }

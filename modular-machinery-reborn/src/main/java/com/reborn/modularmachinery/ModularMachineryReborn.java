@@ -66,6 +66,7 @@ public final class ModularMachineryReborn {
         bus.addListener(com.reborn.modularmachinery.recipe.ConfigRecipes::onAddPackFinders);
         // /mm-get_blueprint <machine>, the original's command for obtaining a blueprint.
         MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.command.BlueprintCommand::onRegisterCommands);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.command.DiagnoseCommand::onRegisterCommands);
         // 0.29.0: the construct tool's per-player selection lives on the server, and the original dropped it when
         // the connection did (PlayerStructureSelectionHelper:128-134). A new session must not inherit one.
         MinecraftForge.EVENT_BUS.addListener(

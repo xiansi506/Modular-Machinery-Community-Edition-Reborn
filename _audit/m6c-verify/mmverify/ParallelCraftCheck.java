@@ -1792,21 +1792,6 @@ public final class ParallelCraftCheck {
         check("...段号从 0 开始", "input_line_2", DynamicPattern.segmentTag("input", "line", 2));
         check("收尾段的标签没有段号", "output_line_end", DynamicPattern.endTag("output", "line"));
 
-        // 展开的算术取决于这三个值，先把它们打出来——上一轮我对它们的心算与实参不符。
-        StringBuilder partDump = new StringBuilder();
-        for (BlockPos pos : parsed.part().positions().keySet()) {
-            partDump.append(' ').append(pos.toShortString());
-        }
-        StringBuilder endDump = new StringBuilder();
-        if (parsed.endPart() != null) {
-            for (BlockPos pos : parsed.endPart().positions().keySet()) {
-                endDump.append(' ').append(pos.toShortString());
-            }
-        }
-        report("诊断 parsed: start=" + parsed.startOffset().toShortString()
-                + " step=" + parsed.stepOffset().toShortString()
-                + " partPositions=[" + partDump + " ]"
-                + " endPositions=[" + endDump + " ]", true);
         MachinePattern three = parsed.expand(3, 0);
         // 期望值取自这个结构**实际**放下的标签（上一轮的十一条失败全部来自我对偏移的心算，
         // 所以这里保留一行把布局打出来的报告，让下一个人一眼能核对自己的期望）。
@@ -1827,13 +1812,6 @@ public final class ParallelCraftCheck {
 
         // 0 节也可以成立（只有收尾段），此时不该有段号标签，只有收尾标签。
         MachinePattern zero = parsed.expand(0, 0);
-        report("诊断 对象同一性: zero 与 three 是同一个对象吗 = " + (zero == three)
-                + "；parsed.expand(0,0) 与 zero 是同一个吗 = " + (parsed.expand(0, 0) == zero), true);
-        StringBuilder zeroDump = new StringBuilder();
-        for (java.util.Map.Entry<BlockPos, String> entry : new java.util.TreeMap<>(zero.tags()).entrySet()) {
-            zeroDump.append(' ').append(entry.getKey().toShortString()).append('=').append(entry.getValue());
-        }
-        report("展开 0 节后的标签布局（供核对）:" + zeroDump, true);
         check("展开 0 节时只剩收尾段的一个标签", 1, zero.tags().size());
         // 再看 1 节：用于分清「offsets 整体多了一格」与「只有收尾段那次多算」这两种不同的原因。
         MachinePattern one = parsed.expand(1, 0);
@@ -2064,9 +2042,110 @@ public final class ParallelCraftCheck {
                 .machineInfoRows(line, 5);
         report("1 节与 5 节的尺寸行不同（尺寸行跟着结构走）",
                 !rowsAt1.equals(rowsAt5));
+        // ---- (6) 端到端复现「旋转之后展开」这一步 ----------------------------------------------
+        //
+        // 实机诊断报出「结构里没有任何带标签的位置」，而不带标签的位置里确实有动态段（z=-1/-2/-3）。
+        // 也就是说 **展开本身没产出标签**，而 3a 的断言只测了 `expand(size, 0)`（朝向 0），
+        // 从没测过**旋转之后**的展开。这里把那个缺口补上。
+        MachinePattern rot0 = com.reborn.modularmachinery.client.preview.StructurePreviews
+                .previewPattern(line, 2);
+        report("朝向 0 展开 2 节：有标签", rot0.hasTags());
+        for (int steps = 1; steps <= 3; steps++) {
+            final int s = steps;
+            // previewPattern 固定用朝向 0，所以这里直接调 expand 传入旋转。
+            MachinePattern rotated = line.pattern().withMerged(
+                    line.dynamicPatterns().get(0).expand(2, s));
+            report("朝向 " + s + " 展开 2 节：有标签（标签数=" + rotated.tags().size() + "）",
+                    rotated.hasTags());
+            StringBuilder dump = new StringBuilder();
+            for (java.util.Map.Entry<BlockPos, String> e
+                    : new java.util.TreeMap<>(rotated.tags()).entrySet()) {
+                dump.append(' ').append(e.getKey().toShortString()).append('=').append(e.getValue());
+            }
+            report("    朝向 " + s + " 的标签布局:" + dump, true);
+        }
         report("...而且两边的动态结构行都在",
                 rowsAt1.stream().anyMatch(row -> row.contains("machine_info.dynamic_pattern"))
                         && rowsAt5.stream().anyMatch(row -> row.contains("machine_info.dynamic_pattern")));
+
+        // ---- (7) 逐字复现实机那份定义（基座含 -z 一侧）-------------------------------------------
+        //
+        // 实机诊断报出「仓口在 z=-1，而结构认为 z=-1 没有标签」。上面 (6) 用的测试定义与实机那份
+        // 在**基座坐标**上不同，所以这里照抄实机正在跑的那一份几何，把差别补上。
+        // 方块 id 换成原版替身（离线解析不了本模组方块），坐标/标签/偏移逐字保持一致。
+        String geomJson = "{\"registryname\":\"real_line\","
+                + "\"parts\":["
+                + "{\"x\":0,\"y\":0,\"z\":-1,\"elements\":\"minecraft:stone\"},"
+                + "{\"x\":-1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"},"
+                + "{\"x\":1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"},"
+                + "{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                + "\"dynamic-patterns\":[{\"name\":\"line\",\"faces\":[\"north\"],\"minSize\":1,\"maxSize\":3,"
+                + "\"parts\":["
+                + "{\"x\":0,\"y\":0,\"z\":0,\"selector-tag\":\"input\",\"elements\":"
+                + "[\"minecraft:stone\",\"minecraft:chest\"]},"
+                + "{\"x\":-1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"},"
+                + "{\"x\":1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"},"
+                + "{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                + "\"parts-end\":["
+                + "{\"x\":0,\"y\":0,\"z\":0,\"selector-tag\":\"output\",\"elements\":"
+                + "[\"minecraft:stone\",\"minecraft:barrel\"]},"
+                + "{\"x\":-1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"},"
+                + "{\"x\":1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"},"
+                + "{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                + "\"structure-size-offset-start\":{\"x\":0,\"y\":0,\"z\":1},"
+                + "\"structure-size-offset\":{\"x\":0,\"y\":0,\"z\":1}}]}";
+        MachineDefinition realLine = readDefinition(geomJson);
+        DynamicPattern realDynamic = realLine.dynamicPatterns().get(0);
+        check("实机几何：解析出 1 个动态模式", 1, realLine.dynamicPatterns().size());
+        report("实机几何：重复段带标签（definition 里的 selector-tag 读到了）", realDynamic.part().hasTags());
+        check("实机几何：重复段的标签是 input", "input",
+                String.valueOf(realDynamic.part().tag(BlockPos.ZERO)));
+
+        // 对照实验：唯一差别是**重复段的 elements 从「两条目的列表」换成「单个字符串」**。
+        // 两者都应当读到 selector-tag；如果只有这一份读到了，问题就出在列表形式的那条路径上。
+        String singleJson = geomJson.replace(
+                "[\"minecraft:stone\",\"minecraft:chest\"]", "\"minecraft:chest\"");
+        DynamicPattern singleDynamic = readDefinition(singleJson).dynamicPatterns().get(0);
+        report("对照：elements 用单个字符串时，selector-tag 读到了", singleDynamic.part().hasTags());
+        check("对照：标签是 input", "input", String.valueOf(singleDynamic.part().tag(BlockPos.ZERO)));
+
+        // 对照实验二：elements 是列表，但只含一项。
+        String oneItemListJson = geomJson.replace(
+                "[\"minecraft:stone\",\"minecraft:chest\"]", "[\"minecraft:chest\"]");
+        DynamicPattern oneItemDynamic = readDefinition(oneItemListJson).dynamicPatterns().get(0);
+        report("对照：elements 是单元素列表时，selector-tag 读到了", oneItemDynamic.part().hasTags());
+
+        // ---- 回归断言：动态段**正中央那一格**必须存在，而且必须带上它的标签 ----------------------
+        //
+        // 这一段是波 3b/3a 里一个真实缺陷的守卫。`readParts` 里有一条「跳过原点」的规则，它只对**根
+        // `parts`** 成立（基座里 (0,0,0) 就是控制器自己站的那一格）；但第一版把同一条规则用在了动态段的
+        // `parts` 上，于是**动态段的正中央那一格连同 selector-tag 被整个丢掉**——而那正是作者放
+        // `input_line_0` 的位置（装配线正中央的输入总线）。
+        //
+        // 症状是「机器成型、仓口都在、配方也加载了，但一个端口都收集不到」，而**旧的断言没抓到**，
+        // 因为那些测试定义把重复段的坐标写成 (0,0,1) 而不是 (0,0,0)，刚好绕过了那个分支。
+        // 所以这里的几何是**逐字照抄实机那份**（含 (0,0,0) 那个带标签的部件）。
+        check("实机几何：重复段有 4 个位置（(0,0,0) 那个带标签的部件没有被跳过）",
+                4, realDynamic.part().positions().size());
+        check("实机几何：重复段有 1 个标签", 1, realDynamic.part().tags().size());
+        report("实机几何：收尾段同样保留了它的正中央那一格",
+                realDynamic.endPart() != null && realDynamic.endPart().positions().size() == 4
+                        && realDynamic.endPart().tags().size() == 1);
+        // 根 parts 的跳过规则必须**仍然生效**：基座里不能出现 (0,0,0)（那是控制器自己）。
+        report("根 parts 仍然跳过原点（控制器那一格不属于结构）",
+                !realLine.pattern().positions().containsKey(BlockPos.ZERO));
+
+        for (int steps = 0; steps <= 3; steps++) {
+            final int s = steps;
+            MachinePattern merged = realLine.pattern().withMerged(realDynamic.expand(2, s));
+            StringBuilder dump = new StringBuilder();
+            for (java.util.Map.Entry<BlockPos, String> e
+                    : new java.util.TreeMap<>(merged.tags()).entrySet()) {
+                dump.append(' ').append(e.getKey().toShortString()).append('=').append(e.getValue());
+            }
+            report("实机几何 朝向" + s + " 合并后标签数=" + merged.tags().size() + ":" + dump,
+                    merged.hasTags());
+        }
 
         // 注：`docs/实机验收步骤-0.32.0.md` 里那份给玩家照抄的定义**不在这里断言**。
         // 它用的是真实方块 id（`modular_machinery_reborn:blockcasing[casing=plain]` 这种），

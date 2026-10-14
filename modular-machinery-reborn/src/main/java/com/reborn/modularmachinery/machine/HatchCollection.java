@@ -182,6 +182,34 @@ public final class HatchCollection {
         return tag.equals(wanted);
     }
 
+    /**
+     * 每个端口一行的人类可读描述，带上它所属的 {@code selector-tag}（没有标签的显示为 {@code -}）。
+     *
+     * <p>为什么需要它：`selector-tag` 是<strong>看不见</strong>的。结构成型之后，玩家在世界上看到的只是一堆
+     * 仓口方块，没有任何东西告诉他某个仓属于 `input_line_0` 还是 `input_line_1`——而配方的成败完全取决于
+     * 这个看不见的名字。实测时就卡在这里：一台成型、配方已加载的机器不开工，而唯一能看出原因的方式是
+     * 把「哪个仓带哪个标签」打出来。
+     *
+     * <p>顺序与 {@link #withTag} 筛选前的桶顺序一致，便于对照。
+     */
+    public List<String> describePorts() {
+        List<String> out = new ArrayList<>();
+        describeBucket(out, "item input", this.itemInputs.size(), this.itemInputTags);
+        describeBucket(out, "item output", this.itemOutputs.size(), this.itemOutputTags);
+        describeBucket(out, "fluid input", this.fluidInputs.size(), this.fluidInputTags);
+        describeBucket(out, "fluid output", this.fluidOutputs.size(), this.fluidOutputTags);
+        describeBucket(out, "energy input", this.energyInputs.size(), this.energyInputTags);
+        describeBucket(out, "energy output", this.energyOutputs.size(), this.energyOutputTags);
+        return List.copyOf(out);
+    }
+
+    private static void describeBucket(List<String> out, String family, int ports, List<String> tags) {
+        for (int i = 0; i < ports; i++) {
+            String tag = tags.get(i);
+            out.add(family + " #" + i + " tag=" + (UNTAGGED.equals(tag) ? "-" : tag));
+        }
+    }
+
     private static <T> List<T> filter(List<T> ports, List<String> tags, String wanted) {
         List<T> kept = new ArrayList<>(ports.size());
         for (int i = 0; i < ports.size(); i++) {

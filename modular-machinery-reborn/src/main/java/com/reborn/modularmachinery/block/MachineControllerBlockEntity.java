@@ -1222,6 +1222,14 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
     public ControllerStatus status() { return status; }
 
+    /**
+     * 这台控制器成型时用的旋转（相对 NORTH 的逆时针四分之一圈数）。
+     *
+     * <p>公开它是因为**动态结构的展开依赖朝向**：诊断命令要把「世界里实际生效的位置标签」重新算一遍，
+     * 而只按定义展开（朝向 0）会得到一份与实际不同的标签表——那正好会让诊断给出错误答案。
+     */
+    public int rotationSteps() { return this.rotationSteps; }
+
     /** The ports gathered from the formed structure. */
     public HatchCollection hatches() { return this.hatches; }
 
