@@ -9,13 +9,16 @@ import com.reborn.modularmachinery.ModularMachineryReborn;
 import com.reborn.modularmachinery.factory.FactoryThreadModel;
 import com.reborn.modularmachinery.recipe.RecipeModifier;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 机器定义的<strong>schema</strong>：读取一份定义，并承载它必须满足的每一条规则。
@@ -68,7 +71,8 @@ public final class MachineSchema {
     public static final List<String> KNOWN_ROOT_FIELDS = List.of(
             "registryname", "localizedname", "parts", "failure-action", "requires-blueprint",
             "max-parallelism", "internal-parallelism", "parallelizable", "modifiers",
-            "has-factory", "factory-only", "max-threads", "core-threads", "smart-interfaces");
+            "has-factory", "factory-only", "max-threads", "core-threads", "smart-interfaces",
+            "dynamic-patterns");
 
     /**
      * Root fields the loader evaluates but the script API cannot yet write — <b>empty as of 0.31.0</b>, and kept
@@ -213,43 +217,17 @@ public final class MachineSchema {
         MachinePattern.Builder builder = MachinePattern.builder();
         boolean ignoredExtras = false;
 
-        for (JsonElement partElement : parts) {
-            JsonObject part = asObject(partElement, where + " part");
-            List<Integer> xs = readCoordinates(part, "x", where);
-            List<Integer> ys = readCoordinates(part, "y", where);
-            List<Integer> zs = readCoordinates(part, "z", where);
-            List<BlockMatcher> accepted = readElements(part, variables, where);
-            String selectorTag = readSelectorTag(part, where);
-
-            if (part.has("nbt") || part.has("preview-nbt")) {
-                ignoredExtras = true;
-            }
-
-            for (int x : xs) {
-                for (int y : ys) {
-                    for (int z : zs) {
-                        if (x == 0 && y == 0 && z == 0) {
-                            // The controller occupies the origin and is not part of the pattern.
-                            continue;
-                        }
-                        BlockPos pos = new BlockPos(x, y, z);
-                        builder.add(pos, accepted);
-                        // 一个部件展开了多个坐标时，每个坐标都拿到同一个标签——旧版也是这样：
-                        // `selector-tag` 是**部件**的属性，坐标数组只是把同一个部件写在多处
-                        // （`DynamicMachine.addParts` 对每个 permutation 设的是同一个 selector，
-                        // `DynamicMachine.java:296-305`）。
-                        builder.tag(pos, selectorTag);
-                    }
-                }
-            }
-        }
+        ignoredExtras |= readParts(parts, builder, variables, where);
 
         if (builder.isEmpty()) {
             throw new JsonParseException("Machine definition " + where + " has no parts besides the controller");
         }
 
+        // 波 3b：动态结构。基座（上面的 `parts`）之外还可以声明若干「沿某个面重复」的段落。
+        List<DynamicPattern> dynamicPatterns = readDynamicPatterns(root, variables, where);
+
         if (ignoredExtras) {
-            LOGGER.warn("[{}] {} uses 'nbt', 'preview-nbt' or 'selector-tag', which M1 does not evaluate yet; "
+            LOGGER.warn("[{}] {} uses 'nbt' or 'preview-nbt', which M1 does not evaluate yet; "
                     + "those positions match on block state only", ModularMachineryReborn.MOD_ID, where);
         }
 
@@ -292,7 +270,7 @@ public final class MachineSchema {
 
         return new MachineDefinition(id, localizedName, builder.build(), failureAction, requiresBlueprint,
                 maxParallelism, internalParallelism, parallelizable, modifiers,
-                maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces);
+                maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces, dynamicPatterns);
     }
 
     // 0.31.0 removed rejectDeferred(JsonObject, Object, boolean) and its call above read()'s body. It existed to
@@ -649,13 +627,13 @@ public final class MachineSchema {
      *
      * <p>{@code modifiers} 在 0.19.0（M6c）离开了这份列表：结构位置现在真的会贡献它的配方修改器。
      * {@code has-factory} / {@code factory-only} 在 0.22.0（M6e）连同两个新线程字段一起离开。
-     * {@code failure-action} 在 0.25.0（D17）离开。剩下这些<strong>完全还没有消费者</strong>：
-     * {@code color} 只是视觉的，而 {@code prefix} / {@code hide-components-when-formed} /
-     * {@code controller-bounding-box} / {@code dynamic-patterns} 属于尚未排期的批次。
+     * {@code failure-action} 在 0.25.0（D17）离开。{@code dynamic-patterns} 在 0.32.0（波 3b）离开：
+     * 动态结构的长度现在是<strong>真的会被量出来</strong>的。
+     * 剩下这些<strong>完全还没有消费者</strong>：{@code color} 只是视觉的，而 {@code prefix} /
+     * {@code hide-components-when-formed} / {@code controller-bounding-box} 属于尚未排期的批次。
      */
     private static final String[] UNIMPLEMENTED_ROOT_FIELDS = {
-            "dynamic-patterns", "color", "prefix",
-            "hide-components-when-formed", "controller-bounding-box"
+            "color", "prefix", "hide-components-when-formed", "controller-bounding-box"
     };
 
     /**
@@ -681,6 +659,225 @@ public final class MachineSchema {
         }
         String tag = element.getAsString();
         return tag.isEmpty() ? null : tag;
+    }
+
+    /**
+     * 读一段 {@code parts} 数组，写进 {@code builder}，返回「是否遇到了本项目还不求值的字段」。
+     *
+     * <p>抽出来是因为波 3b 之后同一个解析要跑三处：根的 {@code parts}（固定基座）、
+     * {@code dynamic-patterns[].parts}（重复单元）与 {@code parts-end}（收尾段）。三处的规则必须完全一样——
+     * 复制三份就是三份迟早分叉的副本，而分叉的表现是「基座里的坐标数组能用、动态段里不能用」这种怪事。
+     */
+    private static boolean readParts(JsonArray parts, MachinePattern.Builder builder,
+                                     Map<String, List<String>> variables, Object where) {
+        boolean ignoredExtras = false;
+        for (JsonElement partElement : parts) {
+            JsonObject part = asObject(partElement, where + " part");
+            List<Integer> xs = readCoordinates(part, "x", where);
+            List<Integer> ys = readCoordinates(part, "y", where);
+            List<Integer> zs = readCoordinates(part, "z", where);
+            List<BlockMatcher> accepted = readElements(part, variables, where);
+            String selectorTag = readSelectorTag(part, where);
+
+            if (part.has("nbt") || part.has("preview-nbt")) {
+                ignoredExtras = true;
+            }
+
+            for (int x : xs) {
+                for (int y : ys) {
+                    for (int z : zs) {
+                        if (x == 0 && y == 0 && z == 0) {
+                            // The controller occupies the origin and is not part of the pattern.
+                            continue;
+                        }
+                        BlockPos pos = new BlockPos(x, y, z);
+                        builder.add(pos, accepted);
+                        // 一个部件展开了多个坐标时，每个坐标都拿到同一个标签——旧版也是这样：
+                        // `selector-tag` 是**部件**的属性，坐标数组只是把同一个部件写在多处
+                        // （`DynamicMachine.addParts` 对每个 permutation 设的是同一个 selector，
+                        // `DynamicMachine.java:296-305`）。
+                        builder.tag(pos, selectorTag);
+                    }
+                }
+            }
+        }
+        return ignoredExtras;
+    }
+
+    /**
+     * 读 {@code dynamic-patterns}：一段可以沿某个面重复的结构。
+     *
+     * <p>字段与校验逐条对齐旧版的 {@code DynamicMachine.addDynamicPatterns} 及其四个 setter。
+     * 旧版那套报错文案（{@code "Empty 'dynamic-patterns'!"}、{@code "Pattern must have a 'name'!"} 等）
+     * 保留原意但补上「该写什么」，这是本项目对「人手写字段」的一贯做法。
+     *
+     * <p><strong>有一处校验是本版新加的，因为旧版那条是空转的。</strong>旧版 {@code setMaxSize} 里有
+     * {@code if (pattern.getMinSize() > maxSize)}，但它在 {@code minSize} 被赋值<strong>之前</strong>运行
+     * （解析顺序是 maxSize → parts → parts-end → minSize），所以读到的永远是构造器初值 0，那条检查
+     * 从来不触发。这里把 {@code minSize <= maxSize} 在两者都读到之后检查一次。
+     */
+    private static List<DynamicPattern> readDynamicPatterns(JsonObject root, Map<String, List<String>> variables,
+                                                            Object where) {
+        if (!root.has("dynamic-patterns")) {
+            return List.of();
+        }
+        JsonElement element = root.get("dynamic-patterns");
+        if (!element.isJsonArray()) {
+            throw new JsonParseException("'dynamic-patterns' of " + where + " must be an array of pattern "
+                    + "objects. Write \"dynamic-patterns\": [ { \"name\": ..., \"faces\": [...], "
+                    + "\"maxSize\": ..., \"parts\": [...] } ], or remove the field.");
+        }
+        JsonArray array = element.getAsJsonArray();
+        if (array.isEmpty()) {
+            // 旧版：`Empty 'dynamic-patterns'!`。写了这个字段却什么都不写，几乎总是编辑到一半留下的。
+            throw new JsonParseException("'dynamic-patterns' of " + where + " is empty. Remove the field, or "
+                    + "declare at least one pattern with a 'name', 'faces', 'maxSize' and 'parts'.");
+        }
+
+        List<DynamicPattern> patterns = new ArrayList<>(array.size());
+        for (JsonElement patternElement : array) {
+            JsonObject pattern = asObject(patternElement, where + " 'dynamic-patterns' entry");
+
+            String name = requireString(pattern, "name", where + " dynamic pattern");
+            Set<Direction> faces = readFaces(pattern, name, where);
+            int maxSize = readPatternSize(pattern, "maxSize", name, where, true, 0);
+            int minSize = readPatternSize(pattern, "minSize", name, where, false, 0);
+            if (minSize > maxSize) {
+                throw new JsonParseException("'minSize' of dynamic pattern '" + name + "' in " + where + " is "
+                        + minSize + ", which is above its 'maxSize' (" + maxSize + "). Raise \"maxSize\" to "
+                        + minSize + " or more, or lower \"minSize\".");
+            }
+
+            MachinePattern.Builder partBuilder = MachinePattern.builder();
+            readParts(asArray(pattern.get("parts"),
+                    "dynamic pattern '" + name + "' 'parts' in " + where), partBuilder, variables,
+                    where + " dynamic pattern '" + name + "'");
+            if (partBuilder.isEmpty()) {
+                throw new JsonParseException("dynamic pattern '" + name + "' of " + where + " has no parts "
+                        + "besides the origin; a repeating section cannot be empty.");
+            }
+
+            MachinePattern endPart = null;
+            if (pattern.has("parts-end")) {
+                MachinePattern.Builder endBuilder = MachinePattern.builder();
+                readParts(asArray(pattern.get("parts-end"),
+                        "dynamic pattern '" + name + "' 'parts-end' in " + where), endBuilder, variables,
+                        where + " dynamic pattern '" + name + "'");
+                if (!endBuilder.isEmpty()) {
+                    endPart = endBuilder.build();
+                }
+            }
+
+            BlockPos startOffset = readPatternOffset(pattern, "structure-size-offset-start", name, where);
+            BlockPos stepOffset = readPatternOffset(pattern, "structure-size-offset", name, where);
+
+            patterns.add(new DynamicPattern(name, faces, minSize, maxSize, partBuilder.build(), endPart,
+                    startOffset, stepOffset));
+        }
+        return List.copyOf(patterns);
+    }
+
+    /**
+     * {@code faces}：这个模式沿哪些面延伸，也就是「往哪个方向一节一节接下去」。
+     *
+     * <p>旧版的取值与报错（{@code setFaces}）逐条对齐：缺字段、不是数组、元素不是字符串、名字不认识，
+     * 各有自己的消息；最后一条会把六个合法值列出来。
+     */
+    private static Set<Direction> readFaces(JsonObject pattern, String name, Object where) {
+        if (!pattern.has("faces")) {
+            throw new JsonParseException("dynamic pattern '" + name + "' of " + where + " has no 'faces'. "
+                    + "Write the directions the section repeats along, for example \"faces\": [\"north\"].");
+        }
+        JsonElement element = pattern.get("faces");
+        if (!element.isJsonArray()) {
+            throw new JsonParseException("'faces' of dynamic pattern '" + name + "' in " + where
+                    + " must be an array of direction names, for example [\"north\"].");
+        }
+        Set<Direction> faces = new LinkedHashSet<>();
+        for (JsonElement faceElement : element.getAsJsonArray()) {
+            if (!faceElement.isJsonPrimitive() || !faceElement.getAsJsonPrimitive().isString()) {
+                throw new JsonParseException("'faces' entries of dynamic pattern '" + name + "' in " + where
+                        + " must be strings, but one is " + faceElement + ".");
+            }
+            String face = faceElement.getAsString();
+            Direction direction = directionByName(face);
+            if (direction == null) {
+                throw new JsonParseException("Invalid facing '" + face + "' in dynamic pattern '" + name
+                        + "' of " + where + ". Expect one of 'up', 'down', 'north', 'south', 'west', 'east'.");
+            }
+            faces.add(direction);
+        }
+        if (faces.isEmpty()) {
+            throw new JsonParseException("'faces' of dynamic pattern '" + name + "' in " + where
+                    + " is empty. Name at least one direction, for example [\"north\"].");
+        }
+        return faces;
+    }
+
+    /** 方向名到 {@link Direction}，不认识时返回 {@code null}（旧版靠 catch 异常达成同一件事）。 */
+    @javax.annotation.Nullable
+    private static Direction directionByName(String name) {
+        for (Direction direction : Direction.values()) {
+            if (direction.getName().equalsIgnoreCase(name)) {
+                return direction;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@code minSize} / {@code maxSize}：整数，且 {@code maxSize} 是必需的。
+     *
+     * <p>旧版 {@code setMaxSize} 的报错原话是 {@code "Pattern must be has 'maxSize'!"}——语法有误，但它是
+     * <strong>面向作者的契约</strong>。这里保留「必须写」这个意思，但不复制那个笔误。
+     */
+    private static int readPatternSize(JsonObject pattern, String key, String name, Object where,
+                                       boolean required, int fallback) {
+        if (!pattern.has(key)) {
+            if (required) {
+                throw new JsonParseException("dynamic pattern '" + name + "' of " + where + " must have a '"
+                        + key + "'. Write how many sections the structure may repeat, for example "
+                        + "\"maxSize\": 15.");
+            }
+            return fallback;
+        }
+        JsonElement element = pattern.get(key);
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+            throw new JsonParseException("'" + key + "' of dynamic pattern '" + name + "' in " + where
+                    + " must be a whole number, but it is " + element + ".");
+        }
+        int value = element.getAsInt();
+        if (value < 0) {
+            throw new JsonParseException("'" + key + "' of dynamic pattern '" + name + "' in " + where + " is "
+                    + value + ". A pattern cannot repeat a negative number of times; write 0 or more.");
+        }
+        return value;
+    }
+
+    /**
+     * {@code structure-size-offset-start} / {@code structure-size-offset}：一个 {@code {x, y, z}} 对象，
+     * 省略时为原点。
+     *
+     * <p>旧版的 {@code getStructureSizeOffset} 走的是与 {@code parts} 同一套坐标读取（它也接受坐标<strong>数组</strong>，
+     * 取第一个值）。这里通过 {@link #readCoordinates} 复用同一套解析，于是「坐标数组」这种写法在两处行为一致。
+     *
+     * <p><strong>省略时是零向量，这是照抄旧版的。</strong>旧版 {@code DynamicPattern} 对这两个字段的初值就是
+     * {@code new BlockPos(0, 0, 0)}，而它们决定的是「第一节从哪儿开始量、每节之间走多远」。取零向量意味着
+     * 「不写这两个字段的模式不会一格格往前走」，也就是它只能有一节——这是旧版的实际行为，本版不去替作者
+     * 猜一个更「好用」的默认值：一个被发明出来的默认值会让同一份定义在两个模组里产生不同的结构，
+     * 而那种分歧在世界里表现为「机器在旧版成型、在新版不成型」，极难归因。
+     *
+     * <p>作者要写动态结构就必须写这两个字段（旧版自带的装配线两个都写了 {@code (0,0,1)}）。
+     */
+    private static BlockPos readPatternOffset(JsonObject pattern, String key, String name, Object where) {
+        if (!pattern.has(key)) {
+            return BlockPos.ZERO;
+        }
+        JsonObject offset = asObject(pattern.get(key), "dynamic pattern '" + name + "' '" + key + "' of " + where);
+        List<Integer> xs = readCoordinates(offset, "x", where);
+        List<Integer> ys = readCoordinates(offset, "y", where);
+        List<Integer> zs = readCoordinates(offset, "z", where);
+        return new BlockPos(xs.get(0), ys.get(0), zs.get(0));
     }
 
     private static List<BlockMatcher> readElements(JsonObject part, Map<String, List<String>> variables,

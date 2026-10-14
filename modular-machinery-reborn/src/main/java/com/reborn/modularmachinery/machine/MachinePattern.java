@@ -79,6 +79,36 @@ public final class MachinePattern {
         return !this.tags.isEmpty();
     }
 
+    /**
+     * 把另一个结构并进来，返回合并后的新结构。
+     *
+     * <p>用途是波 3b：基座（定义里的 {@code parts}）与量出来的动态段各自是一个 {@code MachinePattern}，
+     * 而<strong>端口收集、建造预览、结构诊断都只认一个</strong>结构。与其让每一处都学会「基座 + N 个动态段」，
+     * 不如在匹配那一刻就合成一个——调用者拿到的永远是一个完整结构，不知道它是由几部分拼的。
+     *
+     * <p>两个结构在同一位置都有内容时，接受方块<strong>取并集</strong>：任一方的方块都可以放在那里。
+     * 这与 {@link Builder#add} 已有的合并语义一致（同位置多次 add 会把候选方块加起来），
+     * 而动态段与基座在同一个格子上要求不同方块是定义本身存在歧义，取并集至少能让它成型而不是随机失败。
+     */
+    public MachinePattern withMerged(MachinePattern other) {
+        Builder builder = builder();
+        for (Map.Entry<BlockPos, List<BlockMatcher>> entry : this.positions.entrySet()) {
+            builder.add(entry.getKey(), entry.getValue());
+        }
+        for (Map.Entry<BlockPos, List<BlockMatcher>> entry : other.positions.entrySet()) {
+            builder.add(entry.getKey(), entry.getValue());
+        }
+        // 标签在位置上不重叠（同一位置只属于一个部件），所以两边的标签直接合并。
+        // 动态段自己的标签（input_line_0 这种）正是这样进入有效结构的。
+        for (Map.Entry<BlockPos, String> entry : this.tags.entrySet()) {
+            builder.tag(entry.getKey(), entry.getValue());
+        }
+        for (Map.Entry<BlockPos, String> entry : other.tags.entrySet()) {
+            builder.tag(entry.getKey(), entry.getValue());
+        }
+        return builder.build();
+    }
+
     public int partCount() {
         return this.positions.size();
     }

@@ -106,6 +106,14 @@ public final class MachineDefinition {
     // ---------------------------------------------------------------- M6d-b: the smart interfaces
     private final List<SmartInterfaceType> smartInterfaces;
 
+    /**
+     * 这台机器的动态结构（{@code dynamic-patterns}）：沿某个面重复、长度随世界变化的段落。
+     *
+     * <p>空列表表示「这台机器的形状是固定的」，也就是绝大多数机器的情形。空列表而不是 {@code null}：
+     * 「没有动态结构」是一个正常状态而不是缺失，让调用者少一处判空。
+     */
+    private final List<DynamicPattern> dynamicPatterns;
+
     public MachineDefinition(ResourceLocation id, String localizedName, MachinePattern pattern,
                              FailureAction failureAction, boolean requiresBlueprint) {
         this(id, localizedName, pattern, failureAction, requiresBlueprint,
@@ -138,6 +146,25 @@ public final class MachineDefinition {
                              int maxThreads, boolean hasFactory, boolean factoryOnly,
                              List<FactoryThreadModel.CoreThreadSpec> coreThreads,
                              List<SmartInterfaceType> smartInterfaces) {
+        this(id, localizedName, pattern, failureAction, requiresBlueprint, maxParallelism, internalParallelism,
+                parallelizable, modifiers, maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces,
+                List.of());
+    }
+
+    /**
+     * 规范构造器。最后一批参数是波 3b 的动态结构（{@code dynamic-patterns}）。
+     *
+     * <p>上面的几个重载保留下来，是为了不动既有的调用点与复现器：绝大多数定义<strong>没有</strong>动态结构，
+     * 而「没有」用一个空列表表示就够了。
+     */
+    public MachineDefinition(ResourceLocation id, String localizedName, MachinePattern pattern,
+                             FailureAction failureAction, boolean requiresBlueprint,
+                             int maxParallelism, int internalParallelism, boolean parallelizable,
+                             List<MachineModifier> modifiers,
+                             int maxThreads, boolean hasFactory, boolean factoryOnly,
+                             List<FactoryThreadModel.CoreThreadSpec> coreThreads,
+                             List<SmartInterfaceType> smartInterfaces,
+                             List<DynamicPattern> dynamicPatterns) {
         this.id = id;
         this.localizedName = localizedName;
         this.pattern = pattern;
@@ -152,6 +179,7 @@ public final class MachineDefinition {
         this.factoryOnly = factoryOnly;
         this.coreThreads = List.copyOf(coreThreads);
         this.smartInterfaces = List.copyOf(smartInterfaces);
+        this.dynamicPatterns = List.copyOf(dynamicPatterns);
     }
 
     /** Registry name of the machine, e.g. {@code modular_machinery_reborn:transformer}. */
@@ -320,6 +348,21 @@ public final class MachineDefinition {
      */
     public List<SmartInterfaceType> smartInterfaces() {
         return this.smartInterfaces;
+    }
+
+    /**
+     * 这台机器的动态结构，按定义里的顺序；没有动态结构时是<strong>空列表</strong>。
+     *
+     * <p>顺序有意义：结构匹配时每个模式都要在世界里量一次长度，全部量到才成型
+     * （旧版 {@code matchesDynamicPatternRotation} 一旦有一个不匹配就整体返回 false）。
+     */
+    public List<DynamicPattern> dynamicPatterns() {
+        return this.dynamicPatterns;
+    }
+
+    /** 这台机器是否有任何动态结构。空列表是常态，所以这个判断比 {@code !dynamicPatterns().isEmpty()} 好读。 */
+    public boolean hasDynamicPatterns() {
+        return !this.dynamicPatterns.isEmpty();
     }
 
     /** One declared type by name, or {@code null} — the original's {@code DynamicMachine#getSmartInterfaceType}. */

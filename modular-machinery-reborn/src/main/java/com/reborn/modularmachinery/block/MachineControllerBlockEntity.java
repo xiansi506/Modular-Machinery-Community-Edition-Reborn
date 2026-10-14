@@ -10,6 +10,8 @@ import com.reborn.modularmachinery.machine.FailureAction;
 import com.reborn.modularmachinery.machine.HatchCollection;
 import com.reborn.modularmachinery.machine.MachineDefinition;
 import com.reborn.modularmachinery.machine.MachineModifier;
+import com.reborn.modularmachinery.machine.DynamicPattern;
+import com.reborn.modularmachinery.machine.MachinePattern;
 import com.reborn.modularmachinery.machine.MachineRegistry;
 import com.reborn.modularmachinery.machine.ParallelController;
 import com.reborn.modularmachinery.machine.ParallelControllerCollection;
@@ -28,6 +30,8 @@ import com.reborn.modularmachinery.upgrade.UpgradeEffects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
@@ -166,6 +170,17 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
     /** The ports gathered from the formed structure. */
     private HatchCollection hatches = HatchCollection.EMPTY;
+
+    /**
+     * 这台机器成型时<strong>定格</strong>下来的动态结构：每个模式量到了几节、在哪一面。
+     *
+     * <p>为什么必须存下来而不是每次重新量：配方的 {@code selector-tag} 里带着段号
+     * （{@code input_line_3} 这种），而动态结构的长度在世界上是会变的。如果端口集合按「当前量到的长度」
+     * 重建，玩家在线尾再加一节就会让正在跑的合成指向别的段——表现为「加了一节之后合成突然换料」，
+     * 而且只在有人动结构时出现，极难复现。旧版同样把这三个值存进 NBT
+     * （{@code TileMultiblockMachineController.java:1435/1490}）。
+     */
+    private List<DynamicPattern.Status> dynamicPatterns = List.of();
 
     /**
      * The parallel controllers found in the formed structure — M6d's contribution to the ceiling.
@@ -351,9 +366,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.formed = match != null;
             be.machineId = match == null ? null : match.machine().id();
             be.rotationSteps = match == null ? 0 : match.rotationSteps();
-            be.hatches = be.collectHatches(level, pos, match == null ? null : match.machine());
-            be.parallelControllers = be.collectParallelControllers(level, pos, match == null ? null : match.machine());
-            be.upgradeBuses = be.collectUpgradeBuses(level, pos, match == null ? null : match.machine());
+            // 波 3b：动态机器要用**有效结构**（基座 + 量出来的各段）来收集端口与控制器，而不是定义里的基座。
+            // 没有动态结构的机器，match.pattern() 就是基座本身，所以这段改动对它们没有任何影响。
+            MachinePattern effectivePattern = match == null ? null : match.pattern();
+            be.dynamicPatterns = match == null ? List.of() : match.dynamicPatterns();
+            be.hatches = be.collectHatches(level, pos, match == null ? null : match.machine(), effectivePattern);
+            be.parallelControllers = be.collectParallelControllers(level, pos,
+                    match == null ? null : match.machine(), effectivePattern);
+            be.upgradeBuses = be.collectUpgradeBuses(level, pos,
+                    match == null ? null : match.machine(), effectivePattern);
             be.activeModifiers = match == null
                     ? List.of()
                     : evaluateModifiers(level, pos, match.machine(), match.rotationSteps());
@@ -912,18 +933,25 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         return null;
     }
 
-    /** Walks the formed pattern and buckets every hatch it finds. Positions come from the definition. */
-    private HatchCollection collectHatches(Level level, BlockPos pos, @Nullable MachineDefinition machine) {
-        if (machine == null) {
+    /**
+     * Walks the formed structure and buckets every hatch it finds.
+     *
+     * <p>走的是 {@code effectivePattern} 而不是 {@code machine.pattern()}：对**动态**机器（波 3b）来说，
+     * 定义里的 {@code parts} 只是基座，有效结构才是基座加上量出来的各段。读基座会漏掉落在动态段上的仓口，
+     * 而那正是装配线放输入/输出总线的地方。
+     */
+    private HatchCollection collectHatches(Level level, BlockPos pos, @Nullable MachineDefinition machine,
+                                           @Nullable MachinePattern effectivePattern) {
+        if (machine == null || effectivePattern == null) {
             return HatchCollection.EMPTY;
         }
         HatchCollection.Builder builder = HatchCollection.builder();
-        for (BlockPos relative : machine.pattern().positions().keySet()) {
+        for (BlockPos relative : effectivePattern.positions().keySet()) {
             if (level.getBlockEntity(pos.offset(relative)) instanceof MachineHatchBlockEntity hatch) {
-                    // 把结构位置上的 `selector-tag` 一起交给端口：配方需求靠它筛出「属于那个部件」的仓口。
-                    // 绝大多数结构没有标签，此时 tag() 答 null，端口就按「无标签」入桶。
-                    builder.add(hatch.kind(), hatch.itemHandler(), hatch.fluidTank(), hatch.energyStorage(),
-                            machine.pattern().tag(relative));
+                // 把结构位置上的 `selector-tag` 一起交给端口：配方需求靠它筛出「属于那个部件」的仓口。
+                // 绝大多数结构没有标签，此时 tag() 答 null，端口就按「无标签」入桶。
+                builder.add(hatch.kind(), hatch.itemHandler(), hatch.fluidTank(), hatch.energyStorage(),
+                        effectivePattern.tag(relative));
             }
         }
         // M6d-b: the smart-interface values travel with the ports (see HatchCollection's class comment). The
@@ -945,12 +973,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * blocks a position accepts are affected.
      */
     private ParallelControllerCollection collectParallelControllers(Level level, BlockPos pos,
-                                                                    @Nullable MachineDefinition machine) {
-        if (machine == null) {
+                                                                    @Nullable MachineDefinition machine,
+                                                                    @Nullable MachinePattern effectivePattern) {
+        if (machine == null || effectivePattern == null) {
             return ParallelControllerCollection.EMPTY;
         }
         List<ParallelController> found = new ArrayList<>();
-        for (BlockPos relative : machine.pattern().positions().keySet()) {
+        for (BlockPos relative : effectivePattern.positions().keySet()) {
             if (level.getBlockEntity(pos.offset(relative)) instanceof ParallelController controller) {
                 found.add(controller);
             }
@@ -975,12 +1004,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * while the bus pruned the pairing itself. The walk is still shared; only the interface is wider.
      */
     private List<UpgradeBusUtility> collectUpgradeBuses(Level level, BlockPos pos,
-                                                        @Nullable MachineDefinition machine) {
-        if (machine == null) {
+                                                        @Nullable MachineDefinition machine,
+                                                        @Nullable MachinePattern effectivePattern) {
+        if (machine == null || effectivePattern == null) {
             return List.of();
         }
         List<UpgradeBusUtility> found = new ArrayList<>();
-        for (BlockPos relative : machine.pattern().positions().keySet()) {
+        for (BlockPos relative : effectivePattern.positions().keySet()) {
             if (level.getBlockEntity(pos.offset(relative)) instanceof UpgradeBusUtility bus) {
                 found.add(bus);
             }
@@ -1273,6 +1303,73 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         }, MachineRegistry.byId(this.machineId).map(MachineDefinition::coreThreads).orElse(List.of()));
     }
 
+    /** 动态结构定格值的 NBT 键，与旧版同义（它把一组 {@code DynamicPattern.Status} 存进一个 tag）。 */
+    private static final String TAG_DYNAMIC_PATTERNS = "dynamicPatterns";
+
+    /**
+     * 写出定格下来的动态结构：每个模式一条 {@code {name, size, facing}}。
+     *
+     * <p>形状与旧版相同（一个 list，每项一个 compound），但键名是本项目自己的拼法：旧版把整组
+     * {@code Status} 交给 {@code PatternNBTString} 之类的辅助类去写，具体键名没有跨版本稳定的保证，
+     * 所以这里不去猜它的字节布局，而是把这个<strong>信息</strong>照旧版的语义存下来。
+     * 没有动态结构时不写这个键。
+     */
+    private void saveDynamicPatterns(CompoundTag tag) {
+        if (this.dynamicPatterns.isEmpty()) {
+            return;
+        }
+        ListTag list = new ListTag();
+        for (DynamicPattern.Status status : this.dynamicPatterns) {
+            CompoundTag entry = new CompoundTag();
+            entry.putString("name", status.patternName());
+            entry.putInt("size", status.size());
+            entry.putString("facing", status.face().getName());
+            list.add(entry);
+        }
+        tag.put(TAG_DYNAMIC_PATTERNS, list);
+    }
+
+    /**
+     * 读回动态结构定格值。
+     *
+     * <p>宽容失败是刻意的：这份数据<strong>描述</strong>结构，而结构在世界上随时会被重新核对并覆盖它
+     * （{@code recheckStructure} 每次成功匹配都会重写）。所以一条读不动的记录只意味着「这一 tick 的端口集合
+     * 按无标签处理」，下一次结构核对就修好了；为此让整个方块实体的加载抛异常是不划算的。
+     */
+    private void loadDynamicPatterns(CompoundTag tag) {
+        this.dynamicPatterns = List.of();
+        if (!tag.contains(TAG_DYNAMIC_PATTERNS, Tag.TAG_LIST)) {
+            return;
+        }
+        ListTag list = tag.getList(TAG_DYNAMIC_PATTERNS, Tag.TAG_COMPOUND);
+        List<DynamicPattern.Status> loaded = new ArrayList<>(list.size());
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag entry = list.getCompound(i);
+            Direction face = directionByName(entry.getString("facing"));
+            if (face == null) {
+                continue;
+            }
+            loaded.add(new DynamicPattern.Status(entry.getString("name"), entry.getInt("size"), face));
+        }
+        this.dynamicPatterns = List.copyOf(loaded);
+    }
+
+    /** 方向名到 {@link Direction}，不认识时返回 {@code null}（读者对坏数据保持宽容）。 */
+    @Nullable
+    private static Direction directionByName(String name) {
+        for (Direction direction : Direction.values()) {
+            if (direction.getName().equalsIgnoreCase(name)) {
+                return direction;
+            }
+        }
+        return null;
+    }
+
+    /** 这台机器成型时定格下来的动态结构；没有动态结构时是空列表。 */
+    public List<DynamicPattern.Status> dynamicPatterns() {
+        return this.dynamicPatterns;
+    }
+
     /** The duration of the running craft, after duration modifiers. */
     public int activeDuration() { return Math.max(1, this.activeDuration); }
 
@@ -1368,6 +1465,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         }
         // M6e: the factory's threads, under the original's own keys.
         saveFactoryThreads(tag);
+        // 波 3b：动态结构定格下来的节数与方向。配方的 selector-tag 带着段号，所以长度一旦确定就必须活过存档。
+        saveDynamicPatterns(tag);
         // The original's extra thread count, under the original's own key and its own width — see
         // extraThreadCount() for why it is a short there and an int here.
         tag.putShort("extraThreadCount", (short) this.extraThreadCount);
@@ -1401,6 +1500,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         this.factoryEnabled = FactoryThreadModel.factoryEnabled(this.factoryBlock,
                 MachineRegistry.byId(this.machineId).orElse(null));
         loadFactoryThreads(tag);
+        // 波 3b：把定格下来的动态结构读回来。它必须在第一次结构核对之前就位，否则那一 tick 里
+        // 配方的 selector-tag 会指向一个还不存在的段（读到空端口集合），表现为「重进世界后合成停一下」。
+        loadDynamicPatterns(tag);
         // Read back with `getShort`, matching the width the original wrote it in. A save written by this build
         // therefore reads identically to one written by the original, and a value from a malformed tag falls back
         // to 0 — which is also the original's own field default.

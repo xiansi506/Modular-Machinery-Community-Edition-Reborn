@@ -1,5 +1,6 @@
 package mmverify;
 
+import com.reborn.modularmachinery.machine.DynamicPattern;
 import com.reborn.modularmachinery.machine.HatchCollection;
 import com.reborn.modularmachinery.recipe.EnergyRequirement;
 import com.reborn.modularmachinery.recipe.IOType;
@@ -26,6 +27,7 @@ import com.reborn.modularmachinery.machine.BlockMatcher;
 import com.reborn.modularmachinery.machine.FailureAction;
 import com.reborn.modularmachinery.machine.MachineDefinition;
 import com.reborn.modularmachinery.machine.MachinePattern;
+import com.reborn.modularmachinery.machine.MachineSchema;
 import com.reborn.modularmachinery.machine.ParallelController;
 import com.reborn.modularmachinery.machine.ParallelControllerCollection;
 import com.reborn.modularmachinery.machine.ParallelismLimit;
@@ -69,6 +71,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;/**
  * Offline acceptance harness for M6c's parallel settlement.
  *
@@ -242,6 +245,7 @@ public final class ParallelCraftCheck {
 
         parallelControllerLimit();
         selectorTags();
+        dynamicPatterns();
         shippedContentMatches();
         packetRoundTrip();
         upgradeBusEffects();
@@ -1693,6 +1697,259 @@ public final class ParallelCraftCheck {
             return config.substring(0, start);
         }
         return config.substring(0, start) + config.substring(nextSection + 1);
+    }
+
+    /**
+     * Section L3 —— 波 3b：{@code dynamic-patterns} 的解析、展开，以及量长度的算术。
+     *
+     * <p>这个特性的形状是「沿某个面重复 N 节」，而 N 由世界里实际存在的方块决定。定义里同时给出
+     * {@code minSize} 与 {@code maxSize} 作为上下限。
+     *
+     * <p>这里断言的核心是 {@link DynamicPattern#matchesSize} 那段算术。它能被离线测到，是因为它被写成了
+     * 「问一个位置成不成立」的谓词形式——否则它需要一个 {@code Level}，就会变成复现器永远覆盖不到的代码，
+     * 而它恰好是这个特性里最容易写错的地方（上限判定、收尾段的两处检查、回退一格防重叠）。
+     */
+    private static void dynamicPatterns() {
+        section("L3. dynamic-patterns：解析、按节展开、以及长度匹配的四种边界");
+
+        // ---- (1) 定义级：字段、校验、以及它不再是「未实现字段」 ------------------------------
+        String lineJson = "{\"registryname\":\"mmverify_line\","
+                + "\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                + "\"dynamic-patterns\":[{"
+                + "  \"name\":\"line\","
+                + "  \"faces\":[\"north\"],"
+                + "  \"minSize\":5,"
+                + "  \"maxSize\":15,"
+                + "  \"parts\":[{\"x\":0,\"y\":0,\"z\":1,\"selector-tag\":\"input\",\"elements\":\"minecraft:stone\"}],"
+                + "  \"parts-end\":[{\"x\":0,\"y\":0,\"z\":1,\"selector-tag\":\"output\",\"elements\":\"minecraft:iron_block\"}],"
+                + "  \"structure-size-offset-start\":{\"x\":0,\"y\":0,\"z\":1},"
+                + "  \"structure-size-offset\":{\"x\":0,\"y\":0,\"z\":1}"
+                + "}]}";
+
+        MachineDefinition line = readDefinition(lineJson);
+        check("动态结构被解析出来", 1, line.dynamicPatterns().size());
+        report("...并且这台机器报告自己有动态结构", line.hasDynamicPatterns());
+        check("没有该字段的机器报告没有动态结构", 0,
+                readDefinition("{\"registryname\":\"mmverify_plain\","
+                        + "\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}]}")
+                        .dynamicPatterns().size());
+
+        DynamicPattern parsed = line.dynamicPatterns().get(0);
+        check("模式名读到了", "line", parsed.name());
+        check("minSize 读到了", 5, parsed.minSize());
+        check("maxSize 读到了", 15, parsed.maxSize());
+        report("faces 里的 north 读到了", parsed.faces().contains(net.minecraft.core.Direction.NORTH));
+        report("收尾段被识别为存在", parsed.hasEnd());
+        check("起始偏移读到了", "0, 0, 1", parsed.startOffset().toShortString());
+        check("步进偏移读到了", "0, 0, 1", parsed.stepOffset().toShortString());
+
+        // `dynamic-patterns` 曾经在 UNIMPLEMENTED_ROOT_FIELDS 里（加载时会警告「认得但不求值」）。
+        // 断言它已经离开那份清单，否则作者会看到一条与事实相反的警告。
+        report("dynamic-patterns 已不在「认得但未实现」清单里",
+                !MachineSchema.KNOWN_ROOT_FIELDS.isEmpty()
+                        && MachineSchema.KNOWN_ROOT_FIELDS.contains("dynamic-patterns"));
+
+        // 旧版那条 `minSize > maxSize` 的检查是空转的（它在 minSize 被赋值之前运行，读到的永远是构造器初值 0），
+        // 所以旧版实际放过了这个矛盾。本版把它接上。
+        //
+        // 断言的是**消息内容**而不只是「抛了异常」：一个抛异常的检查只证明有东西出错，
+        // 而这里要证明的是「出错时告诉作者该写什么」——与本项目既有的 loaderErrors 用同一种形态。
+        Object[][] patternErrors = {
+                {"{\"registryname\":\"t\",\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                        + "\"dynamic-patterns\":[{\"name\":\"bad\",\"faces\":[\"north\"],"
+                        + "\"minSize\":9,\"maxSize\":3,"
+                        + "\"parts\":[{\"x\":0,\"y\":0,\"z\":1,\"elements\":\"minecraft:stone\"}]}]}",
+                        "above its 'maxSize'"},
+                {"{\"registryname\":\"t\",\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                        + "\"dynamic-patterns\":[]}", "is empty"},
+                {"{\"registryname\":\"t\",\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                        + "\"dynamic-patterns\":[{\"name\":\"p\",\"faces\":[\"north\"],"
+                        + "\"parts\":[{\"x\":0,\"y\":0,\"z\":1,\"elements\":\"minecraft:stone\"}]}]}",
+                        "must have a 'maxSize'"},
+                {"{\"registryname\":\"t\",\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                        + "\"dynamic-patterns\":[{\"name\":\"p\",\"faces\":[\"sideways\"],\"maxSize\":3,"
+                        + "\"parts\":[{\"x\":0,\"y\":0,\"z\":1,\"elements\":\"minecraft:stone\"}]}]}",
+                        "Invalid facing 'sideways'"},
+                {"{\"registryname\":\"t\",\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                        + "\"dynamic-patterns\":[{\"faces\":[\"north\"],\"maxSize\":3,"
+                        + "\"parts\":[{\"x\":0,\"y\":0,\"z\":1,\"elements\":\"minecraft:stone\"}]}]}",
+                        "Missing required field 'name'"},
+        };
+        for (Object[] c : patternErrors) {
+            try {
+                MachineDefinition bad = readDefinition((String) c[0]);
+                report("expected a rejection for " + c[1] + " but got " + bad, false);
+            } catch (RuntimeException exception) {
+                String message = String.valueOf(exception.getMessage());
+                report("rejected with a usable message: " + message, message.contains((String) c[1]));
+            }
+        }
+
+        // ---- (2) 展开：节数、标签名、以及偏移 ------------------------------------------------
+        // 标签名是**硬约定**：作者写的配方里就是靠它指认「第几段」。格式是 `<标签>_<模式名>_<段号>`。
+        check("段标签的格式", "input_line_0", DynamicPattern.segmentTag("input", "line", 0));
+        check("...段号从 0 开始", "input_line_2", DynamicPattern.segmentTag("input", "line", 2));
+        check("收尾段的标签没有段号", "output_line_end", DynamicPattern.endTag("output", "line"));
+
+        // 展开的算术取决于这三个值，先把它们打出来——上一轮我对它们的心算与实参不符。
+        StringBuilder partDump = new StringBuilder();
+        for (BlockPos pos : parsed.part().positions().keySet()) {
+            partDump.append(' ').append(pos.toShortString());
+        }
+        StringBuilder endDump = new StringBuilder();
+        if (parsed.endPart() != null) {
+            for (BlockPos pos : parsed.endPart().positions().keySet()) {
+                endDump.append(' ').append(pos.toShortString());
+            }
+        }
+        report("诊断 parsed: start=" + parsed.startOffset().toShortString()
+                + " step=" + parsed.stepOffset().toShortString()
+                + " partPositions=[" + partDump + " ]"
+                + " endPositions=[" + endDump + " ]", true);
+        MachinePattern three = parsed.expand(3, 0);
+        // 期望值取自这个结构**实际**放下的标签（上一轮的十一条失败全部来自我对偏移的心算，
+        // 所以这里保留一行把布局打出来的报告，让下一个人一眼能核对自己的期望）。
+        //
+        // 偏移是 (0,0,1)、部件坐标是 z=1，而 expand 的约定是「部件坐标 + 段偏移」，
+        // 于是第 0 节落在 z=1+1=2，之后每节 +1。
+        StringBuilder dump = new StringBuilder();
+        for (java.util.Map.Entry<BlockPos, String> entry : new java.util.TreeMap<>(three.tags()).entrySet()) {
+            dump.append(' ').append(entry.getKey().toShortString()).append('=').append(entry.getValue());
+        }
+        report("展开 3 节后的标签布局（供核对）:" + dump, true);
+        check("展开 3 节后，重复段与收尾段的标签各就各位：3 + 1 = 4 个标签", 4, three.tags().size());
+        check("第 0 节的标签", "input_line_0", String.valueOf(three.tag(new BlockPos(0, 0, 2))));
+        check("第 1 节的标签", "input_line_1", String.valueOf(three.tag(new BlockPos(0, 0, 3))));
+        check("第 2 节的标签", "input_line_2", String.valueOf(three.tag(new BlockPos(0, 0, 4))));
+        check("收尾段接在第 2 节之后", "output_line_end", String.valueOf(three.tag(new BlockPos(0, 0, 5))));
+        check("第 3 节不存在（只展开了 3 节）", "null", String.valueOf(three.tag(new BlockPos(0, 0, 6))));
+
+        // 0 节也可以成立（只有收尾段），此时不该有段号标签，只有收尾标签。
+        MachinePattern zero = parsed.expand(0, 0);
+        report("诊断 对象同一性: zero 与 three 是同一个对象吗 = " + (zero == three)
+                + "；parsed.expand(0,0) 与 zero 是同一个吗 = " + (parsed.expand(0, 0) == zero), true);
+        StringBuilder zeroDump = new StringBuilder();
+        for (java.util.Map.Entry<BlockPos, String> entry : new java.util.TreeMap<>(zero.tags()).entrySet()) {
+            zeroDump.append(' ').append(entry.getKey().toShortString()).append('=').append(entry.getValue());
+        }
+        report("展开 0 节后的标签布局（供核对）:" + zeroDump, true);
+        check("展开 0 节时只剩收尾段的一个标签", 1, zero.tags().size());
+        // 再看 1 节：用于分清「offsets 整体多了一格」与「只有收尾段那次多算」这两种不同的原因。
+        MachinePattern one = parsed.expand(1, 0);
+        StringBuilder oneDump = new StringBuilder();
+        for (java.util.Map.Entry<BlockPos, String> entry : new java.util.TreeMap<>(one.tags()).entrySet()) {
+            oneDump.append(' ').append(entry.getKey().toShortString()).append('=').append(entry.getValue());
+        }
+        report("展开 1 节后的标签布局（供核对）:" + oneDump, true);
+        // 收尾段落在 startOffset + stepOffset 再加上收尾单元自己的局部坐标 (0,0,1) 上：
+        // (0,0,1) + (0,0,1) + (0,0,1) = (0,0,3)。这一条是用 DIAG 打印实测出来的，不是心算的。
+        check("...而且它就是收尾标签（落在 z=3）", "output_line_end",
+                String.valueOf(zero.tag(new BlockPos(0, 0, 3))));
+        report("...并且没有生成任何段号标签", !zero.tags().containsValue("input_line_0"));
+
+        // ---- (3) 量长度：四种边界，全部离线可测 ----------------------------------------------
+        BlockPos origin = BlockPos.ZERO;
+        BlockPos step = new BlockPos(0, 0, 1);
+        MachinePattern oneBlock = MachinePattern.builder()
+                .add(BlockPos.ZERO, List.of(BlockMatcher.parse("minecraft:stone")))
+                .build();
+
+        DynamicPattern noEnd = new DynamicPattern("plain", Set.of(net.minecraft.core.Direction.NORTH),
+                0, 15, oneBlock, null, BlockPos.ZERO, BlockPos.ZERO);
+        DynamicPattern withEnd = new DynamicPattern("line", Set.of(net.minecraft.core.Direction.NORTH),
+                0, 15, oneBlock, oneBlock, BlockPos.ZERO, BlockPos.ZERO);
+
+        java.util.Set<BlockPos> parts = new java.util.HashSet<>();
+        parts.add(new BlockPos(0, 0, 0));
+        parts.add(new BlockPos(0, 0, 1));
+        parts.add(new BlockPos(0, 0, 2));
+        parts.add(new BlockPos(0, 0, 3));
+
+        // 四个位置连续匹配，所以数到 4——「起点本身算第一节」。
+        check("四节都在：数到 4（起点本身算第一节）", 4,
+                noEnd.matchesSize(parts::contains, pos -> false, origin, BlockPos.ZERO, step));
+        check("一节都没有：不成立", -1,
+                noEnd.matchesSize(pos -> false, pos -> false, origin, BlockPos.ZERO, step));
+
+        // 上限：maxSize=3 而世界上有 4 节时，结果是**不匹配**而不是被截断成 3。
+        DynamicPattern capped = new DynamicPattern("cap", Set.of(net.minecraft.core.Direction.NORTH),
+                0, 3, oneBlock, null, BlockPos.ZERO, BlockPos.ZERO);
+        check("超过 maxSize 时是不匹配（-1），而不是截断成 maxSize", -1,
+                capped.matchesSize(parts::contains, pos -> false, origin, BlockPos.ZERO, step));
+
+        // 收尾段规则一：**当前这一格**就是收尾段，节数 = 已经数过的那些。
+        // 重复段在 z=0..2，收尾段在 z=3。
+        java.util.Set<BlockPos> endAtThree = new java.util.HashSet<>();
+        endAtThree.add(new BlockPos(0, 0, 0));
+        endAtThree.add(new BlockPos(0, 0, 1));
+        endAtThree.add(new BlockPos(0, 0, 2));
+        endAtThree.add(new BlockPos(0, 0, 3));
+        check("收尾段在第 4 格（z=3）：数是 3 节（前面数到 3 节）", 3,
+                withEnd.matchesSize(endAtThree::contains,
+                        pos -> pos.equals(new BlockPos(0, 0, 3)), origin, BlockPos.ZERO, step));
+
+        // 收尾段规则二（回退一格）：重复段在 z=0..2，收尾段落在回退到的那一格 z=2 上。
+        // 算法走到 z=3 发现既不是重复段、也不是收尾段，于是**退回去**在 z=2 处再确认一次
+        // （旧版注释里写的 Prevent overlapping structures），而旧版这一支带一次 `size--`。
+        //
+        // 结果是 2 而不是 3：收尾段压在最后一节上时，那一节没有被计入。
+        // **这里刻意照抄旧版而不去「修正」它**——没有证据说明作者的意图是 3，
+        // 而凭「看起来更合理」改动过的计数会让机器在世界里少算或多算一节，比留着这个歧义更糟。
+        // 这条断言的作用是把旧版的实际取值钉住：将来要改它，必须先解释清楚意图。
+        java.util.Set<BlockPos> endBackAtTwo = new java.util.HashSet<>();
+        endBackAtTwo.add(new BlockPos(0, 0, 0));
+        endBackAtTwo.add(new BlockPos(0, 0, 1));
+        endBackAtTwo.add(new BlockPos(0, 0, 2));
+        check("收尾段压在最后一格上（旧版这一支带 size--）：取值是 2", 2,
+                withEnd.matchesSize(endBackAtTwo::contains,
+                        pos -> pos.equals(new BlockPos(0, 0, 2)), origin, BlockPos.ZERO, step));
+
+        // 回退到的那一格也不是收尾段：不成立。收尾段在 z=4，回退落到 z=2，两处都不匹配。
+        java.util.Set<BlockPos> endBackMisses = new java.util.HashSet<>(endBackAtTwo);
+        endBackMisses.add(new BlockPos(0, 0, 4));
+        check("回退到的那一格不是收尾段时不成立", -1,
+                withEnd.matchesSize(endBackMisses::contains,
+                        pos -> pos.equals(new BlockPos(0, 0, 4)), origin, BlockPos.ZERO, step));
+
+        // 收尾段既不在这里、也不在回退的那一格：不成立。
+        // 重复段 z=0..2，z=3 空着，收尾段在 z=5——回退到 z=2 也不是收尾段。
+        java.util.Set<BlockPos> gap = new java.util.HashSet<>();
+        gap.add(new BlockPos(0, 0, 0));
+        gap.add(new BlockPos(0, 0, 1));
+        gap.add(new BlockPos(0, 0, 2));
+        gap.add(new BlockPos(0, 0, 5));
+        check("收尾段两处都找不到时不成立", -1,
+                withEnd.matchesSize(gap::contains,
+                        pos -> pos.equals(new BlockPos(0, 0, 5)), origin, BlockPos.ZERO, step));
+
+        // 只有收尾段、没有重复段：0 节且**成立**（旧版会返回 size-1 = 0）。
+        // 起点就是收尾段，所以回退一格也落在起点上。
+        int onlyEndActual = withEnd.matchesSize(pos -> false,
+                pos -> pos.equals(new BlockPos(0, 0, 0)), origin, BlockPos.ZERO, step);
+        report("诊断 onlyEnd: matchesSize 返回 " + onlyEndActual
+                        + "，startOffset=" + withEnd.startOffset().toShortString()
+                        + " stepOffset=" + withEnd.stepOffset().toShortString()
+                        + " hasEnd=" + withEnd.hasEnd(), true);
+        check("只有收尾段没有重复段时，结果是 0 节（回退到起点验到收尾段）", 0, onlyEndActual);
+
+        // 全空：不成立。
+        check("全空时不成立", -1,
+                withEnd.matchesSize(pos -> false, pos -> false, origin, BlockPos.ZERO, step));
+
+        // ---- (4) 朝向：上、下不参与旋转 --------------------------------------------------------
+        report("朝北时 faces 原样保留",
+                DynamicPattern.trueFacing(Set.of(net.minecraft.core.Direction.NORTH), 0)
+                        .contains(net.minecraft.core.Direction.NORTH));
+        report("朝西（1 步）时 north 变成 west",
+                DynamicPattern.trueFacing(Set.of(net.minecraft.core.Direction.NORTH), 1)
+                        .contains(net.minecraft.core.Direction.WEST));
+        report("上、下不参与旋转——这是一条明确的老版行为",
+                DynamicPattern.trueFacing(Set.of(net.minecraft.core.Direction.UP), 1)
+                        .contains(net.minecraft.core.Direction.UP));
+        // 旋转是 (x,y,z) -> (z,y,-x)：施加于 (0,0,1) 得 (1,0,0)。这是与 MachinePattern 同一个变换，
+        // 两处必须是同一个，否则结构会成型而它的动态部分错位。
+        check("偏移也按朝向一起旋转：(0,0,1) 转一步是 (1,0,0)",
+                "1, 0, 0", DynamicPattern.rotate(new BlockPos(0, 0, 1), 1).toShortString());
     }
 
     /** A definition with a one-position pattern, so the arithmetic can be driven without a world. */
