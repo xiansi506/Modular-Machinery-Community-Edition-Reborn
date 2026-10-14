@@ -29,11 +29,40 @@ public final class MachineRegistry {
     private static volatile Map<ResourceLocation, MachineDefinition> machines = Map.of();
     private static volatile Map<ResourceLocation, MachinePattern[]> rotations = Map.of();
 
+    /**
+     * 波 4：每个定义**解析用的那份 JSON**，按 id 存放。
+     *
+     * <p>它是「同步到客户端」这份工作的载体，而选它当载体有一个明确的理由：
+     * 客户端拿到 JSON 之后调**同一个** {@link MachineSchema#read} 重建定义，于是两边的定义逐字段相同，
+     * 连所有校验规则、报错文案、以及「某字段省略时的默认值」都必然一致。
+     *
+     * <p>另一条路是给 {@code MachineDefinition} 的十五个字段各写一套线上格式。那条路要额外处理
+     * {@code BlockMatcher}（它持有**活的 {@code Block} 引用**）、{@code MachineModifier}、
+     * {@code SmartInterfaceType}、{@code CoreThreadSpec} 和 {@code DynamicPattern}——**五套新格式**，
+     * 而每一套都是一份迟早会与解析器分叉的副本。分叉的表现是「单机能跑、联机不行」，
+     * 那正是本项目最怕的一类问题。所以这里留的是**输入**，不是**输出的复制品**。
+     *
+     * <p>空 map 是合法状态（例如客户端断线后），不是错误。
+     */
+    private static volatile Map<ResourceLocation, com.google.gson.JsonElement> sources = Map.of();
+
     private MachineRegistry() {
     }
 
     /** Replaces the registry contents; called by {@link MachineLoader} on every resource reload. */
     public static void replace(Map<ResourceLocation, MachineDefinition> loaded) {
+        replace(loaded, Map.of());
+    }
+
+    /**
+     * {@link #replace(Map)} plus the source JSON each definition was parsed from.
+     *
+     * <p>两个参数的版本保留下来，是因为**客户端**重建定义时手上没有源 JSON：它已经把 JSON 解析成
+     * {@code MachineDefinition} 了，再往注册表里放一遍那份 JSON 没有意义（客户端不往外发同步）。
+     * 服务端则总是走两参数的那个。
+     */
+    public static void replace(Map<ResourceLocation, MachineDefinition> loaded,
+                               Map<ResourceLocation, com.google.gson.JsonElement> loadedSources) {
         // Insertion order is preserved so that, when two definitions could match the same structure, the
         // outcome does not depend on hash iteration order. Map.copyOf would not guarantee that.
         Map<ResourceLocation, MachineDefinition> copy = Collections.unmodifiableMap(new LinkedHashMap<>(loaded));
@@ -49,6 +78,26 @@ public final class MachineRegistry {
         }
         rotations = Collections.unmodifiableMap(rotated);
         machines = copy;
+        // 只保留仍然存在的定义的源 JSON：一次 reload 可能删掉了某些机器，而留着它们的 JSON
+        // 会让下一次同步把已经删掉的机器又发给客户端。
+        Map<ResourceLocation, com.google.gson.JsonElement> kept = new LinkedHashMap<>();
+        for (ResourceLocation id : copy.keySet()) {
+            com.google.gson.JsonElement source = loadedSources.get(id);
+            if (source != null) {
+                kept.put(id, source);
+            }
+        }
+        sources = Collections.unmodifiableMap(kept);
+    }
+
+    /**
+     * 每个定义解析用的源 JSON，按定义 id；只有服务端有内容（客户端重建之后它是空的）。
+     *
+     * <p>同步用的就是这个方法，而不是再去遍历文件——{@code reload} 之后注册表里就是**权威**的一份，
+     * 而文件系统可能已经变了。
+     */
+    public static Map<ResourceLocation, com.google.gson.JsonElement> sources() {
+        return sources;
     }
 
     public static Collection<MachineDefinition> all() {

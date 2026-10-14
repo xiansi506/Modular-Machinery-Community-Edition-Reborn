@@ -64,6 +64,15 @@ public final class MachineDefinitions {
     private static volatile Map<ResourceLocation, MachineDefinition> staged = Map.of();
 
     /**
+     * 波 4：脚本层每个定义**解析用的那份 JSON**，按定义 id。
+     *
+     * <p>{@code MachineBuilderJS} 本来就是「往一个 {@code JsonObject} 里追加字段、再交给
+     * {@link MachineSchema#read}」，所以这份 JSON 是现成的，不需要在解析之后反向生成一份
+     * （那是第二份真相，而它与解析器分叉的方式无法察觉）。客户端靠它重建同一批定义。
+     */
+    private static volatile Map<ResourceLocation, com.google.gson.JsonObject> stagedSources = Map.of();
+
+    /**
      * Whether {@link #beginCycle()} has run at least once. Used only by the startup path: a data-pack reload
      * without KubeJS still calls {@link #applyScriptLayer}, and the answer is an empty layer either way.
      */
@@ -78,9 +87,31 @@ public final class MachineDefinitions {
      * visible even if the caller somehow runs outside a reload.
      */
     public static void stage(MachineDefinition definition) {
+        stage(definition, null);
+    }
+
+    /**
+     * {@link #stage(MachineDefinition)} plus the JSON it was parsed from — 波 4 的同步要靠它。
+     *
+     * <p>两个参数的版本保留，因为**不是所有调用者都有 JSON**：离线复现器与某些内嵌用法直接构造
+     * {@code MachineDefinition}。那种情况下定义本身照旧可用，只是它**无法被同步到客户端**——
+     * 而这个事实必须是明确的，不能靠「反向生成一份 JSON」来掩盖：反向生成的东西一旦与
+     * {@code MachineSchema} 的规则不一致，客户端拿到的就是一份与服务器不同的定义。
+     */
+    public static void stage(MachineDefinition definition, @javax.annotation.Nullable com.google.gson.JsonObject source) {
         Map<ResourceLocation, MachineDefinition> next = new LinkedHashMap<>(staged);
         next.put(definition.id(), definition);
         staged = Collections.unmodifiableMap(next);
+        if (source != null) {
+            Map<ResourceLocation, com.google.gson.JsonObject> sources = new LinkedHashMap<>(stagedSources);
+            sources.put(definition.id(), source);
+            stagedSources = Collections.unmodifiableMap(sources);
+        }
+    }
+
+    /** 脚本层每个定义解析用的 JSON；没有的那几个（直接构造的定义）不在里面。 */
+    public static Map<ResourceLocation, com.google.gson.JsonObject> stagedSources() {
+        return stagedSources;
     }
 
     /**
@@ -94,6 +125,7 @@ public final class MachineDefinitions {
     public static void beginCycle() {
         cycleStarted = true;
         staged = Map.of();
+        stagedSources = Map.of();
     }
 
     /** The definitions staged by the current cycle, in staging order. */

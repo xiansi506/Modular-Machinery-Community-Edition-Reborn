@@ -102,6 +102,9 @@ public final class MachineLoader extends SimpleJsonResourceReloadListener {
         }
 
         Map<ResourceLocation, MachineDefinition> loaded = new LinkedHashMap<>();
+        // 波 4：把**解析用的那份 JSON** 一并留下。客户端要重建同一批定义，而重跑同一个
+        // `MachineSchema.read` 是唯一能保证两边逐字段相同的办法——见 MachineRegistry#replace 的说明。
+        Map<ResourceLocation, JsonElement> sources = new LinkedHashMap<>();
         List<String> failures = new ArrayList<>();
         for (Map.Entry<ResourceLocation, JsonElement> entry : all.entrySet()) {
             if (isVariableFile(entry.getKey())) {
@@ -110,6 +113,7 @@ public final class MachineLoader extends SimpleJsonResourceReloadListener {
             try {
                 MachineDefinition definition = readMachine(entry.getKey(), entry.getValue(), variables);
                 loaded.put(definition.id(), definition);
+                sources.put(definition.id(), entry.getValue());
             } catch (Exception exception) {
                 failures.add(entry.getKey().toString());
                 LOGGER.error("[{}] Failed to load machine definition {}", ModularMachineryReborn.MOD_ID,
@@ -121,8 +125,11 @@ public final class MachineLoader extends SimpleJsonResourceReloadListener {
         // surviving one really survives the reload. Applied here rather than pushed into the registry from
         // KubeJS, because this listener runs after the scripts and would otherwise overwrite them.
         MachineDefinitions.applyScriptLayer(loaded);
+        // 脚本层也留下源 JSON：`MachineBuilderJS` 本来就是「构建一个 JsonObject 再交给 read」，
+        // 所以它的 JSON 是现成的，从 stage 那边取回来即可（不在解析之后再反向生成一份——那是第二份真相）。
+        sources.putAll(MachineDefinitions.stagedSources());
 
-        MachineRegistry.replace(loaded);
+        MachineRegistry.replace(loaded, sources);
         LOGGER.info("[{}] Loaded {} machine definition(s) from {} variable set(s){}",
                 ModularMachineryReborn.MOD_ID, loaded.size(), variables.size(),
                 failures.isEmpty() ? "" : ", " + failures.size() + " failed: " + failures);

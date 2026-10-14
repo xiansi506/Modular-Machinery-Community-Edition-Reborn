@@ -1735,6 +1735,58 @@ public final class ParallelCraftCheck {
         check("...第二条仍是接口数值不等", com.reborn.modularmachinery.machine.SmartInterfaceType
                         .DEFAULT_NOT_EQUAL_KEY,
                 com.reborn.modularmachinery.block.MachineControllerBlockEntity.START_FAILURE_KEYS.get(1));
+
+        // ---- (7) 波 4：源 JSON 往返之后重建出的定义必须与原定义相符 ------------------------------
+        //
+        // 这是「机器定义同步到客户端」那条路的核心性质：同步传的是**定义解析用的那份 JSON**，
+        // 客户端拿它重跑同一个 MachineSchema.read。所以「往返之后还是同一台机器」必须被断言——
+        // 否则客户端会拿到一份**看起来能用、但某些字段不同**的定义，而那类分歧表现为
+        // 「单机正常、联机行为诡异」，是最难查的一种。
+        //
+        // 这里用的是一个**功能齐全**的定义（并行度、工厂线程、智能接口、修改器、动态结构都写了），
+        // 因为只测一个最小定义的话，漏掉的恰好会是那些字段。
+        String wireJson = "{\"registryname\":\"mmverify_wire\",\"localizedname\":\"Wire Test\","
+                + "\"max-parallelism\":32,\"internal-parallelism\":2,\"parallelizable\":true,"
+                + "\"failure-action\":\"decrease\",\"requires-blueprint\":false,"
+                + "\"max-threads\":7,\"has-factory\":true,\"factory-only\":false,"
+                + "\"core-threads\":[{\"name\":\"smelter\",\"recipes\":[]}],"
+                + "\"smart-interfaces\":[{\"type\":\"mode\",\"default\":1,\"priority\":100}],"
+                + "\"modifiers\":[{\"elements\":\"minecraft:stone\",\"x\":0,\"y\":2,\"z\":0,"
+                + "\"modifier\":{\"target\":\"item\",\"io\":\"output\",\"operation\":1,\"multiplier\":2.0}}],"
+                + "\"parts\":[{\"x\":0,\"y\":0,\"z\":-1,\"elements\":\"minecraft:stone\"},"
+                + "{\"x\":-1,\"y\":0,\"z\":0,\"selector-tag\":\"input\",\"elements\":\"minecraft:chest\"},"
+                + "{\"x\":1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                + "\"dynamic-patterns\":[{\"name\":\"line\",\"faces\":[\"north\"],\"minSize\":1,\"maxSize\":4,"
+                + "\"parts\":[{\"x\":0,\"y\":0,\"z\":0,\"selector-tag\":\"seg\","
+                + "\"elements\":[\"minecraft:stone\",\"minecraft:chest\"]}],"
+                + "\"structure-size-offset-start\":{\"x\":0,\"y\":0,\"z\":1},"
+                + "\"structure-size-offset\":{\"x\":0,\"y\":0,\"z\":1}}]}";
+        com.google.gson.JsonElement sourceJson = com.google.gson.JsonParser.parseString(wireJson);
+        MachineDefinition original = com.reborn.modularmachinery.machine.MachineSchema.read(
+                sourceJson, "wire-round-trip", java.util.Map.of());
+        com.reborn.modularmachinery.machine.MachineRegistry.replace(
+                java.util.Map.of(original.id(), original),
+                java.util.Map.of(original.id(), sourceJson));
+        report("注册表留下了源 JSON", com.reborn.modularmachinery.machine.MachineRegistry
+                .sources().containsKey(original.id()));
+        com.google.gson.JsonElement roundTripped = com.reborn.modularmachinery.machine.MachineRegistry
+                .sources().get(original.id());
+        report("...而且就是同一份 JSON", sourceJson.equals(roundTripped));
+        MachineDefinition rebuilt = com.reborn.modularmachinery.machine.MachineSchema.read(
+                roundTripped, "wire-round-trip", java.util.Map.of());
+        // `MachineDefinition` 有 toString()（逐字段拼的），所以这一条是**整台机器**的比较，
+        // 而不是我挑几个字段来比——挑字段的写法会漏掉我没想到的那个。
+        check("往返之后整台机器逐字段相同", original.toString(), rebuilt.toString());
+        report("...结构里的标签也相同（selector-tag 随 JSON 一起过去）",
+                original.pattern().tags().equals(rebuilt.pattern().tags()));
+        report("...而且这份定义确实覆盖了那些容易漏的字段（不是最小定义）",
+                original.hasFactory() && original.maxThreads() == 7
+                        && original.smartInterfaces().size() == 1 && original.modifiers().size() == 1
+                        && original.hasDynamicPatterns() && original.pattern().hasTags());
+        // 一次 replace 只保留仍然存在的定义的源 JSON：否则下一次同步会把已经删掉的机器又发给客户端。
+        com.reborn.modularmachinery.machine.MachineRegistry.replace(java.util.Map.of());
+        report("注册表清空时源 JSON 也清空（删掉的机器不会被重新同步出去）",
+                com.reborn.modularmachinery.machine.MachineRegistry.sources().isEmpty());
     }
 
     /**

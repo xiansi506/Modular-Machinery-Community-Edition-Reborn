@@ -478,7 +478,9 @@ public final class MachineBuilderJS extends EventJS {
      */
     public MachineDefinition register() {
         MachineDefinition definition = MachineSchema.read(this.json, this.where, Map.of(), true);
-        MachineDefinitions.stage(definition);
+        // 波 4：把**这份 JSON 本身**一起 stage。客户端就是靠它重建同一批定义的，
+        // 而这里传的是「刚刚被 read 的那一个对象」——不是解析之后反向生成的一份。
+        MachineDefinitions.stage(definition, this.json);
         this.owner.countRegistered(definition);
         return definition;
     }
