@@ -1834,6 +1834,31 @@ public final class ParallelCraftCheck {
             check("坏定义被跳过，好的那台仍然收下", 1,
                     com.reborn.modularmachinery.machine.MachineRegistry.size());
             check("...并且被计数", 1, com.reborn.modularmachinery.client.ClientMachines.lastRejected());
+
+            // **客户端重建必须与服务端加载一样宽容。**
+            //
+            // 这一条抓的是一个真实隐患，而我第一版就写错了：我当时给客户端用了 strict=true，
+            // 理由是"客户端应该严格一点"。但 strict 只控制一件事——是否拒绝**未知根字段**——
+            // 而 MachineLoader.readMachine 走的是三参数的 read，即 strict=false。
+            // 于是含未知字段的定义在服务端加载成功、到客户端被拒，客户端静默少一台机器。
+            //
+            // 所以这里把两端**实际上用的那个模式**断言成同一个值，而不只是断言"客户端能解析"：
+            // 后者在两边都宽容时也会通过，而前者才是"忠实重建"这件事本身。
+            com.reborn.modularmachinery.machine.MachineRegistry.replace(java.util.Map.of());
+            String withUnknownField = "{\"registryname\":\"mmverify_unknown\","
+                    + "\"a-field-from-a-newer-version\":123,"
+                    + "\"parts\":[{\"x\":0,\"y\":0,\"z\":-1,\"elements\":\"minecraft:stone\"}]}";
+            report("客户端用的解析模式与服务端加载时相同（都是宽容）",
+                    !com.reborn.modularmachinery.network.MachineDefinitionSyncPacket.CLIENT_PARSE_STRICT);
+            com.reborn.modularmachinery.client.ClientMachines.accept(java.util.Map.of(
+                    new ResourceLocation("mmverify", "unknown_field"), withUnknownField));
+            check("含未知根字段的定义在客户端也被收下（服务端就是这么接受它的）", 1,
+                    com.reborn.modularmachinery.machine.MachineRegistry.size());
+            check("...没有被拒", 0, com.reborn.modularmachinery.client.ClientMachines.lastRejected());
+            // 对照：严格模式确实会拒绝它——证明上面那条不是因为「未知字段其实没人检查」而通过的。
+            report("对照：严格模式确实拒绝同一个定义（所以宽容不是空断言）",
+                    com.reborn.modularmachinery.network.MachineDefinitionSyncPacket.parse(
+                            new ResourceLocation("mmverify", "unknown_field"), withUnknownField, true) == null);
             com.reborn.modularmachinery.client.ClientMachines.clear();
         } catch (Throwable throwable) {
             // 这一段的失败要说清楚它测的是什么——它是这个特性的终点，不是细节。

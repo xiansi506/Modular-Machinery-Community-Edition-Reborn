@@ -45,8 +45,8 @@ public final class ClientMachines {
         Map<ResourceLocation, MachineDefinition> parsed = new LinkedHashMap<>();
         int rejected = 0;
         for (Map.Entry<ResourceLocation, String> entry : definitions.entrySet()) {
-            MachineDefinition definition = MachineDefinitionSyncPacket.parse(
-                    entry.getKey(), entry.getValue(), true);
+            MachineDefinition definition = MachineDefinitionSyncPacket.parseForClient(
+                    entry.getKey(), entry.getValue());
             if (definition == null) {
                 rejected++;
                 continue;

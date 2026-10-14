@@ -130,13 +130,35 @@ public final class MachineDefinitionSyncPacket {
     public static MachineDefinition parse(ResourceLocation id, String json, boolean strict) {
         try {
             JsonElement element = JsonParser.parseString(json);
-            // 严格模式：同步过来的定义是**这台服务器自己的**，而服务端已经用它的规则读过一次；
-            // 客户端用同一套规则再读一遍，是为了让"省略字段的默认值"这类判断两边一致。
             return MachineSchema.read(element, "synced '" + id + "'", Map.of(), strict);
         } catch (Exception exception) {
             ModularMachineryReborn.LOGGER.error("[{}] Failed to read the synced machine definition {}",
                     ModularMachineryReborn.MOD_ID, id, exception);
             return null;
         }
+    }
+
+    /**
+     * 客户端重建时该用的解析模式——<strong>与服务端加载时完全相同</strong>，也就是宽容模式。
+     *
+     * <p>这个常量的存在是因为我第一版在这里写错了，而写错的方式值得记下来：
+     * 我当时用了 {@code strict = true}，理由是「客户端应该严格一点」。但 {@code strict} 在这套
+     * schema 里只控制<strong>一件事</strong>——是否拒绝<strong>未知根字段</strong>——而
+     * {@code MachineLoader.readMachine} 走的是三参数的 {@code read}，也就是
+     * {@code strict = false}（宽容）。
+     *
+     * <p>于是：一份含未知根字段的定义（例如作者按更新的格式写的、或只是打错了一个字段名）
+     * 在服务端<strong>加载成功</strong>，到了客户端<strong>被拒</strong>——客户端静默少一台机器。
+     * 那正是本项目最怕的一类缺陷：没有报错、两边不一致、而症状看起来像「这台机器在联机时不工作」。
+     *
+     * <p>正确的做法是<strong>忠实重建服务端的那一份</strong>，而不是拿更严的规则重新审一遍：
+     * 服务端已经用它的规则接受过这份定义了。客户端的职责是复现，不是二次把关。
+     */
+    public static final boolean CLIENT_PARSE_STRICT = false;
+
+    /** 客户端重建一份同步来的定义。 */
+    @javax.annotation.Nullable
+    public static MachineDefinition parseForClient(ResourceLocation id, String json) {
+        return parse(id, json, CLIENT_PARSE_STRICT);
     }
 }
