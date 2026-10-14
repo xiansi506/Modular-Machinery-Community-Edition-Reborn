@@ -2067,6 +2067,14 @@ public final class ParallelCraftCheck {
         report("...而且两边的动态结构行都在",
                 rowsAt1.stream().anyMatch(row -> row.contains("machine_info.dynamic_pattern"))
                         && rowsAt5.stream().anyMatch(row -> row.contains("machine_info.dynamic_pattern")));
+
+        // 注：`docs/实机验收步骤-0.32.0.md` 里那份给玩家照抄的定义**不在这里断言**。
+        // 它用的是真实方块 id（`modular_machinery_reborn:blockcasing[casing=plain]` 这种），
+        // 而离线复现器解析不了方块 id（Forge 注册表为空，`BlockMatcher.parse` 会抛
+        // "has no block"），复现器里所有既有断言也都只用 `minecraft:stone` 这类原版方块。
+        // 那份定义的 id 正确性由另一条可离线检查的事实保证：**它们与已实机验证过的
+        // `example-datapack/data/modular_machinery_reborn/machinery/alloy_furnace.json` 逐字相同**。
+        // 它的结构合法性（字段名、faces、minSize/maxSize）由上面 L3 段的同一套解析覆盖。
     }
 
 
