@@ -441,8 +441,22 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
         MachineRecipe recipe = be.resolveRecipe(level);
         if (recipe == null) {
-            be.status = ControllerStatus.NO_RECIPE;
-            be.clearStartFailure();
+            // 「没有配方」与「有配方但付不起」是**两件完全不同的事**，而这个分支曾经把后者也吞成前者：
+            // `findRecipe` 只返回能开工的配方，于是「配方在、只是料不够或料放错了段」也会走到这里，
+            // 状态显示 NO_RECIPE 并把失败文案**清掉**——玩家看到的是「没有相匹配的配方」，
+            // 而真正的原因（缺少物品输入 / 料不在配方要的那个部件上）被丢掉了。
+            //
+            // 实机验证时正是如此：配方绑着 `input_line_1`，料只放在 `input_line_0`，
+            // 于是玩家的第一反应是「机器没成型」或「配方没加载」，而不是「料放错了段」。
+            //
+            // 现在：如果这台机器**确实**有配方、只是此刻付不起，就把那条配方给出的原因显示出来。
+            String blockedReason = be.unaffordableStartFailure(level);
+            be.status = blockedReason == null ? ControllerStatus.NO_RECIPE : ControllerStatus.IDLE;
+            if (blockedReason == null) {
+                be.clearStartFailure();
+            } else {
+                be.startFailureKey = blockedReason;
+            }
             be.abortCraft();
             be.maxProgress = 1;
             be.parallelCeiling = be.machineCeiling();
@@ -907,6 +921,44 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                     .orElse(null);
         }
         return this.findRecipe(level);
+    }
+
+    /**
+     * 这台机器**有**配方、但此刻一条都开工不了时，第一条给出的失败原因；真的没有配方时返回 {@code null}。
+     *
+     * <p>它补上了 {@link #findRecipe} 丢掉的那一半信息：那个方法只返回<strong>能开工</strong>的配方，
+     * 于是「配方在、只是料不够」与「一条配方都没有」都变成 {@code null}，控制器无法区分，
+     * 只能显示「没有相匹配的配方」并把失败文案清掉。
+     *
+     * <p>只在「一条都开不了」的那一 tick 才走这条路（{@code findRecipe} 找不到时），所以它不进入
+     * 正常合成的路径。代价是那一个 tick 多遍历一次配方表，换的是玩家能看到<strong>真正的原因</strong>。
+     *
+     * <p><b>没有原因时不编一个。</b>这里只返回需求自己给出的 {@code startFailure}；它答 {@code null} 时
+     * 调用者把状态置为 {@code IDLE}（「有配方、在等条件」）而不写任何失败文案。
+     * 早先的草稿在这里回退成「缺少物品输入」，那是<strong>撒谎</strong>——原因也可能是输出仓没有空间，
+     * 而一句错的失败文案比没有文案更糟：它会把人的注意力引到一个不缺的东西上。
+     */
+    @Nullable
+    private String unaffordableStartFailure(Level level) {
+        if (this.machineId == null) {
+            return null;
+        }
+        for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
+            if (!this.machineId.equals(recipe.machineId())) {
+                continue;
+            }
+            // **必须先自己确认它真的开工不了，再去问原因。** `startFailure` 的契约是「只在
+            // `canSatisfy` 已经答 false 之后才被问」（见 MachineRequirement 的说明），
+            // 而这条配方不一定是被 `findRecipe` 刷掉的那一条（可能是另一条能开工、只是选择顺序在前）。
+            // 无条件地问它会让一条**本来能开工**的配方也给出失败文案——一句与事实相反的提示。
+            if (recipe.canStart(this.hatches, this.modifiers)
+                    && recipe.canTick(this.hatches, this.modifiers)) {
+                return null;
+            }
+            // 这条配方认这台机器、而且此刻确实开工不了。它的原因就是答案。
+            return recipe.startFailure(this.hatches, this.modifiers);
+        }
+        return null;
     }
 
     /**

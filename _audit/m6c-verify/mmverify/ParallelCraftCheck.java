@@ -1662,6 +1662,39 @@ public final class ParallelCraftCheck {
         requirement.setSelectorTag(null);
         report("同一个配方去掉标签后，无标签的仓又能被看到（对照，证明上一条的失败确实来自筛选）",
                 requirement.canSatisfy(requirement.visiblePorts(twoInputs)));
+
+        // ---- (5) 料放错段时，必须报告原因，而不是「没有配方」------------------------------------
+        //
+        // 实机发现的第二个缺陷：`findRecipe` 只返回**能开工**的配方，于是「配方在、只是料放错了段」
+        // 也走「没有配方」那条路，控制器显示 NO_RECIPE 并把失败文案**清掉**。
+        // 玩家看到「没有相匹配的配方」，而真正的原因（缺少物品输入）被丢了——实机时正卡在这里。
+        //
+        // 现在控制器在那种情况下保留 `startFailure` 给出的原因。这里断言的是那条链路里**配方一侧**的
+        // 那一半：一条绑着 `input_line_0` 的配方，在料放在别的段上时必须答出「缺少物品输入」。
+        net.minecraftforge.items.ItemStackHandler wrongSegment =
+                new net.minecraftforge.items.ItemStackHandler(1);
+        net.minecraftforge.items.ItemStackHandler rightSegment =
+                new net.minecraftforge.items.ItemStackHandler(1);
+        HatchCollection segments = HatchCollection.builder()
+                .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, rightSegment, null, null,
+                        "input_line_0")
+                .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, wrongSegment, null, null,
+                        "input_line_1")
+                .build();
+        MachineRequirement bound = ItemRequirement.input(Ingredient.of(Items.COBBLESTONE), 1);
+        bound.setSelectorTag("input_line_0");
+        wrongSegment.setStackInSlot(0, new ItemStack(Items.COBBLESTONE, 8));
+        report("料只放在别的段上时，绑定的需求不满足",
+                !bound.canSatisfy(bound.visiblePorts(segments)));
+        check("...而且它给出的原因是「缺少物品输入」，不是空",
+                ItemRequirement.FAILURE_ITEM_INPUT,
+                String.valueOf(bound.startFailure(bound.visiblePorts(segments))));
+        rightSegment.setStackInSlot(0, new ItemStack(Items.COBBLESTONE, 8));
+        report("料放进它自己那一段之后满足了", bound.canSatisfy(bound.visiblePorts(segments)));
+        // 注意这里**不**断言 `startFailure()` 在满足时返回 null：按契约它只在 canSatisfy 已经答 false
+        // 之后才被问（见 MachineRequirement 的说明），而 ItemRequirement 的实现是「按方向给出那条消息」。
+        // 生产代码里对应的纪律是 `unaffordableStartFailure` 先自己确认 canStart/canTick 都过不了再问它——
+        // 上面那条断言失败过一次，正是因为当时的生产代码没做这个前置检查。
     }
 
     /**
