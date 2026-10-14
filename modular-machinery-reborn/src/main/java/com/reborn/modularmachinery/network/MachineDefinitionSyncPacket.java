@@ -1,0 +1,142 @@
+package com.reborn.modularmachinery.network;
+
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+import com.reborn.modularmachinery.ModularMachineryReborn;
+import com.reborn.modularmachinery.machine.MachineDefinition;
+import com.reborn.modularmachinery.machine.MachineRegistry;
+import com.reborn.modularmachinery.machine.MachineSchema;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.function.Supplier;
+
+/**
+ * 波 4：把服务端那一批机器定义送到客户端。
+ *
+ * <h2>为什么必须先有这个包</h2>
+ *
+ * <p>{@link MachineRegistry} 只在服务端被填充（{@code MachineLoader.apply} → {@code replace}，
+ * 那是服务端的数据包加载），而客户端侧有四处在读它：JEI 的结构预览分类、JEI 的每台机器分类、
+ * 升级总线界面的机器名、以及建造预览。单人游戏里这些"看起来正常"只是因为进程同时是服务端；
+ * 连到专用服务器时注册表是空的，那些界面就没有内容。代码里原本也自认了这一点——
+ * 「on a dedicated-server client it is empty and this category simply has nothing to show」。
+ *
+ * <h2>为什么传的是「定义解析用的那份 JSON」</h2>
+ *
+ * <p>客户端收到之后跑<strong>同一个</strong> {@link MachineSchema#read}（严格模式开，
+ * 与脚本路径一致）。这样两边逐字段相同，连「某字段省略时的默认值」都必然一致，而这个项目里
+ * 已经有过一次教训：同一个 schema 有两个各自演进的入口，就会给出两份不同的定义。
+ *
+ * <p>另一条路是给 {@code MachineDefinition} 的十五个字段各写一套线上格式。那条路要额外处理
+ * {@code BlockMatcher}（它持有<strong>活的 {@code Block} 引用</strong>）、{@code MachineModifier}、
+ * {@code SmartInterfaceType}、{@code CoreThreadSpec} 与 {@code DynamicPattern}——五套新格式，
+ * 每一套都是一份迟早会与解析器分叉的副本。
+ *
+ * <h2>线上格式</h2>
+ *
+ * <pre>
+ *   int    count
+ *   count × { utf id, utf json }
+ * </pre>
+ *
+ * <p>与 {@code SelectionSyncPacket} 同一条纪律：<strong>计数是外部数据，先夹住再拿去预分配</strong>，
+ * 否则一个伪造的计数就能让客户端按它的大小申请内存。
+ */
+public final class MachineDefinitionSyncPacket {
+
+    /** 一次消息最多宣布多少台机器，仅用于预分配——真实的包不会接近这个数。 */
+    private static final int INITIAL_CAPACITY_CAP = 1024;
+
+    /** 单份定义的 JSON 长度上限。超长的定义是损坏或恶意的，宁可整包拒绝也不要吃掉内存。 */
+    private static final int MAX_JSON_LENGTH = 1 << 20;
+
+    private final Map<ResourceLocation, String> definitions;
+
+    public MachineDefinitionSyncPacket(Map<ResourceLocation, String> definitions) {
+        this.definitions = Map.copyOf(definitions);
+    }
+
+    public MachineDefinitionSyncPacket(FriendlyByteBuf buf) {
+        int count = buf.readInt();
+        Map<ResourceLocation, String> read = new LinkedHashMap<>(
+                Math.max(0, Math.min(count, INITIAL_CAPACITY_CAP)));
+        for (int i = 0; i < count; i++) {
+            ResourceLocation id = ResourceLocation.tryParse(buf.readUtf());
+            String json = buf.readUtf(MAX_JSON_LENGTH);
+            if (id == null) {
+                // 一个读不出来的 id 意味着这一项的其余内容丢失了，剩下的字节无法再解释——
+                // 所以整包放弃，而不是猜着继续读。
+                throw new io.netty.handler.codec.DecoderException(
+                        "Machine definition sync carried an unreadable id at entry " + i);
+            }
+            read.put(id, json);
+        }
+        this.definitions = Map.copyOf(read);
+    }
+
+    public Map<ResourceLocation, String> definitions() {
+        return this.definitions;
+    }
+
+    public void encode(FriendlyByteBuf buf) {
+        buf.writeInt(this.definitions.size());
+        for (Map.Entry<ResourceLocation, String> entry : this.definitions.entrySet()) {
+            buf.writeUtf(entry.getKey().toString());
+            buf.writeUtf(entry.getValue(), MAX_JSON_LENGTH);
+        }
+    }
+
+    public static void handle(MachineDefinitionSyncPacket message, Supplier<NetworkEvent.Context> contextSupplier) {
+        NetworkEvent.Context context = contextSupplier.get();
+        // 客户端专用，走 DistExecutor，这样任何 common 类都不会直接提到客户端状态。
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> com.reborn.modularmachinery.client.ClientMachines.accept(message.definitions())));
+        context.setPacketHandled(true);
+    }
+
+    /**
+     * 把当前注册表里的定义与它们的源 JSON 打成一个包发出去。
+     *
+     * <p>直接读 {@link MachineRegistry#sources()}，而不是再去遍历文件：{@code reload} 之后注册表里
+     * 就是**权威**的一份，而文件系统可能已经变了。
+     *
+     * <p>没有源 JSON 的定义（直接构造的那种，例如离线复现器造的）会被<strong>跳过并计数</strong>，
+     * 然后记一条日志。它不能假装成功：客户端少一台机器与客户端有一台错误的机器是两回事，
+     * 而后者才是真正难查的。
+     */
+    public static Map<ResourceLocation, String> snapshot() {
+        Map<ResourceLocation, String> out = new LinkedHashMap<>();
+        for (Map.Entry<ResourceLocation, JsonElement> entry : MachineRegistry.sources().entrySet()) {
+            out.put(entry.getKey(), entry.getValue().toString());
+        }
+        int missing = MachineRegistry.size() - out.size();
+        if (missing > 0) {
+            ModularMachineryReborn.LOGGER.warn("[{}] {} machine definition(s) have no source JSON and cannot be "
+                            + "sent to clients; they will be missing there. Definitions constructed directly "
+                            + "(rather than parsed from JSON) cannot be synchronised.",
+                    ModularMachineryReborn.MOD_ID, missing);
+        }
+        return out;
+    }
+
+    /** 解析一份定义 JSON；解析失败时返回 {@code null} 并把原因记下来（一份坏定义不该让整次同步失败）。 */
+    @javax.annotation.Nullable
+    public static MachineDefinition parse(ResourceLocation id, String json, boolean strict) {
+        try {
+            JsonElement element = JsonParser.parseString(json);
+            // 严格模式：同步过来的定义是**这台服务器自己的**，而服务端已经用它的规则读过一次；
+            // 客户端用同一套规则再读一遍，是为了让"省略字段的默认值"这类判断两边一致。
+            return MachineSchema.read(element, "synced '" + id + "'", Map.of(), strict);
+        } catch (Exception exception) {
+            ModularMachineryReborn.LOGGER.error("[{}] Failed to read the synced machine definition {}",
+                    ModularMachineryReborn.MOD_ID, id, exception);
+            return null;
+        }
+    }
+}

@@ -1787,6 +1787,58 @@ public final class ParallelCraftCheck {
         com.reborn.modularmachinery.machine.MachineRegistry.replace(java.util.Map.of());
         report("注册表清空时源 JSON 也清空（删掉的机器不会被重新同步出去）",
                 com.reborn.modularmachinery.machine.MachineRegistry.sources().isEmpty());
+
+        // ---- (8) 客户端收到包之后，界面读的那个注册表必须真的被填上 ------------------------------
+        //
+        // 上面 (7) 验的是「JSON 往返之后定义不变」；这一段验的是**终点**：客户端的那些读点
+        // （`MachineRegistry.all()` / `byId()`）在收到同步之后能不能拿到机器。
+        //
+        // 为什么非要单独立一条：这个特性的全部意义就是「客户端也能看到机器定义」，
+        // 而「包发出去了」和「客户端界面上有内容」之间还隔着一步——把解析结果写进注册表。
+        // 这一步错了的话，包、注册表、往返断言**全都是绿的**，而 JEI 分类依然是空的。
+        try {
+            com.google.gson.JsonElement clientSource = com.google.gson.JsonParser.parseString(wireJson);
+            MachineDefinition sentDefinition = com.reborn.modularmachinery.machine.MachineSchema.read(
+                    clientSource, "client-side", java.util.Map.of());
+            // 服务端那一步：注册表里有什么，就同步什么。
+            com.reborn.modularmachinery.machine.MachineRegistry.replace(
+                    java.util.Map.of(sentDefinition.id(), sentDefinition),
+                    java.util.Map.of(sentDefinition.id(), clientSource));
+            java.util.Map<ResourceLocation, String> snapshot =
+                    com.reborn.modularmachinery.network.MachineDefinitionSyncPacket.snapshot();
+            check("服务端快照里有这台机器", 1, snapshot.size());
+            check("...键是定义自己的 id", sentDefinition.id().toString(),
+                    String.valueOf(snapshot.keySet().iterator().next()));
+
+            // 客户端那一步：清空注册表，装作刚连上来的客户端，再接收同步。
+            com.reborn.modularmachinery.machine.MachineRegistry.replace(java.util.Map.of());
+            report("客户端接收之前注册表是空的（这就是专用服务器客户端的现状）",
+                    com.reborn.modularmachinery.machine.MachineRegistry.all().isEmpty());
+            com.reborn.modularmachinery.client.ClientMachines.accept(snapshot);
+            check("接收之后注册表里有 1 台机器", 1,
+                    com.reborn.modularmachinery.machine.MachineRegistry.size());
+            report("...而且就是那台机器（界面用 byId 查得到）",
+                    com.reborn.modularmachinery.machine.MachineRegistry.byId(sentDefinition.id())
+                            .map(found -> found.toString().equals(sentDefinition.toString()))
+                            .orElse(false));
+            check("...没有条目被拒", 0, com.reborn.modularmachinery.client.ClientMachines.lastRejected());
+            // 断线清空：否则换一个服务器之后，上一个服务器的机器还留在界面里。
+            com.reborn.modularmachinery.client.ClientMachines.clear();
+            report("断线清空之后注册表又空了",
+                    com.reborn.modularmachinery.machine.MachineRegistry.all().isEmpty());
+
+            // 一份坏定义被跳过并计数，而不是让整次同步失败——少一台机器好过整个界面打不开。
+            com.reborn.modularmachinery.client.ClientMachines.accept(java.util.Map.of(
+                    sentDefinition.id(), wireJson,
+                    new ResourceLocation("mmverify", "broken"), "{\"registryname\":"));
+            check("坏定义被跳过，好的那台仍然收下", 1,
+                    com.reborn.modularmachinery.machine.MachineRegistry.size());
+            check("...并且被计数", 1, com.reborn.modularmachinery.client.ClientMachines.lastRejected());
+            com.reborn.modularmachinery.client.ClientMachines.clear();
+        } catch (Throwable throwable) {
+            // 这一段的失败要说清楚它测的是什么——它是这个特性的终点，不是细节。
+            report("客户端重建这一段无法驱动（这才是波 4 真正要验的东西）: " + throwable, false);
+        }
     }
 
     /**
@@ -2452,6 +2504,43 @@ public final class ParallelCraftCheck {
             } finally {
                 buffer.release();
             }
+        }
+
+        // 波 4：机器定义同步包的往返。断言的是**包这一层**，客户端重建那一层在 L4 段。
+        section("N2. 机器定义同步包");
+        java.util.Map<ResourceLocation, String> sent = new java.util.LinkedHashMap<>();
+        sent.put(new ResourceLocation("mmverify", "one"), "{\"registryname\":\"one\"}");
+        sent.put(new ResourceLocation("mmverify", "two"),
+                "{\"registryname\":\"two\",\"max-parallelism\":7}");
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            new com.reborn.modularmachinery.network.MachineDefinitionSyncPacket(sent).encode(buffer);
+            java.util.Map<ResourceLocation, String> decoded =
+                    new com.reborn.modularmachinery.network.MachineDefinitionSyncPacket(buffer).definitions();
+            check("两台机器都往返回来", 2, decoded.size());
+            check("...第一份的 JSON 逐字相同", sent.get(new ResourceLocation("mmverify", "one")),
+                    decoded.get(new ResourceLocation("mmverify", "one")));
+            check("...第二份也是", sent.get(new ResourceLocation("mmverify", "two")),
+                    decoded.get(new ResourceLocation("mmverify", "two")));
+        } finally {
+            buffer.release();
+        }
+        // 有问题的输入：计数字段是**外部数据**，伪造一个巨大的计数不能让客户端按它预分配内存。
+        // 这里断言的是「读得下去、不抛异常」，而不是「读得快」——真正的防线是那个上限常量。
+        FriendlyByteBuf hostile = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            hostile.writeInt(Integer.MAX_VALUE);
+            // 一项都没有：读取会在第一项就撞到缓冲区末尾并抛 DecoderException，这是**正确**的
+            // （一个说"有 21 亿项"的包本来就该被拒绝），而不是让客户端按那个数字申请内存。
+            boolean threw = false;
+            try {
+                new com.reborn.modularmachinery.network.MachineDefinitionSyncPacket(hostile);
+            } catch (RuntimeException expected) {
+                threw = true;
+            }
+            report("一个声称有 " + Integer.MAX_VALUE + " 项却没有内容的包被拒绝（而不是按它预分配）", threw);
+        } finally {
+            hostile.release();
         }
     }
 
@@ -3844,26 +3933,31 @@ public final class ParallelCraftCheck {
             Path network = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
                     + "modularmachinery/network/ModNetwork.java");
             String source = Files.readString(network);
-            check("the channel id constants are 0, 1 and 2", "true",
+            check("the channel id constants are 0, 1, 2 and 3", "true",
                     String.valueOf(source.contains("ID_PARALLEL_CONTROLLER_UPDATE = 0")
                             && source.contains("ID_SMART_INTERFACE_UPDATE = 1")
-                            && source.contains("ID_SELECTION_SYNC = 2")));
+                            && source.contains("ID_SELECTION_SYNC = 2")
+                            && source.contains("ID_MACHINE_DEFINITION_SYNC = 3")));
             int registrations = 0;
             for (String line : source.split("\n")) {
                 if (line.contains("CHANNEL.registerMessage(")) {
                     registrations++;
                 }
             }
-            // Three from 0.29.0: the construct tool's selection sync joined the two M6d-b messages. The protocol
-            // version deliberately stays "1" (adding an id is the compatible direction).
-            check("the channel registers exactly three messages", 3, registrations);
-            report("all three messages are registered against those constants",
+            // Three from 0.29.0: the construct tool's selection sync joined the two M6d-b messages.
+            // Four from 0.32.0's wave 4: the machine-definition sync. The protocol version deliberately stays
+            // "1" each time — adding an id is the compatible direction, and a mismatched pair of builds is
+            // refused on the version string anyway.
+            check("the channel registers exactly four messages", 4, registrations);
+            report("all four messages are registered against those constants",
                     source.contains("CHANNEL.registerMessage(ID_PARALLEL_CONTROLLER_UPDATE, "
                             + "ParallelControllerUpdatePacket.class")
                             && source.contains("CHANNEL.registerMessage(ID_SMART_INTERFACE_UPDATE, "
                                     + "SmartInterfaceUpdatePacket.class")
                             && source.contains("CHANNEL.registerMessage(ID_SELECTION_SYNC, "
-                                    + "SelectionSyncPacket.class"));
+                                    + "SelectionSyncPacket.class")
+                            && source.contains("CHANNEL.registerMessage(ID_MACHINE_DEFINITION_SYNC, "
+                                    + "MachineDefinitionSyncPacket.class"));
             report("the protocol version is unchanged from 0.20.0's '1'",
                     source.contains("PROTOCOL_VERSION = \"1\""));
         } catch (Exception exception) {

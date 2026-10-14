@@ -71,6 +71,16 @@ public final class ModularMachineryReborn {
         // the connection did (PlayerStructureSelectionHelper:128-134). A new session must not inherit one.
         MinecraftForge.EVENT_BUS.addListener(
                 com.reborn.modularmachinery.selection.ServerSelections::onPlayerLoggedOut);
+        // 波 4：把机器定义送到客户端。`OnDatapackSyncEvent` 是这件事**唯一**正确的时机——
+        // 它在玩家登录时针对该玩家触发、在 `/reload` 之后针对所有人触发一次（`getPlayer()` 为 null）。
+        // 自己监听 `PlayerLoggedInEvent` 会在定义加载之前就发（玩家可能在 reload 中间进服）。
+        MinecraftForge.EVENT_BUS.addListener(
+                com.reborn.modularmachinery.network.MachineDefinitionSync::onDatapackSync);
+        // 断线时清空客户端那一份：否则换一个服务器之后，上一个服务器的机器还留在界面里。
+        // `ClientSelection` 有同样的语义（原版在断线时清掉选区）。
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> MinecraftForge.EVENT_BUS.addListener(
+                        com.reborn.modularmachinery.client.ClientMachines::onLoggingOut));
 
 
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> bus.addListener(com.reborn.modularmachinery.client.ClientSetup::onClientSetup));

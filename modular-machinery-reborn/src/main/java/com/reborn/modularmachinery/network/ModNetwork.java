@@ -49,6 +49,11 @@ public final class ModNetwork {
      * compatible direction, and a mismatched pair of builds is refused on the version string anyway.
      */
     private static final int ID_SELECTION_SYNC = 2;
+    /**
+     * 波 4 的消息：机器定义（服务端 → 客户端）。协议版本仍然保持 {@code "1"}——理由与上面两个 id 相同：
+     * 追加 id 是兼容方向，而一对不匹配的构建本来就会被版本字符串拒掉。
+     */
+    private static final int ID_MACHINE_DEFINITION_SYNC = 3;
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(ModularMachineryReborn.MOD_ID, "main"),
@@ -69,6 +74,10 @@ public final class ModNetwork {
                 SelectionSyncPacket::encode,
                 SelectionSyncPacket::new,
                 SelectionSyncPacket::handle);
+        CHANNEL.registerMessage(ID_MACHINE_DEFINITION_SYNC, MachineDefinitionSyncPacket.class,
+                MachineDefinitionSyncPacket::encode,
+                MachineDefinitionSyncPacket::new,
+                MachineDefinitionSyncPacket::handle);
     }
 
     private ModNetwork() {
