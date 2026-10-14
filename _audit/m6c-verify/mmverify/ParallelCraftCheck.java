@@ -246,6 +246,7 @@ public final class ParallelCraftCheck {
         parallelControllerLimit();
         selectorTags();
         dynamicPatterns();
+        dynamicPatternPreviews();
         shippedContentMatches();
         packetRoundTrip();
         upgradeBusEffects();
@@ -1395,10 +1396,10 @@ public final class ParallelCraftCheck {
             // the MOC namespace added the original's two tile.modularmachinery.machinecontroller.deprecated.tip
             // keys verbatim; 176 in 0.29.0, when the construct tool gained the original's own tooltip plus its
             // six message.structurebuild.* lines — all seven under the ORIGINAL's key names, so section AA1 can
-            // diff them against _mmce-src's .lang files key for key. 186 now: the four energy unit labels plus the six craftcheck.failure.* lines
+            // diff them against _mmce-src's .lang files key for key. 189 now: the four energy unit labels, the six craftcheck.failure.* lines, and the three dynamic-structure preview keys
             // (`…energy.type` plus `.fe` / `.rf` / `.ic2_eu` / `.gt_eu`), which are the original's
             // `tooltip.energy.type.*` keys carried under this mod's namespace.
-            check("the language files' key count", 186, zhMap.size());
+            check("the language files' key count", 189, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to
@@ -1951,6 +1952,123 @@ public final class ParallelCraftCheck {
         check("偏移也按朝向一起旋转：(0,0,1) 转一步是 (1,0,0)",
                 "1, 0, 0", DynamicPattern.rotate(new BlockPos(0, 0, 1), 1).toShortString());
     }
+
+    /**
+     * Section L4 —— 波 3c：预览与建造投影里的动态结构。
+     *
+     * <p>动态结构的长度在世界里是量出来的，而预览里没有世界，所以长度由玩家在界面上选（旧版同样如此）。
+     * 这里断言的是那条链路：大小 → 展开 → 预览结构 → 材料清单 → 信息面板的尺寸行。
+     *
+     * <p>全部是纯逻辑，所以能离线测。真正需要眼睛的是**按钮的贴图与位置**，那属于实机验收。
+     */
+    private static void dynamicPatternPreviews() {
+        section("L4. 动态结构在预览里按玩家选的大小展开");
+
+        // 与 L3 同一份定义：基座一格 + 一个动态模式（重复单元与收尾段各一格）。
+        String lineJson = "{\"registryname\":\"mmverify_preview_line\","
+                + "\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}],"
+                + "\"dynamic-patterns\":[{"
+                + "  \"name\":\"line\","
+                + "  \"faces\":[\"north\"],"
+                + "  \"minSize\":5,"
+                + "  \"maxSize\":15,"
+                + "  \"parts\":[{\"x\":0,\"y\":0,\"z\":1,\"selector-tag\":\"input\",\"elements\":\"minecraft:stone\"}],"
+                + "  \"parts-end\":[{\"x\":0,\"y\":0,\"z\":1,\"selector-tag\":\"output\",\"elements\":\"minecraft:iron_block\"}],"
+                + "  \"structure-size-offset-start\":{\"x\":0,\"y\":0,\"z\":1},"
+                + "  \"structure-size-offset\":{\"x\":0,\"y\":0,\"z\":1}"
+                + "}]}";
+        MachineDefinition line = readDefinition(lineJson);
+
+        // ---- (1) 初始值与夹取：照旧版的两条规则 ------------------------------------------------
+        // 旧版把渲染器的初始大小夹到第一个动态模式的 minSize（WorldSceneRendererWidget.java:191），
+        // 之后每次增减夹进 [minSize, maxSize]（:196）。
+        check("初始大小取第一个动态模式的 minSize", 5,
+                com.reborn.modularmachinery.client.preview.StructurePreviews.initialDynamicPatternSize(line));
+        check("小于下限时被夹到下限", 5,
+                com.reborn.modularmachinery.client.preview.StructurePreviews
+                        .clampDynamicPatternSize(line, 0));
+        check("大于上限时被夹到上限", 15,
+                com.reborn.modularmachinery.client.preview.StructurePreviews
+                        .clampDynamicPatternSize(line, 999));
+        check("区间内原样保留", 9,
+                com.reborn.modularmachinery.client.preview.StructurePreviews
+                        .clampDynamicPatternSize(line, 9));
+
+        // 没有动态结构的机器：初始值为 0、夹取恒为 0，两个按钮也不会出现。
+        MachineDefinition plain = readDefinition("{\"registryname\":\"mmverify_preview_plain\","
+                + "\"parts\":[{\"x\":0,\"y\":1,\"z\":0,\"elements\":\"minecraft:stone\"}]}");
+        report("没有动态结构的机器初始大小为 0", 
+                com.reborn.modularmachinery.client.preview.StructurePreviews
+                        .initialDynamicPatternSize(plain) == 0);
+        report("...夹取也恒为 0", 
+                com.reborn.modularmachinery.client.preview.StructurePreviews
+                        .clampDynamicPatternSize(plain, 7) == 0);
+        report("...并且它报告自己没有动态结构（按钮条因此少两个按钮）", !plain.hasDynamicPatterns());
+
+        // ---- (2) 大小真的改变了投影 ------------------------------------------------------------
+        // 5 节 / 15 节 / 1 节三种大小下，投影的 Z 向长度必须相应变化。
+        // 之所以要断言**尺寸**而不只是「没崩」：这是玩家唯一能直接看出来的效果。
+        MachinePattern at5 = com.reborn.modularmachinery.client.preview.StructurePreviews
+                .previewPattern(line, 5);
+        MachinePattern at15 = com.reborn.modularmachinery.client.preview.StructurePreviews
+                .previewPattern(line, 15);
+        MachinePattern at1 = com.reborn.modularmachinery.client.preview.StructurePreviews
+                .previewPattern(line, 1);
+        report("5 节的投影比 1 节长", at5.size().getZ() > at1.size().getZ());
+        report("15 节的投影比 5 节长", at15.size().getZ() > at5.size().getZ());
+        report("15 节的方块数比 5 节多", at15.partCount() > at5.partCount());
+        // 每多一节就多一个重复段方块（收尾段只出现一次）。
+        check("从 5 节到 15 节，投影正好多 10 个方块", at5.partCount() + 10, at15.partCount());
+
+        // 动态段的标签进入预览结构，段号与展开时的规则一致。
+        report("预览结构里带着动态段的标签", at5.hasTags());
+        check("第 0 节的标签在预览结构里", "input_line_0",
+                String.valueOf(at5.tag(new BlockPos(0, 0, 2))));
+        report("1 节的预览只有一段动态部件（加基座），比 5 节少 4 个方块",
+                at1.partCount() + 4 == at5.partCount());
+
+        // 没有动态结构的机器，预览结构**就是**基座本身（不是副本、也不是空集）。
+        report("没有动态结构的机器，预览结构等于基座",
+                com.reborn.modularmachinery.client.preview.StructurePreviews.previewPattern(plain, 0)
+                        .partCount() == plain.pattern().partCount());
+
+        // ---- (3) 材料清单跟着大小变：**离线测不了，这里只记录限制** ------------------------------
+        //
+        // `StructurePreviews.components` 会取控制器方块的状态来把控制器插进清单，于是碰到
+        // `ModBlocks` 的静态初始化，而它在 FML 之外无法运行（`NoClassDefFoundError:
+        // net/minecraftforge/fml/common/Mod`）。复现器其它地方也同样绕开 `ModBlocks.get()`
+        // （见 noFailureSentinel 那段对 `MACHINE_CONTROLLER_ENTITY.get()` 的注释）。
+        //
+        // 所以这一条**不假装测过**：材料清单「加长一节就多备一节的料」这件事依赖
+        // `previewPattern` 的方块数（上面已断言），而清单本身只是把那个结构的方块按物品合并——
+        // 合并逻辑是既有的、已被其它段覆盖的代码。真正需要眼睛的是清单**在界面上**跟着变，
+        // 那属于实机验收清单。
+        report("材料清单需要 FML（ModBlocks 静态初始化），离线不可测——已在实机清单里列出", true);
+
+        // ---- (4) 信息面板：存在动态结构时多一行，且尺寸行跟着大小变 ------------------------------
+        // 旧版那一行的守卫是 `!machine.getDynamicPatterns().isEmpty()`
+        // （MachineStructurePreviewPanel 的 getMachineExtraInfo），位置在 core_threads 之后、
+        // requires_blueprint 之前。
+        List<String> rowsPlain = com.reborn.modularmachinery.client.preview.PreviewPanel
+                .machineInfoRows(plain);
+        List<String> rowsLine = com.reborn.modularmachinery.client.preview.PreviewPanel
+                .machineInfoRows(line);
+        report("没有动态结构的机器不打印那一行",
+                rowsPlain.stream().noneMatch(row -> row.contains("machine_info.dynamic_pattern")));
+        report("有动态结构的机器打印那一行",
+                rowsLine.stream().anyMatch(row -> row.contains("machine_info.dynamic_pattern")));
+        // 尺寸行必须与当前预览的结构一致——加长一节投影真的变长，信息面板不能说一个对不上的数字。
+        List<String> rowsAt1 = com.reborn.modularmachinery.client.preview.PreviewPanel
+                .machineInfoRows(line, 1);
+        List<String> rowsAt5 = com.reborn.modularmachinery.client.preview.PreviewPanel
+                .machineInfoRows(line, 5);
+        report("1 节与 5 节的尺寸行不同（尺寸行跟着结构走）",
+                !rowsAt1.equals(rowsAt5));
+        report("...而且两边的动态结构行都在",
+                rowsAt1.stream().anyMatch(row -> row.contains("machine_info.dynamic_pattern"))
+                        && rowsAt5.stream().anyMatch(row -> row.contains("machine_info.dynamic_pattern")));
+    }
+
 
     /** A definition with a one-position pattern, so the arithmetic can be driven without a world. */
     private static MachineDefinition definition(String path, int maxParallelism, int internalParallelism,

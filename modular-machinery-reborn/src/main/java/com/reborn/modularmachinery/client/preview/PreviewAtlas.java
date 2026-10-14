@@ -52,6 +52,21 @@ public final class PreviewAtlas {
     public static final Sprite LAYER_TOGGLE_PRESSED = new Sprite(214, 30, 13, 13);
     public static final Sprite LAYER_TOGGLE_ACTIVE = new Sprite(229, 30, 13, 13);
 
+    /**
+     * {@code dynamicPatternPlus} (:137-146) 与 {@code dynamicPatternSubtract} (:147-156)：
+     * 增减动态结构长度的两个按钮，只在机器真的有动态结构时才出现在按钮条上。
+     *
+     * <p>坐标是旧版自己的 {@code setTexture(184, 60)} / {@code (184, 75)} 加 15 的两级偏移，
+     * 而本项目的 {@code guiblueprint_new.png} 与旧版**逐字节相同**（6961 字节，SHA-256 一致），
+     * 所以这三组 UV 是照抄而不是估的。
+     */
+    public static final Sprite DYNAMIC_PLUS = new Sprite(184, 60, 13, 13);
+    public static final Sprite DYNAMIC_PLUS_HOVERED = new Sprite(199, 60, 13, 13);
+    public static final Sprite DYNAMIC_PLUS_PRESSED = new Sprite(214, 60, 13, 13);
+    public static final Sprite DYNAMIC_MINUS = new Sprite(184, 75, 13, 13);
+    public static final Sprite DYNAMIC_MINUS_HOVERED = new Sprite(199, 75, 13, 13);
+    public static final Sprite DYNAMIC_MINUS_PRESSED = new Sprite(214, 75, 13, 13);
+
     // ----- 9x9 layer arrows and the 9x90 track, from LayerRenderScrollbar ----------------------------------
 
     public static final Sprite LAYER_UP = new Sprite(184, 121, 9, 9);

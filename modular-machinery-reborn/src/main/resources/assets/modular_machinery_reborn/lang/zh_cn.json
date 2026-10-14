@@ -94,9 +94,12 @@
   "gui.preview.button.machine_info.max_parallelism": "最大并行数：§a%s§f",
   "gui.preview.button.machine_info.max_threads": "基础线程数（仅集成控制器）：§b%s§f",
   "gui.preview.button.machine_info.core_threads": "特殊线程数（仅集成控制器）：§9%s§f",
+  "gui.preview.button.machine_info.dynamic_pattern": "§e存在动态结构。",
   "gui.preview.button.machine_info.requires_blueprint": "§c需要蓝图。",
 
   "gui.preview.button.reset_center.tip": "点击重置预览的中心位置。",
+  "gui.preview.button.dynamic_pattern_plus.tip": "点击增加动态结构的大小。（当前：§a%s§f）",
+  "gui.preview.button.dynamic_pattern_subtract.tip": "点击减小动态结构的大小。（当前：§a%s§f）",
   "gui.preview.button.enable_cycle_replaceable_blocks.tip.0": "点击启用定时循环替换方块。",
   "gui.preview.button.enable_cycle_replaceable_blocks.tip.1": "循环替换：每 1.5 秒按顺序循环替换每个位置的所有可用方块。",
   "gui.preview.button.disable_cycle_replaceable_blocks.tip": "点击禁用定时循环替换方块。",

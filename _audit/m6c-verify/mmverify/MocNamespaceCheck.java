@@ -730,8 +730,8 @@ final class MocNamespaceCheck {
         // 169 at 0.27.0; 176 from 0.29.0, when the construct tool added the original's own tooltip plus its six
         // message.structurebuild.* lines (section AA1 diffs all seven against _mmce-src's .lang); 180 with the four
         // energy unit labels, whose values ParallelCraftCheck's section R asserts one by one.
-        check("en_us.json key count", 186, en.size());
-        check("zh_cn.json key count", 186, zh.size());
+        check("en_us.json key count", 189, en.size());
+        check("zh_cn.json key count", 189, zh.size());
         Set<String> enKeys = new TreeSet<>(en.keySet());
         Set<String> zhKeys = new TreeSet<>(zh.keySet());
         report("the two files carry identical key sets (" + enKeys.size() + " keys each)", enKeys.equals(zhKeys));

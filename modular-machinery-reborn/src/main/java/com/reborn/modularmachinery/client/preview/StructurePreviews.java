@@ -2,7 +2,9 @@ package com.reborn.modularmachinery.client.preview;
 
 import com.reborn.modularmachinery.block.ModBlocks;
 import com.reborn.modularmachinery.machine.BlockMatcher;
+import com.reborn.modularmachinery.machine.DynamicPattern;
 import com.reborn.modularmachinery.machine.MachineDefinition;
+import com.reborn.modularmachinery.machine.MachinePattern;
 import com.reborn.modularmachinery.machine.StructurePreview;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -35,8 +37,62 @@ public final class StructurePreviews {
     private StructurePreviews() {
     }
 
+    /** 预览的默认结构：动态段取各自动态模式的下限（见 {@link #initialDynamicPatternSize}）。 */
     public static StructurePreview of(MachineDefinition machine) {
-        return StructurePreview.of(machine.pattern(), controllerState(machine));
+        return of(machine, initialDynamicPatternSize(machine));
+    }
+
+    /** {@link #of(MachineDefinition)} for a chosen dynamic size — what the panel rebuilds when the player picks one. */
+    public static StructurePreview of(MachineDefinition machine, int dynamicPatternSize) {
+        return StructurePreview.of(previewPattern(machine, dynamicPatternSize), controllerState(machine));
+    }
+
+    /**
+     * 预览用的结构：基座加上按 {@code dynamicPatternSize} 展开的动态段。
+     *
+     * <p>动态结构的长度在世界里是量出来的，而预览里没有世界，所以长度必须由玩家在界面上选
+     * （旧版的 {@code WorldSceneRendererWidget.setDynamicPatternSize} 就是这么做的）。
+     * 本方法负责把「基座 + 各段」合成一个结构，与运行时 {@code MachineRegistry} 的合并是同一个意思，
+     * 只是这里的大小来自界面而不是来自世界。
+     *
+     * <p><strong>预览里的动态段按朝向 0（北）展开。</strong>预览画的是一个固定朝向的投影，
+     * 而动态段的偏移本来就要按控制器朝向旋转；这里不转，是因为预览没有控制器朝向可言。
+     * 玩家在世界里把机器朝别的方向摆，段会跟着转向——那是运行时的行为，不是预览要回答的问题。
+     *
+     * @param dynamicPatternSize 每个动态模式重复几节；机器没有动态结构时忽略
+     */
+    public static MachinePattern previewPattern(MachineDefinition machine, int dynamicPatternSize) {
+        MachinePattern merged = machine.pattern();
+        for (DynamicPattern dynamic : machine.dynamicPatterns()) {
+            merged = merged.withMerged(dynamic.expand(dynamicPatternSize, 0));
+        }
+        return merged;
+    }
+
+    /**
+     * 预览里应当用几节起手：旧版把渲染器的初始大小夹到<b>第一个</b>动态模式的 {@code minSize}
+     * （{@code WorldSceneRendererWidget.java:191}），本方法照做。
+     *
+     * <p>机器没有动态结构时返回 0——那个值不会被用到，返回 0 只是为了让调用者少一处判空。
+     */
+    public static int initialDynamicPatternSize(MachineDefinition machine) {
+        if (machine.dynamicPatterns().isEmpty()) {
+            return 0;
+        }
+        return Math.max(0, machine.dynamicPatterns().get(0).minSize());
+    }
+
+    /**
+     * 把玩家选的大小夹进<b>第一个</b>动态模式允许的范围，与旧版
+     * {@code Math.min(Math.max(pattern.getMinSize(), size), pattern.getMaxSize())} 一致
+     * （{@code WorldSceneRendererWidget.java:196}）。
+     */
+    public static int clampDynamicPatternSize(MachineDefinition machine, int size) {
+        if (machine.dynamicPatterns().isEmpty()) {
+            return 0;
+        }
+        DynamicPattern first = machine.dynamicPatterns().get(0);
+        return Math.min(Math.max(first.minSize(), size), first.maxSize());
     }
 
     /**
@@ -47,9 +103,19 @@ public final class StructurePreviews {
      * original sample-state behaviour for replaceable positions.
      */
     public static List<ItemStack> components(MachineDefinition machine) {
+        return components(machine, initialDynamicPatternSize(machine));
+    }
+
+    /**
+     * {@link #components(MachineDefinition)} for a chosen dynamic size.
+     *
+     * <p>读者会问「为什么材料清单要跟着大小变」：动态段本身是由方块组成的，玩家加长一节就要多备一节的料，
+     * 所以清单必须与预览画出来的结构一致。旧版的 {@code IngredientList} 也是从它当时渲染的那个结构取的。
+     */
+    public static List<ItemStack> components(MachineDefinition machine, int dynamicPatternSize) {
         Map<Item, ItemStack> stacks = new LinkedHashMap<>();
         addComponent(stacks, controllerState(machine));
-        for (List<BlockMatcher> accepted : machine.pattern().positions().values()) {
+        for (List<BlockMatcher> accepted : previewPattern(machine, dynamicPatternSize).positions().values()) {
             if (!accepted.isEmpty()) {
                 addComponent(stacks, accepted.get(0).representativeState());
             }

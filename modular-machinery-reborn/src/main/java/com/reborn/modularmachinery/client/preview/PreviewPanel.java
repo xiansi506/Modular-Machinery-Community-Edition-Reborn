@@ -1,6 +1,7 @@
 package com.reborn.modularmachinery.client.preview;
 
 import com.reborn.modularmachinery.machine.MachineDefinition;
+import com.reborn.modularmachinery.machine.MachinePattern;
 import com.reborn.modularmachinery.machine.StructurePreview;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
@@ -48,8 +49,8 @@ public final class PreviewPanel {
     private static final long CYCLE_PERIOD_MILLIS = 1500L;
 
     private final MachineDefinition machine;
-    private final StructurePreview preview;
-    private final List<ItemStack> components;
+    private StructurePreview preview;
+    private List<ItemStack> components;
 
     private final List<PreviewButton> buttons = new ArrayList<>();
     private final PreviewButton layerUp;
@@ -57,7 +58,26 @@ public final class PreviewPanel {
     private final PreviewButton machineInfoButton;
     private final PreviewButton layerToggleButton;
     private final PreviewButton cycleButton;
-    private final List<Component> machineInfoLines;
+    /**
+     * 「额外信息」面板的行。
+     *
+     * <p>不是 {@code final}，因为其中的<strong>长/高/宽</strong>一行取决于动态结构当前多长：
+     * 加长一节会真的让投影变长，那一行必须跟着变，否则它会报一个与画面对不上的尺寸。
+     * 旧版每帧从渲染器重新取值，所以没有这个问题；本项目的这组行是构建出来的，因此要在结构变化时重算。
+     */
+    private List<Component> machineInfoLines;
+
+    /**
+     * 预览里动态结构重复几节。
+     *
+     * <p>动态结构的长度在世界里是<strong>量出来的</strong>，而预览里没有世界，所以这个长度只能由玩家在界面上选——
+     * 旧版的做法完全一样：它把这个值放在 {@code WorldSceneRendererWidget} 上，由按钮条上的两个按钮增减
+     * （{@code MachineStructurePreviewPanel.java:388-394}），并在增减时夹进模式的
+     * {@code [minSize, maxSize]}（{@code WorldSceneRendererWidget.java:191/196}）。
+     *
+     * <p>机器没有动态结构时这个字段恒为 0，两个按钮也不会出现在按钮条上。
+     */
+    private int dynamicPatternSize;
 
     private float yaw = StructurePreviewRenderer.DEFAULT_YAW;
     private float pitch = StructurePreviewRenderer.DEFAULT_PITCH;
@@ -77,16 +97,47 @@ public final class PreviewPanel {
 
     public PreviewPanel(MachineDefinition machine) {
         this.machine = machine;
-        this.preview = StructurePreviews.of(machine);
-        this.components = StructurePreviews.components(machine);
-        this.machineInfoLines = buildMachineInfo(machine);
+        this.dynamicPatternSize = StructurePreviews.initialDynamicPatternSize(machine);
+        this.preview = StructurePreviews.of(machine, this.dynamicPatternSize);
+        this.components = StructurePreviews.components(machine, this.dynamicPatternSize);
+        this.machineInfoLines = buildMachineInfo(machine, this.dynamicPatternSize);
 
-        int count = 4;
+        // The original built its bottom strip as a right-aligned Row and **only** added the two dynamic-size
+        // buttons when the machine actually has dynamic patterns (MachineStructurePreviewPanel.java:193-203),
+        // which is why the whole strip shifts when they are present. The count is computed up front so the
+        // indices below stay in the original's order: the two dynamic buttons come first, then the features
+        // this port has (machine info, cycle, reset, layer toggle) plus the original's own placeWorldPreview
+        // and menu slots, which this port does not implement.
+        boolean hasDynamic = machine.hasDynamicPatterns();
+        // 两个索引起点：有动态结构时后移两位，因为旧版把动态按钮放在条的最前面。
+        int machine_infoX;
+        int cycleX;
+        int count = hasDynamic ? 6 : 4;
+        int index = 0;
+        if (hasDynamic) {
+            PreviewButton plus = PreviewButton.button("dynamic-plus", PreviewLayout.buttonX(index++, count),
+                    PreviewLayout.BUTTON_STRIP_Y, PreviewLayout.BUTTON_SIZE,
+                    PreviewAtlas.DYNAMIC_PLUS, PreviewAtlas.DYNAMIC_PLUS_HOVERED,
+                    PreviewAtlas.DYNAMIC_PLUS_PRESSED, () -> dynamicTooltip(true),
+                    ignored -> stepDynamicPatternSize(1));
+            PreviewButton minus = PreviewButton.button("dynamic-minus", PreviewLayout.buttonX(index++, count),
+                    PreviewLayout.BUTTON_STRIP_Y, PreviewLayout.BUTTON_SIZE,
+                    PreviewAtlas.DYNAMIC_MINUS, PreviewAtlas.DYNAMIC_MINUS_HOVERED,
+                    PreviewAtlas.DYNAMIC_MINUS_PRESSED, () -> dynamicTooltip(false),
+                    ignored -> stepDynamicPatternSize(-1));
+            this.buttons.add(plus);
+            this.buttons.add(minus);
+        }
+        // The remaining buttons keep their relative order; `count` includes the two slots the original
+        // reserved for placeWorldPreview and its options menu, so the strip stays right-aligned at the same
+        // margin the original used.
+        machine_infoX = index;
+        cycleX = index + 1;
         // Bottom strip order, left to right. The original's own strip was
         // [placeWorldPreview, cycleReplaceable, toggleLayerRender, menu]; place-to-world and the options menu
         // are not implemented, so the two features we do have keep their relative order and the two additions
         // take the remaining places.
-        this.machineInfoButton = PreviewButton.toggle("machine-info", PreviewLayout.buttonX(0, count),
+        this.machineInfoButton = PreviewButton.toggle("machine-info", PreviewLayout.buttonX(machine_infoX, count),
                 PreviewLayout.BUTTON_STRIP_Y,
                 PreviewLayout.BUTTON_SIZE, PreviewAtlas.MACHINE_INFO, PreviewAtlas.MACHINE_INFO_HOVERED,
                 // The atlas has no mouse-down sprite for this row either: the original used machineExtraInfo as a
@@ -96,17 +147,17 @@ public final class PreviewPanel {
                 // No "clicked" sprite exists for this row, so PreviewButton tints the normal sprite while on.
                 null,
                 this::machineInfoTooltip, this::onMachineInfoToggled);
-        this.cycleButton = PreviewButton.toggle("cycle-blocks", PreviewLayout.buttonX(1, count),
+        this.cycleButton = PreviewButton.toggle("cycle-blocks", PreviewLayout.buttonX(cycleX, count),
                 PreviewLayout.BUTTON_STRIP_Y,
                 PreviewLayout.BUTTON_SIZE, PreviewAtlas.CYCLE_BLOCKS, PreviewAtlas.CYCLE_BLOCKS_HOVERED,
                 PreviewAtlas.CYCLE_BLOCKS_PRESSED, PreviewAtlas.CYCLE_BLOCKS_ACTIVE,
                 this::cycleTooltip, this::onCycleToggled);
-        PreviewButton resetButton = PreviewButton.button("reset-center", PreviewLayout.buttonX(2, count),
+        PreviewButton resetButton = PreviewButton.button("reset-center", PreviewLayout.buttonX(cycleX + 1, count),
                 PreviewLayout.BUTTON_STRIP_Y,
                 PreviewLayout.BUTTON_SIZE, PreviewAtlas.RESET_CENTER, PreviewAtlas.RESET_CENTER_HOVERED,
                 PreviewAtlas.RESET_CENTER_PRESSED, () -> List.of(Component.translatable(
                         "gui.preview.button.reset_center.tip")), ignored -> resetView());
-        this.layerToggleButton = PreviewButton.toggle("layer-toggle", PreviewLayout.buttonX(3, count),
+        this.layerToggleButton = PreviewButton.toggle("layer-toggle", PreviewLayout.buttonX(cycleX + 2, count),
                 PreviewLayout.BUTTON_STRIP_Y,
                 PreviewLayout.BUTTON_SIZE, PreviewAtlas.LAYER_TOGGLE, PreviewAtlas.LAYER_TOGGLE_HOVERED,
                 PreviewAtlas.LAYER_TOGGLE_PRESSED, PreviewAtlas.LAYER_TOGGLE_ACTIVE,
@@ -129,6 +180,51 @@ public final class PreviewPanel {
 
     private void onMachineInfoToggled(boolean enabled) {
         this.machineInfoVisible = enabled;
+    }
+
+    /**
+     * 增减预览里的动态结构长度，并重建预览与材料清单。
+     *
+     * <p>夹取用 {@link StructurePreviews#clampDynamicPatternSize}（对应旧版的
+     * {@code Math.min(Math.max(pattern.getMinSize(), size), pattern.getMaxSize())}）。
+     *
+     * <p><strong>夹取之后的「没变」要提前返回。</strong>否则按到边界时仍会重建预览与材料清单——
+     * 那是一次没有可见结果的重算，而它在每一帧的点击里都会发生。旧版没有这个问题，因为它的渲染器每帧
+     * 从字段重新取值；本项目的预览是<strong>构建出来</strong>的对象，所以必须自己判断有没有变化。
+     */
+    private void stepDynamicPatternSize(int delta) {
+        int wanted = StructurePreviews.clampDynamicPatternSize(this.machine, this.dynamicPatternSize + delta);
+        if (wanted == this.dynamicPatternSize) {
+            return;
+        }
+        this.dynamicPatternSize = wanted;
+        this.preview = StructurePreviews.of(this.machine, wanted);
+        this.components = StructurePreviews.components(this.machine, wanted);
+        // 长/高/宽那一行与画面对齐：结构变长了，尺寸行也必须跟着变。
+        this.machineInfoLines = buildMachineInfo(this.machine, wanted);
+        // 层索引指向的是旧结构的某一层，而结构的层数刚刚变了（动态段会加高/降低）。
+        // 不重算会让切片预览停在一个不存在的层上，看起来像「预览空了」。
+        this.layerIndex = Math.min(this.layerIndex, Math.max(0, this.preview.layers().size() - 1));
+    }
+
+    /**
+     * 两个动态长度按钮的提示，措辞取自旧版自己的两条语言键。
+     *
+     * <p>留意旧版这两条键的措辞是<strong>反的</strong>：{@code dynamic_pattern_plus.tip} 写的是
+     * 「点击以<strong>减小</strong>动态结构的尺寸」。本版按<strong>按钮的实际作用</strong>取句子
+     * （加号说加、减号说减），因为照抄一句说反的话会让玩家按错方向——这是本项目对「面向作者的文案」
+     * 的一贯取舍：意思对齐旧版，错误不去复制。
+     */
+    private List<Component> dynamicTooltip(boolean plus) {
+        return List.of(Component.translatable(
+                plus ? "gui.preview.button.dynamic_pattern_plus.tip"
+                        : "gui.preview.button.dynamic_pattern_subtract.tip",
+                this.dynamicPatternSize));
+    }
+
+    /** 预览当前用的动态结构长度；机器没有动态结构时是 0。供复现器与界面核对。 */
+    public int dynamicPatternSize() {
+        return this.dynamicPatternSize;
     }
 
     private void onCycleToggled(boolean enabled) {
@@ -642,8 +738,18 @@ public final class PreviewPanel {
      * panel draws, because it is produced by the same method — the strings are only unwrapped for printing.
      */
     public static List<String> machineInfoRows(MachineDefinition machine) {
+        return machineInfoRows(machine, StructurePreviews.initialDynamicPatternSize(machine));
+    }
+
+    /**
+     * {@link #machineInfoRows(MachineDefinition)} for a chosen dynamic size.
+     *
+     * <p>复现器用它把「加长之后尺寸行是否跟着变」这件事断言下来——那不是一句界面文案的问题，
+     * 而是「信息面板与画面是否一致」的问题，而后者是玩家能直接看出来的。
+     */
+    public static List<String> machineInfoRows(MachineDefinition machine, int dynamicPatternSize) {
         List<String> rows = new ArrayList<>();
-        for (Component line : buildMachineInfo(machine)) {
+        for (Component line : buildMachineInfo(machine, dynamicPatternSize)) {
             // Language data is only loaded inside a running client, so getString() answers the key itself here;
             // the arguments are appended so the numbers the rows would print are assertable too.
             Object[] args = line.getContents()
@@ -664,20 +770,24 @@ public final class PreviewPanel {
      * original's own position: right after max parallelism and before the blueprint line, each under the
      * original's guard.
      *
-     * <p>The dynamic-pattern line needs dynamic patterns, which are still unimplemented, and stays omitted for
-     * the reason it always was: printing a zero would claim the machine has none when the field is not read at
-     * all. The length/height/width line uses {@code pattern().size()} and the controller line the controller's Y
-     * inside the pattern box, exactly as the original computed them.
+     * <p><b>波 3c：动态结构那一行现在有条件地打印了。</b>此前它一直在被省略，理由是「动态结构还没实现，
+     * 打印一个 0 会声称机器没有动态结构」。现在动态结构真的会被展开，所以它可以按旧版的方式出现：
+     * 只在机器<strong>确实有</strong>动态模式时加一行，对应旧版的
+     * {@code if (!machine.getDynamicPatterns().isEmpty())}（{@code MachineStructurePreviewPanel.java:319}）。
+     *
+     * <p>长/高/宽那一行改用<strong>当前预览的那个结构</strong>而不是定义里的基座：动态段是真方块，
+     * 加长一节投影就真的变长，尺寸行必须与画面一致。
      */
-    private static List<Component> buildMachineInfo(MachineDefinition machine) {
+    private static List<Component> buildMachineInfo(MachineDefinition machine, int dynamicPatternSize) {
         List<Component> lines = new ArrayList<>();
         lines.add(Component.translatable("gui.preview.button.machine_info"));
         lines.add(Component.translatable("gui.preview.button.machine_info.xyz.0"));
-        BlockPos size = machine.pattern().size();
+        MachinePattern shown = StructurePreviews.previewPattern(machine, dynamicPatternSize);
+        BlockPos size = shown.size();
         lines.add(Component.translatable("gui.preview.button.machine_info.xyz.1",
                 size.getX(), size.getY(), size.getZ()));
         lines.add(Component.translatable("gui.preview.button.machine_info.controller_y_pos",
-                Math.abs(machine.pattern().min().getY())));
+                Math.abs(shown.min().getY())));
         // The original only listed these two when the machine was not at the defaults
         // (MachineStructurePreviewPanel:298-307: internal parallelism > 0, max parallelism != the config
         // default), which is why a machine that has not opted in stays quiet.
@@ -700,6 +810,11 @@ public final class PreviewPanel {
         if (!machine.coreThreads().isEmpty()) {
             lines.add(Component.translatable("gui.preview.button.machine_info.core_threads",
                     machine.coreThreads().size()));
+        }
+        // 波 3c：存在动态结构时加这一行。位置按旧版——在 core_threads 之后、requires_blueprint 之前
+        // （MachineStructurePreviewPanel 的 getMachineExtraInfo）。
+        if (machine.hasDynamicPatterns()) {
+            lines.add(Component.translatable("gui.preview.button.machine_info.dynamic_pattern"));
         }
         if (machine.requiresBlueprint()) {
             lines.add(Component.translatable("gui.preview.button.machine_info.requires_blueprint"));

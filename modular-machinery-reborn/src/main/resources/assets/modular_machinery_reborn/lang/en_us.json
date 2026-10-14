@@ -94,9 +94,12 @@
   "gui.preview.button.machine_info.max_parallelism": "Max Parallelism：§a%s§f",
   "gui.preview.button.machine_info.max_threads": "Max Threads(Only Factory Controller)：§b%s§f",
   "gui.preview.button.machine_info.core_threads": "Special Threads(Only Factory Controller)：§9%s§f",
+  "gui.preview.button.machine_info.dynamic_pattern": "§eDynamic structures exist.",
   "gui.preview.button.machine_info.requires_blueprint": "§cRequires blueprint.",
 
   "gui.preview.button.reset_center.tip": "Click to reset the center of the preview.",
+  "gui.preview.button.dynamic_pattern_plus.tip": "Click to increase the size of the dynamic structure. (Current: §a%s§f)",
+  "gui.preview.button.dynamic_pattern_subtract.tip": "Click to decrease the size of the dynamic structure. (Current: §a%s§f)",
   "gui.preview.button.enable_cycle_replaceable_blocks.tip.0": "Click to enable timed cycle replacement of blocks.",
   "gui.preview.button.enable_cycle_replaceable_blocks.tip.1": "Cycle Replaceable: Cycles through all available blocks in each position in sequence every 1.5 seconds.",
   "gui.preview.button.disable_cycle_replaceable_blocks.tip": "Click to disable timed cycle replacement of blocks.",
