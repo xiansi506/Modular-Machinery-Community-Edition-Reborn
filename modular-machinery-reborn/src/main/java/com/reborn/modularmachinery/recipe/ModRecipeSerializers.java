@@ -7,18 +7,13 @@ import com.google.gson.JsonParseException;
 import com.reborn.modularmachinery.ModularMachineryReborn;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeSerializer;
-import net.minecraft.world.level.material.Fluid;
-import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Reads and syncs machine recipes.
@@ -29,6 +24,13 @@ import java.util.Locale;
  * {@code interface_number_input} and {@code ingredient_array_input}. The original's remaining kinds
  * ({@code gas}, {@code gas_pertick}, {@code fluid_pertick}) are not implemented, because they need a gas API
  * this port does not have; an unknown kind is a load error rather than a silently ignored requirement.
+ *
+ * <p><b>波 5.2：这个类不再知道「有哪些需求种类」。</b>它原来持有五个
+ * {@code private static final String} 常量，并在**三处**各自把那些名字硬编码一遍——JSON 解析的
+ * {@code switch}、写包的 {@code instanceof} 链、读包的 {@code switch}。那三处现在都不在了：
+ * 种类住在 {@link RequirementTypes} 这张注册表里，每条需求自己知道自己是哪一种
+ * （{@link MachineRequirement#type()}），解析与过网由 {@link MachineRequirementParser} 分派。
+ * 于是「加一种需求」不再等于改这个文件——那正是兼容模块（{@code compat/}）成立的前提。
  *
  * <p><b>{@code item_durability} and {@code catalyst} are deliberately absent, and are not gaps.</b> Neither
  * exists as a usable requirement type in the original: {@code RequirementTypeItemDurability#createRequirement}
@@ -41,15 +43,6 @@ public final class ModRecipeSerializers {
             DeferredRegister.create(ForgeRegistries.RECIPE_SERIALIZERS, ModularMachineryReborn.MOD_ID);
     public static final RegistryObject<RecipeSerializer<MachineRecipe>> MACHINE =
             SERIALIZERS.register("machine", MachineSerializer::new);
-
-    private static final String KIND_ITEM = "item";
-    private static final String KIND_FLUID = "fluid";
-    private static final String KIND_ENERGY = "energy";
-    private static final String KIND_INTERFACE_NUMBER_INPUT = "interface_number_input";
-    private static final String KIND_INGREDIENT_ARRAY_INPUT = "ingredient_array_input";
-
-    private ModRecipeSerializers() {
-    }
 
     private static final class MachineSerializer implements RecipeSerializer<MachineRecipe> {
 
@@ -76,13 +69,9 @@ public final class ModRecipeSerializers {
                 if (!element.isJsonObject()) {
                     throw new JsonParseException("A requirement of " + id + " is not a JSON object");
                 }
-                JsonObject requirementJson = element.getAsJsonObject();
-                MachineRequirement requirement = parseRequirement(requirementJson, id);
-                // `selector-tag`（旧版的同一字段，`MachineRecipe.java:474`）：把这条需求绑定到结构里某个打了标签的
-                // 部件，于是它只看得到那个部件上的端口。解析放在 parseRequirement 之外，是因为它对每种需求类型
-                // 含义完全相同——把同一条规则写进十来个 parse 分支，就会有一份迟早分叉的副本。
-                requirement.setSelectorTag(readSelectorTag(requirementJson, id));
-                requirements.add(requirement);
+                // 需求的解析与 `selector-tag` 的挂载都在 MachineRequirementParser 里：它对每种需求类型
+                // 含义完全相同，所以整条路径只有一处。种类分派则交给 RequirementTypes 注册表。
+                requirements.add(MachineRequirementParser.parse(element.getAsJsonObject(), id));
             }
             return new MachineRecipe(id, machine, registryName, recipeTime, requirements,
                     parseMaxParallelism(json, id));
@@ -124,7 +113,7 @@ public final class ModRecipeSerializers {
             int count = buf.readVarInt();
             List<MachineRequirement> requirements = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
-                requirements.add(readRequirement(buf));
+                requirements.add(MachineRequirementParser.read(buf));
             }
             return new MachineRecipe(id, machine, registryName, recipeTime, requirements, maxParallelism);
         }
@@ -137,68 +126,12 @@ public final class ModRecipeSerializers {
             buf.writeVarInt(recipe.maxParallelism());
             buf.writeVarInt(recipe.requirements().size());
             for (MachineRequirement requirement : recipe.requirements()) {
-                writeRequirement(buf, requirement);
+                MachineRequirementParser.write(buf, requirement);
             }
         }
     }
 
     // ------------------------------------------------------------------ json
-    private static MachineRequirement parseRequirement(JsonObject json, ResourceLocation recipeId) {
-        String where = "a requirement of " + recipeId;
-        String rawType = requireString(json, "type", where);
-        int colon = rawType.indexOf(':');
-        String kind = (colon >= 0 ? rawType.substring(colon + 1) : rawType).toLowerCase(Locale.ROOT);
-        IOType ioType = IOType.byName(requireString(json, "io-type", where));
-        float chance = json.has("chance") ? json.get("chance").getAsFloat() : 1.0F;
-
-        switch (kind) {
-            case KIND_ITEM -> {
-                Ingredient ingredient = LegacyIngredients.parse(requireString(json, "item", where), where);
-                int amount = json.has("amount") ? json.get("amount").getAsInt() : 1;
-                int min = json.has("minAmount") ? json.get("minAmount").getAsInt() : amount;
-                int max = json.has("maxAmount") ? json.get("maxAmount").getAsInt() : amount;
-                if (ioType == IOType.INPUT) {
-                    if (min != max) {
-                        throw new JsonParseException("An item input in " + where
-                                + " uses minAmount/maxAmount; only outputs may vary their amount. "
-                                + "Give inputs a fixed 'amount'.");
-                    }
-                    return ItemRequirement.input(ingredient, min);
-                }
-                ItemStack stack = LegacyIngredients.firstStack(ingredient);
-                if (stack.isEmpty()) {
-                    throw new JsonParseException("An item output in " + where + " resolved to no concrete item");
-                }
-                return ItemRequirement.output(stack, min, max, chance);
-            }
-            case KIND_FLUID -> {
-                String fluidId = requireString(json, "fluid", where);
-                ResourceLocation key = ResourceLocation.tryParse(fluidId);
-                Fluid fluid = key == null ? null : ForgeRegistries.FLUIDS.getValue(key);
-                if (fluid == null) {
-                    throw new JsonParseException("Unknown fluid '" + fluidId + "' in " + where);
-                }
-                int amount = json.has("amount") ? json.get("amount").getAsInt() : 1;
-                boolean perTick = json.has("perTick") && json.get("perTick").getAsBoolean();
-                return new FluidRequirement(ioType, new FluidStack(fluid, 1), amount, chance, perTick);
-            }
-            case KIND_ENERGY -> {
-                long perTick = json.has("energyPerTick") ? json.get("energyPerTick").getAsLong() : 0L;
-                return new EnergyRequirement(ioType, perTick);
-            }
-            case KIND_INTERFACE_NUMBER_INPUT -> {
-                return InterfaceNumberInputParser.parse(json, ioType, where);
-            }
-            case KIND_INGREDIENT_ARRAY_INPUT -> {
-                return IngredientArrayParser.parse(json, ioType, where);
-            }
-            default -> throw new JsonParseException("Unknown requirement type '" + rawType + "' in " + where
-                    + "'. M2 implements item, fluid and energy; M6d-b adds interface_number_input; 0.26.0 adds "
-                    + "ingredient_array_input. The original's gas, gas_pertick and fluid_pertick kinds are not "
-                    + "ported because they need a gas API; its item_durability and catalyst kinds are not "
-                    + "requirement types at all and are not gaps (D18).");
-        }
-    }
 
     private static String requireString(JsonObject json, String key, Object where) {
         if (!json.has(key)) {
@@ -208,145 +141,8 @@ public final class ModRecipeSerializers {
     }
 
     // --------------------------------------------------------------- network
-
-    private static void writeRequirement(FriendlyByteBuf buf, MachineRequirement requirement) {
-        if (requirement instanceof ItemRequirement item) {
-            buf.writeUtf(KIND_ITEM);
-            buf.writeUtf(item.ioType().name());
-            buf.writeVarInt(item.minAmount());
-            buf.writeVarInt(item.maxAmount());
-            if (item.ioType() == IOType.INPUT) {
-                Ingredient ingredient = item.ingredient();
-                (ingredient == null ? Ingredient.EMPTY : ingredient).toNetwork(buf);
-            } else {
-                buf.writeItem(item.outputStack().copyWithCount(1));
-                buf.writeFloat(item.chance());
-            }
-        } else if (requirement instanceof FluidRequirement fluid) {
-            buf.writeUtf(KIND_FLUID);
-            buf.writeUtf(fluid.ioType().name());
-            fluid.fluidType().writeToPacket(buf);
-            buf.writeVarInt(fluid.amount());
-            buf.writeFloat(fluid.chance());
-            buf.writeBoolean(fluid.perTick());
-        } else if (requirement instanceof EnergyRequirement energy) {
-            buf.writeUtf(KIND_ENERGY);
-            buf.writeUtf(energy.ioType().name());
-            buf.writeVarLong(energy.energyPerTick());
-        } else if (requirement instanceof InterfaceNumberInputRequirement interfaceRequirement) {
-            buf.writeUtf(KIND_INTERFACE_NUMBER_INPUT);
-            buf.writeUtf(interfaceRequirement.ioType().name());
-            buf.writeUtf(interfaceRequirement.interfaceType());
-            buf.writeFloat(interfaceRequirement.minValue());
-            buf.writeFloat(interfaceRequirement.maxValue());
-        } else if (requirement instanceof IngredientArrayRequirement array) {
-            buf.writeUtf(KIND_INGREDIENT_ARRAY_INPUT);
-            buf.writeUtf(array.ioType().name());
-            buf.writeFloat(array.chance());
-            buf.writeVarInt(array.entryCount());
-            for (int index = 0; index < array.entryCount(); index++) {
-                buf.writeVarInt(array.entryAmount(index));
-                // Each entry travels as the concrete stacks it may consume. An entry parsed from a tag arrived
-                // here through the shared reader, so the client re-matches exactly the same items; only the
-                // "#tag" spelling of the tooltip is not carried, which is display-only.
-                var matches = array.entryStacks(index);
-                buf.writeVarInt(matches.size());
-                for (ItemStack match : matches) {
-                    buf.writeItem(match);
-                }
-            }
-        } else {
-            throw new IllegalStateException("Unsupported requirement " + requirement.getClass());
-        }
-        // `selector-tag` 写在**每条需求的末尾**，与 `readRequirement` 的读取顺序一一对应。空串代表「没有标签」，
-        // 而不是写一个可空值：`FriendlyByteBuf#writeUtf` 不接受 null，而「没有标签」是这个字段的常态。
-        buf.writeUtf(requirement.selectorTag() == null ? "" : requirement.selectorTag());
-    }
-
-    /**
-     * 一条需求的 {@code selector-tag}，没写时为 {@code null}。
-     *
-     * <p>旧版在这里只确认它是字符串（{@code MachineRecipe.java:470-476}）。这里沿用本项目对「人手写字段」的惯例，
-     * 把该写什么一并说清；空串被归一成「没有标签」，与 {@code MachineRequirement#setSelectorTag} 一致。
-     */
-    @javax.annotation.Nullable
-    private static String readSelectorTag(JsonObject requirement, ResourceLocation id) {
-        if (!requirement.has("selector-tag")) {
-            return null;
-        }
-        JsonElement element = requirement.get("selector-tag");
-        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
-            throw new JsonParseException("'selector-tag' of a requirement in " + id + " must be a string, but it "
-                    + "is " + element + ". Write the name a part of the machine's structure declares, for example "
-                    + "\"selector-tag\": \"input\".");
-        }
-        String tag = element.getAsString();
-        return tag.isEmpty() ? null : tag;
-    }
-
-    /**
-     * 从网络读一条需求。
-     *
-     * <p>拆成「读 kind 与 ioType → 交给 {@link #readRequirementBody} → 设标签」三步而不是在各分支里各设一次：
-     * 八个分支都是早期返回，逐支去设就是八份可能分叉的副本。{@code selector-tag} 对每种需求类型含义完全相同，
-     * 所以它就该只有一处。
-     */
-    private static MachineRequirement readRequirement(FriendlyByteBuf buf) {
-        String kind = buf.readUtf();
-        IOType ioType = IOType.valueOf(buf.readUtf());
-        MachineRequirement requirement = readRequirementBody(buf, kind, ioType);
-        String selectorTag = buf.readUtf();
-        requirement.setSelectorTag(selectorTag.isEmpty() ? null : selectorTag);
-        return requirement;
-    }
-
-    private static MachineRequirement readRequirementBody(FriendlyByteBuf buf, String kind, IOType ioType) {
-        switch (kind) {
-            case KIND_ITEM -> {
-                int min = buf.readVarInt();
-                int max = buf.readVarInt();
-                if (ioType == IOType.INPUT) {
-                    return ItemRequirement.input(Ingredient.fromNetwork(buf), min);
-                }
-                ItemStack stack = buf.readItem();
-                float chance = buf.readFloat();
-                return ItemRequirement.output(stack, min, max, chance);
-            }
-            case KIND_FLUID -> {
-                FluidStack fluid = FluidStack.readFromPacket(buf);
-                int amount = buf.readVarInt();
-                float chance = buf.readFloat();
-                boolean perTick = buf.readBoolean();
-                return new FluidRequirement(ioType, fluid, amount, chance, perTick);
-            }
-            case KIND_ENERGY -> {
-                return new EnergyRequirement(ioType, buf.readVarLong());
-            }
-            case KIND_INTERFACE_NUMBER_INPUT -> {
-                String type = buf.readUtf();
-                float min = buf.readFloat();
-                float max = buf.readFloat();
-                return new InterfaceNumberInputRequirement(type, min, max, null);
-            }
-            case KIND_INGREDIENT_ARRAY_INPUT -> {
-                float chance = buf.readFloat();
-                int entries = buf.readVarInt();
-                List<IngredientArrayEntry> parsed = new ArrayList<>(entries);
-                for (int index = 0; index < entries; index++) {
-                    int amount = buf.readVarInt();
-                    int matches = buf.readVarInt();
-                    ItemStack first = ItemStack.EMPTY;
-                    for (int match = 0; match < matches; match++) {
-                        ItemStack stack = buf.readItem();
-                        if (match == 0) {
-                            first = stack;
-                        }
-                    }
-                    parsed.add(IngredientArrayEntry.ofItem(first, amount, chance));
-                }
-                return new IngredientArrayRequirement(parsed, chance);
-            }
-            default -> throw new IllegalStateException("Unknown requirement kind '" + kind + "' on the wire");
-        }
-    }
+    //
+    // 需求的两端都不再转发到私有方法：种类分派住在 MachineRequirementParser 里，因为那是**能离机驱动**的
+    // 地方，而本类不能（它持有 DeferredRegister，静态初始化会碰 net.minecraftforge.fml.common.Mod）。
+    // 这里留一层同名的私有转发除了让调用点看起来没变，没有任何作用——而「看起来没变」正是这一波要拆掉的东西。
 }

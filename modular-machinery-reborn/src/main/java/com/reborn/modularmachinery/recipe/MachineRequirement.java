@@ -135,6 +135,22 @@ public abstract class MachineRequirement {
     /** Which modifier target this requirement belongs to, the original's {@code requirementType}. */
     public abstract RecipeModifier.Target modifierTarget();
 
+    /**
+     * 这条需求是**哪一种**需求，也就是它在 {@link RequirementTypes} 里的那一行。
+     *
+     * <p>它决定两件事，而这两件事在改动前各有各的硬编码：
+     *
+     * <ul>
+     *   <li>{@link MachineRequirementParser#write} 往包里写哪个种类字符串。改动前是一条
+     *       {@code instanceof} 链，所以一个兼容模块的需求**写不出去**（见 {@link RequirementType}）；</li>
+     *   <li>「一条需求对象回头找到它的解析器」，于是客户端读回来的是同一个种类，而不是「看起来像」的另一种。</li>
+     * </ul>
+     *
+     * <p>返回的一定是注册表里那**一个**实例（实现类写 {@code return RequirementTypes.ITEM;} 这种形式），
+     * 所以它是身份而不是描述：{@code byId(type().id()) == type()} 恒成立。
+     */
+    public abstract RequirementType type();
+
     // ------------------------------------------------------------------ lifecycle
 
     /**

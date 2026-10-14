@@ -19,3 +19,22 @@ description='''A Forge 1.20.1 reimplementation foundation for Modular Machinery:
     versionRange="[1.20.1,1.21)"
     ordering="NONE"
     side="BOTH"
+# 波 5.2：两个**可选**依赖，声明在这里是为了让「本模组与它们的关系」有一处可读的地方。
+#
+# 这两行**不产生新行为**，写清楚免得被当成「已经接好了」：
+#   - kubejs：本模组与它的结合一直走 kubejs.plugins.txt（KubeJS 自己的入口文件），与这份声明无关。
+#   - jei：本模组一直走 META-INF/services/mezz.jei.api.IModPlugin（ServiceLoader），也与它无关。
+# 也就是说，这两行只是把既有的软关系**登记**下来。
+#
+# 有意不写 versionRange：装了任意版本的 jei/kubejs 都不该被本模组拒绝启动，而「未装」的情形由
+# mandatory=false 表达。写出一个我没实测过的版本区间，风险是把玩家挡在门外，而收益是零。
+[[dependencies.${mod_id}]]
+    modId="jei"
+    mandatory=false
+    ordering="NONE"
+    side="BOTH"
+[[dependencies.${mod_id}]]
+    modId="kubejs"
+    mandatory=false
+    ordering="NONE"
+    side="BOTH"

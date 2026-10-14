@@ -61,6 +61,11 @@ public final class ModularMachineryReborn {
         });
         // Registers the synthetic resource pack that models controllers declared by a pack author.
         bus.addListener(com.reborn.modularmachinery.block.GeneratedPacks::onAddPackFinders);
+        // 波 5.2：兼容模块自注册。放在 FMLCommonSetupEvent（= 所有模组构造完之后）而不是这里，
+        // 因为「某个模组装了没」在 mod 构造阶段能不能问**未查到依据**（本机 fmlcore 无源码，
+        // ModList.setLoadedMods 是包内方法），而猜错的后果是兼容类型静默地永不注册。
+        // 需求类型不是 Forge 注册表内容，所以这个时机不违 D8。理由详见 ModCompat 的类注释。
+        bus.addListener(com.reborn.modularmachinery.compat.ModCompat::onCommonSetup);
         // Exposes config/modular_machinery_reborn/recipes/ as a data pack, since 1.20.1 recipes can only come
         // from a RecipeManager reload.
         bus.addListener(com.reborn.modularmachinery.recipe.ConfigRecipes::onAddPackFinders);

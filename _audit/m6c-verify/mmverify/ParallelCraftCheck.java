@@ -285,6 +285,13 @@ public final class ParallelCraftCheck {
         // It owns the one thing about this tool that can be settled without a game: the selection and rotation
         // arithmetic, the exported fragment's text, and the file-name scheme.
         ConstructToolCheck.constructTool();
+        // 波 5.2 (0.33.0): the requirement-type registry and the compat layer. It owns the one claim this wave
+        // exists to make -- that a compat module can add a requirement kind without editing
+        // ModRecipeSerializers -- and it drives that claim end to end (register, parse, wire round trip). The
+        // classes are not reflected over: the registry was moved out of ModRecipeSerializers precisely so that a
+        // harness can load and drive it, which is why this section can be written against the production types
+        // directly instead of by name.
+        RequirementTypeCheck.requirementTypeRegistry();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");

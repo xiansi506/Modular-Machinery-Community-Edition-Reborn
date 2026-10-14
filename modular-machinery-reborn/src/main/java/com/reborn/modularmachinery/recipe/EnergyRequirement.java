@@ -46,6 +46,16 @@ public final class EnergyRequirement extends MachineRequirement {
         return RecipeModifier.Target.ENERGY;
     }
 
+    @Override
+    public RequirementType type() {
+        return Holder.TYPE;
+    }
+
+    /** 见 {@code ItemRequirement.Holder}：这个嵌套类存在的唯一理由是避开类初始化顺序。 */
+    private static final class Holder {
+        private static final RequirementType TYPE = RequirementTypes.ENERGY;
+    }
+
     public long energyPerTick() {
         return this.energyPerTick;
     }

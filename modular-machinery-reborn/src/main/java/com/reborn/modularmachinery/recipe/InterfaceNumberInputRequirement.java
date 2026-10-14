@@ -109,6 +109,16 @@ public final class InterfaceNumberInputRequirement extends MachineRequirement {
         return RecipeModifier.Target.ITEM;
     }
 
+    @Override
+    public RequirementType type() {
+        return Holder.TYPE;
+    }
+
+    /** 见 {@code ItemRequirement.Holder}：这个嵌套类存在的唯一理由是避开类初始化顺序。 */
+    private static final class Holder {
+        private static final RequirementType TYPE = RequirementTypes.INTERFACE_NUMBER_INPUT;
+    }
+
     /** The value this machine currently holds for the named type, or {@code null} when it holds none. */
     @Nullable
     public Float currentValue(HatchCollection ports) {

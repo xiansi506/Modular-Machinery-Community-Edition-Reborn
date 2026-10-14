@@ -70,6 +70,23 @@ public final class ItemRequirement extends MachineRequirement {
         return RecipeModifier.Target.ITEM;
     }
 
+    @Override
+    public RequirementType type() {
+        return Holder.TYPE;
+    }
+
+    /**
+     * 这个类对应注册表里的哪一行。
+     *
+     * <p>放在一个嵌套类里，是为了避开**类初始化顺序**：{@code RequirementTypes} 的静态初始化会构造内置五种的
+     * 读写器，如果 {@code ItemRequirement} 自己持有一个 {@code static final RequirementType TYPE = RequirementTypes.ITEM;}，
+     * 那么 {@code RequirementTypes} 初始化到一半、{@code ITEM} 还是 {@code null} 时这个字段就可能被读成
+     * {@code null}。放进 {@code Holder} 之后，它只在**第一次问 type() 时**才初始化，那时注册表必然已经好了。
+     */
+    private static final class Holder {
+        private static final RequirementType TYPE = RequirementTypes.ITEM;
+    }
+
     /** Upper bound of the amount: what the space check must reserve. */
     public int amount() {
         return this.maxAmount;
