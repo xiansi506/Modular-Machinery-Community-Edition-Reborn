@@ -1695,6 +1695,46 @@ public final class ParallelCraftCheck {
         // 之后才被问（见 MachineRequirement 的说明），而 ItemRequirement 的实现是「按方向给出那条消息」。
         // 生产代码里对应的纪律是 `unaffordableStartFailure` 先自己确认 canStart/canTick 都过不了再问它——
         // 上面那条断言失败过一次，正是因为当时的生产代码没做这个前置检查。
+
+        // ---- (6) 失败文案必须**能被镜像到客户端** ------------------------------------------------
+        //
+        // 这是波 2 最大的一处「看不见的墙」：菜单只能传整数，所以失败键要通过一张**白名单**
+        // （START_FAILURE_KEYS）映射成索引；而波 2 新增的六条 craftcheck.failure.* 一个都不在里面。
+        // failureIndex() 对「不在列表里的键」返回 NO_START_FAILURE，于是那些文案**从来没有可能到达客户端**
+        // ——服务端设了、发包了、客户端读到的却是「没有失败」。实机表现是「状态显示闲置，但状态行下面是空的」。
+        //
+        // 这一条之所以值得单独立断言：一份白名单漏项时**不会报错**，只会安静地把功能删掉。
+        // 所以这里断言的不是「文案存在」，而是「每一条键都能被镜像到客户端、且原样读回来」。
+        String[] mustBeMirrorable = {
+                com.reborn.modularmachinery.recipe.ItemRequirement.FAILURE_ITEM_INPUT,
+                com.reborn.modularmachinery.recipe.ItemRequirement.FAILURE_ITEM_OUTPUT_SPACE,
+                com.reborn.modularmachinery.recipe.FluidRequirement.FAILURE_FLUID_INPUT,
+                com.reborn.modularmachinery.recipe.FluidRequirement.FAILURE_FLUID_OUTPUT_SPACE,
+                com.reborn.modularmachinery.recipe.EnergyRequirement.FAILURE_ENERGY_INPUT,
+                com.reborn.modularmachinery.recipe.EnergyRequirement.FAILURE_ENERGY_OUTPUT_SPACE,
+                com.reborn.modularmachinery.recipe.InterfaceNumberInputRequirement.MISSING_KEY,
+                com.reborn.modularmachinery.machine.SmartInterfaceType.DEFAULT_NOT_EQUAL_KEY,
+        };
+        for (String key : mustBeMirrorable) {
+            int index = com.reborn.modularmachinery.block.MachineControllerBlockEntity.failureIndex(key);
+            report("失败键能镜像到客户端: " + key + " (索引 " + index + ")",
+                    index >= 0 && key.equals(com.reborn.modularmachinery.block.MachineControllerBlockEntity
+                            .failureKeyAt(index)));
+        }
+        report("不在白名单里的键仍然映射成「没有失败」，而不是越界",
+                com.reborn.modularmachinery.block.MachineControllerBlockEntity.failureIndex("not.a.key")
+                        == com.reborn.modularmachinery.block.MachineControllerBlockEntity.NO_START_FAILURE);
+        report("「没有失败」的哨兵值不会被当成索引取到东西",
+                com.reborn.modularmachinery.block.MachineControllerBlockEntity
+                        .failureKeyAt(com.reborn.modularmachinery.block.MachineControllerBlockEntity
+                                .NO_START_FAILURE) == null);
+        // 顺序是通信格式的一部分：新键只能追加。这条断言把「前缀不变」这件事钉住。
+        check("原有两条键仍在最前面（索引 0/1），新键只能追加在末尾",
+                com.reborn.modularmachinery.recipe.InterfaceNumberInputRequirement.MISSING_KEY,
+                com.reborn.modularmachinery.block.MachineControllerBlockEntity.START_FAILURE_KEYS.get(0));
+        check("...第二条仍是接口数值不等", com.reborn.modularmachinery.machine.SmartInterfaceType
+                        .DEFAULT_NOT_EQUAL_KEY,
+                com.reborn.modularmachinery.block.MachineControllerBlockEntity.START_FAILURE_KEYS.get(1));
     }
 
     /**
@@ -3581,9 +3621,19 @@ public final class ParallelCraftCheck {
         check("...and nothing moved", 0, 4 - coalLeft());
 
         // The controller's own failure index: the menu mirrors an int, so the fixed list is the wire format.
-        check("the failure key list is the two original keys, in wire order",
+        //
+        // 0.32.0（波 2）在这份列表末尾**追加**了六条 craftcheck.failure.*。追加是对的，因为
+        // failureIndex 把键映射成索引、而索引要跨网络传给客户端——插入或删除会让旧客户端读到错误的键。
+        // 所以原来的两条仍在 0/1 位（下面单独断言），这里只把整张表钉住。
+        check("the failure key list is the two original keys followed by wave 2's six, in wire order",
                 "[component.missing.modularmachinery.interface.number, "
-                        + "craftcheck.failure.interface.number.notequal]",
+                        + "craftcheck.failure.interface.number.notequal, "
+                        + "craftcheck.failure.item.input, "
+                        + "craftcheck.failure.item.output.space, "
+                        + "craftcheck.failure.fluid.input, "
+                        + "craftcheck.failure.fluid.output.space, "
+                        + "craftcheck.failure.energy.input, "
+                        + "craftcheck.failure.energy.output.space]",
                 com.reborn.modularmachinery.block.MachineControllerBlockEntity.START_FAILURE_KEYS.toString());
         check("index of the missing key", 0,
                 com.reborn.modularmachinery.block.MachineControllerBlockEntity.failureIndex(
@@ -3900,14 +3950,21 @@ public final class ParallelCraftCheck {
             report("the sentinel the harness uses (" + HARNESS_NO_FAILURE + ") is the class's own "
                             + "NO_START_FAILURE (" + noFailure + ")",
                     noFailure == HARNESS_NO_FAILURE);
-            check("the list is the two keys the wire format carries", 2, keys.size());
-            check("index " + HARNESS_MISSING_KEY_INDEX + " is the missing-type key",
+            // **这里不能断言「列表正好两项」。** 那份列表是通信格式，而它的协议是
+            // 「新键只能追加」——0.32.0（波 2）确实在末尾追加了六条 craftcheck.failure.*。
+            // 真正要守的性质是：**下面这些断言用到的索引仍然指向同一批键**（追加不动前缀），
+            // 以及列表至少还有那两项。总数写死会让每一次合法的追加都变成一次假失败，
+            // 而假失败的代价是下一个人开始忽略这个检查。
+            report("the list still has at least the two keys this section indexes",
+                    keys.size() >= 2);
+            check("index " + HARNESS_MISSING_KEY_INDEX + " is still the missing-type key",
                     HARNESS_MISSING_KEY, String.valueOf(keys.get(HARNESS_MISSING_KEY_INDEX)));
-            check("index " + HARNESS_MISMATCH_KEY_INDEX + " is the mismatch key",
+            check("index " + HARNESS_MISMATCH_KEY_INDEX + " is still the mismatch key",
                     HARNESS_MISMATCH_KEY, String.valueOf(keys.get(HARNESS_MISMATCH_KEY_INDEX)));
-            if (noFailure != HARNESS_NO_FAILURE || keys.size() != 2
+            if (noFailure != HARNESS_NO_FAILURE || keys.size() < 2
                     || !HARNESS_MISSING_KEY.equals(keys.get(0)) || !HARNESS_MISMATCH_KEY.equals(keys.get(1))) {
-                report("the wire format moved; the checks below would describe a different build", false);
+                report("the wire format's PREFIX moved; the checks below would describe a different build",
+                        false);
                 return;
             }
         } catch (Throwable throwable) {
@@ -3939,7 +3996,14 @@ public final class ParallelCraftCheck {
                 "iconst_m1", fieldInitialiserConstant(controller, "clientStartFailure"));
 
         // ---- (2) the lookup guard: any index that is not a real one means "no failure" -----------------
-        for (int index : new int[] {HARNESS_NO_FAILURE, -2, 2, 3, Integer.MIN_VALUE, Integer.MAX_VALUE}) {
+        //
+        // **越界的索引必须相对列表长度来取。** 原来这里写死了 `2, 3`——当列表只有两项时它们确实越界，
+        // 而 0.32.0 追加了六条之后它们变成了**合法索引**，于是这几条从「验证越界安全」悄悄变成
+        // 「验证一个正常值等于 null」，报的是假失败。凡是「边界」都要由数据算出来，不能写死。
+        int failureKeyCount = com.reborn.modularmachinery.block.MachineControllerBlockEntity
+                .START_FAILURE_KEYS.size();
+        for (int index : new int[] {HARNESS_NO_FAILURE, -2, failureKeyCount, failureKeyCount + 1,
+                failureKeyCount + 100, Integer.MIN_VALUE, Integer.MAX_VALUE}) {
             try {
                 check("failureKeyAt(" + index + ") is null (the sentinel means \"no failure\")", "null",
                         String.valueOf(failureKeyAt.invoke(null, index)));
@@ -4004,8 +4068,16 @@ public final class ParallelCraftCheck {
             report("reading the mirror could not be driven: " + throwable, false);
         }
         try {
-            mirror.setInt(client, 2);
-            check("startFailureKey() with the mirror one past the end is null too", "null",
+            // **越界索引要相对列表长度取，不能写死 2。** 原来写的 2 在列表只有两项时正好是「越界」，
+            // 而 0.32.0 追加了六条之后它变成了一个**合法索引**——那三条断言于是从「验证越界安全」
+            // 悄悄变成「验证一个正常值等于 null」，也就是变成假失败。写死的边界值会随数据增长而失效。
+            int pastEnd = com.reborn.modularmachinery.block.MachineControllerBlockEntity
+                    .START_FAILURE_KEYS.size();
+            mirror.setInt(client, pastEnd);
+            check("startFailureKey() with the mirror one past the end (" + pastEnd + ") is null too", "null",
+                    String.valueOf(startFailureKey.invoke(client)));
+            mirror.setInt(client, pastEnd + 5);
+            check("startFailureKey() with a far-out-of-range mirror is null too", "null",
                     String.valueOf(startFailureKey.invoke(client)));
             mirror.setInt(client, -2);
             check("startFailureKey() with a below-zero index is null too", "null",

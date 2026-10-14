@@ -947,15 +947,16 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             if (!this.machineId.equals(recipe.machineId())) {
                 continue;
             }
-            // **必须先自己确认它真的开工不了，再去问原因。** `startFailure` 的契约是「只在
-            // `canSatisfy` 已经答 false 之后才被问」（见 MachineRequirement 的说明），
-            // 而这条配方不一定是被 `findRecipe` 刷掉的那一条（可能是另一条能开工、只是选择顺序在前）。
-            // 无条件地问它会让一条**本来能开工**的配方也给出失败文案——一句与事实相反的提示。
-            if (recipe.canStart(this.hatches, this.modifiers)
-                    && recipe.canTick(this.hatches, this.modifiers)) {
-                return null;
+            // **条件必须是「开不了工」，不能写成「开得了工」。** 这个方法只在 `findRecipe` 找不到配方时
+            // 才被调用，所以走到这里就说明「有配方认这台机器、但它此刻过不了」。第一版把条件写反了
+            // （`canStart && canTick` 时 return null），于是**能开工时给出原因、开不了工时什么都不给**——
+            // 正好与需要的相反，而实机上就表现为「状态是闲置、原因空的」。
+            //
+            // 只问 `canStart` 那一半的原因：`startFailure` 是「开工阶段」的消息，
+            // 而 `canTick` 失败（例如每 tick 的能源）本来就不由它描述。
+            if (recipe.canStart(this.hatches, this.modifiers)) {
+                continue;
             }
-            // 这条配方认这台机器、而且此刻确实开工不了。它的原因就是答案。
             return recipe.startFailure(this.hatches, this.modifiers);
         }
         return null;
@@ -1171,10 +1172,31 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * menu channel carries integers only — the same constraint that produced
      * {@code FactoryControllerMenu}'s status ordinals — so the string is mapped through this fixed list, and the
      * order is part of the wire format.
+     *
+     * <p><b>波 2 的六条 {@code craftcheck.failure.*} 曾经不在这份列表里，而那是一堵看不见的墙。</b>
+     * {@code failureIndex} 对「不在列表里的键」返回 {@link #NO_START_FAILURE}，于是那些文案
+     * <strong>从来没有可能到达客户端</strong>：服务端设了、`sendBlockUpdated` 发了、
+     * 客户端读到的却是「没有失败」。实机验证时表现为「状态是闲置、但状态行下面什么都没有」，
+     * 而真正的原因（缺少物品输入）在被吞掉之前就已经死在这一步了。
+     *
+     * <p>教训与本项目那条「日志里没有报错不提供任何信息」是同一类：**一份白名单漏了一项时，
+     * 它不会报错，只会安静地把功能删掉。** 所以 `START_FAILURE_KEYS` 现在必须包含
+     * {@code MachineRequirement} 那一侧可能产出的<strong>每一个</strong>键，
+     * 而 {@code ParallelCraftCheck} 的 S4 段断言这几条键**确实能被镜像到客户端**（而不是只断言文案存在）。
+     *
+     * <p><b>顺序是通信格式的一部分</b>：新增的键只能<strong>追加</strong>在末尾。中间的插入或删除会让
+     * 一个旧客户端把索引读到错误的键上——所以下面六条的相对顺序按波 2 的约定固定下来。
      */
     public static final List<String> START_FAILURE_KEYS = List.of(
             com.reborn.modularmachinery.recipe.InterfaceNumberInputRequirement.MISSING_KEY,
-            SmartInterfaceType.DEFAULT_NOT_EQUAL_KEY);
+            SmartInterfaceType.DEFAULT_NOT_EQUAL_KEY,
+            // 波 2（0.32.0）新增的六条，追加在末尾。
+            com.reborn.modularmachinery.recipe.ItemRequirement.FAILURE_ITEM_INPUT,
+            com.reborn.modularmachinery.recipe.ItemRequirement.FAILURE_ITEM_OUTPUT_SPACE,
+            com.reborn.modularmachinery.recipe.FluidRequirement.FAILURE_FLUID_INPUT,
+            com.reborn.modularmachinery.recipe.FluidRequirement.FAILURE_FLUID_OUTPUT_SPACE,
+            com.reborn.modularmachinery.recipe.EnergyRequirement.FAILURE_ENERGY_INPUT,
+            com.reborn.modularmachinery.recipe.EnergyRequirement.FAILURE_ENERGY_OUTPUT_SPACE);
 
     /**
      * The sentinel index meaning "no failure". {@link #failureIndex} returns it for {@code null} and
