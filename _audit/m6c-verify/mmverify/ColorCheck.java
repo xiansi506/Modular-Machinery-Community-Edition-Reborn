@@ -5,23 +5,26 @@ import com.google.gson.JsonParser;
 import com.reborn.modularmachinery.machine.MachineDefinition;
 import com.reborn.modularmachinery.machine.MachineSchema;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
- * 波 6 第 2 项（{@code color}）的第一小步：**解析与保存**。
+ * 波 6 第 2 项（{@code color}）：解析与保存，以及染色的模型资产。
  *
- * <h2>为什么先做这一半</h2>
+ * <h2>为什么先做这两半</h2>
  *
- * <p>波 6 的纪律是「一次一小步、做完留给实机确认」。{@code color} 全量做下来包含三件事：
- * ① 解析（十六进制字符串 → 颜色值）② 染色落地（模型 tint 层 + 方块颜色处理器）③ 外观。
- * 其中 ① 是**纯函数**、可以离线钉死；②③ 是渲染、必须用眼睛。
- * 所以这一节只钉 ①：定义里写什么颜色，读出来就是什么；写错了，报的是哪一句话。
+ * <p>波 6 的纪律是「一次一小步、做完留给实机确认」。{@code color} 全量包含三件事：
+ * ① 解析与保存 ② 模型 tint 层与颜色处理器 ③ 外观。其中 ① 与 ② 的**资产部分**是离线可证的；
+ * 真正把颜色画到方块上（方块实体带走颜色 + 处理器按位置读回）是下一小步，必须用眼睛看。
  *
  * <h2>断言走的是真实路径</h2>
  *
- * <p>不是直接调 {@code MachineDefinition.parseColor}，而是把一份**完整的定义 JSON** 喂给
- * {@code MachineSchema.read}——与数据包加载走的是同一条路。这样「解析器对了但没接进 loader」
- * 这种错误也会被抓到（那正是本项目反复强调的「接线也要断言」）。
+ * <p>解析的断言不直接调 {@code MachineDefinition.parseColor}，而是把一份**完整的定义 JSON** 喂给
+ * {@code MachineSchema.read}——与数据包加载走同一条路。这样「解析器对了但没接进 loader」也会被抓到。
  */
 final class ColorCheck {
 
@@ -36,11 +39,16 @@ final class ColorCheck {
             "\"parts\":[{\"x\":0,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"},"
                     + "{\"x\":1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"}]";
 
+    /** 模型资产的目录。 */
+    private static final Path MODELS =
+            Path.of("C:/mmwork/modular-machinery-reborn/src/main/resources/assets/"
+                    + "modular_machinery_reborn/models/block");
+
     private ColorCheck() {
     }
 
     static void colorParsing() {
-        ParallelCraftCheck.section("color 解析（波 6 · 0.60.0）");
+        ParallelCraftCheck.section("color（波 6 · 0.60.0 解析 / 0.61.0 模型 tint 层）");
 
         // ---- 成功路径 ------------------------------------------------------------------------------
         check("a definition without 'color' keeps the default (white = no tint)",
@@ -62,10 +70,9 @@ final class ColorCheck {
 
         // ---- 失败路径：两条与旧版对应的话 ------------------------------------------------------------
         //
-        // 旧版 DynamicMachinePreDeserializer#getColor 的两条错误是「不是字符串原语」与「解析失败」，
-        // 而且第二条把原因包起来。本版把两条都归到一句「必须恰好六位十六进制」，
-        // 因为那才是作者真正需要知道的事（旧版那句「应该是十六进制整数」在 'GGGGGG' 与 12345 两种情况下
-        // 都没说清该怎么写）。
+        // 旧版 DynamicMachinePreDeserializer#getColor 的两条错误是「不是字符串原语」与「解析失败」。
+        // 本版把两条都归到一句「必须恰好六位十六进制」，因为那才是作者真正需要知道的事
+        // （旧版那句「应该是十六进制整数」在 'GGGGGG' 与 12345 两种情况下都没说清该怎么写）。
         reportRefuses("a non-string 'color' is refused by name",
                 "{\"registryname\":\"color_bad_type\"," + PARTS + ",\"color\":12345}",
                 "color");
@@ -85,16 +92,54 @@ final class ColorCheck {
         // 日志里却在说「has root field(s) this loader does not know: color」——因为 `color` 此前在
         // UNIMPLEMENTED_ROOT_FIELDS 里，从来不需要出现在 KNOWN_ROOT_FIELDS 中。
         // 那条警告会让包作者以为字段名写错了，所以它必须不出现——**「没有警告」也要被钉住**。
-        // 与 `dynamic-patterns` 离开那份名单时的断言同形（见 ParallelCraftCheck）。
         ParallelCraftCheck.report("color 已被加载器认识（否则作者会看到一条与事实相反的 "
                         + "「does not know: color」警告）",
                 MachineSchema.KNOWN_ROOT_FIELDS.contains("color"));
-        // 不直接读那份「未实现」清单（它是 private，而为了断言去放宽可见性会把内部结构变成接口）。
+        // 不直接读那份「未实现」清单（它是 private，为了断言去放宽可见性会把内部结构变成接口）。
         // 改从**行为**上验：`color` 现在读得出值，说明它不再是「认得但不求值」的字段。
-        // 这与上面那条断言是不同的失败模式：上面抓「字段名不被认识」，这条抓「字段被认识但被当成摆设」。
         ParallelCraftCheck.report("...而且它确实被求值了（不是「认得但不求值」那种摆设）",
                 read("{\"registryname\":\"color_evaluated\"," + PARTS
                         + ",\"color\":\"123456\"}").color() == 0x123456);
+
+        // ---- 染色资产：外壳模型的 tint 层 ------------------------------------------------------------
+        checkTintAssets();
+    }
+
+    /**
+     * 外壳模型的 tint 层。
+     *
+     * <p>用途是**防止新增外壳模型时漏掉继承**：vanilla 的 {@code block/cube_all} 没有 tint 层，
+     * 所以任何一个仍然直接继承它的模型都会「不参与染色」——而那种漏法在游戏里只表现为
+     * 「这一种外壳不跟着变色」，很难注意到。断言把「每一种外壳都继承了带 tint 的父模型」钉住。
+     */
+    private static void checkTintAssets() {
+        try {
+            Path tintedParent = MODELS.resolve("cube_all_tinted.json");
+            if (!Files.exists(tintedParent)) {
+                ParallelCraftCheck.report("带 tint 的父模型存在（cube_all_tinted.json）", false);
+                return;
+            }
+            int tintFaces = countOf(Files.readString(tintedParent), "\"tintindex\": 1");
+            ParallelCraftCheck.report("父模型的六个面都带 tintindex 1（实际 " + tintFaces + " 个）",
+                    tintFaces == 6);
+
+            List<Path> casings;
+            try (Stream<Path> stream = Files.list(MODELS)) {
+                casings = stream
+                        .filter(path -> path.getFileName().toString().startsWith("blockcasing"))
+                        .filter(path -> path.getFileName().toString().endsWith(".json"))
+                        .sorted()
+                        .toList();
+            }
+            ParallelCraftCheck.report("外壳模型都被找到了（" + casings.size() + " 个）", casings.size() >= 6);
+            for (Path casing : casings) {
+                ParallelCraftCheck.report("...而且 " + casing.getFileName() + " 继承了带 tint 的父模型"
+                                + "（仍继承 vanilla cube_all 的话，这一种外壳不会跟着染色）",
+                        Files.readString(casing).contains("cube_all_tinted"));
+            }
+        } catch (IOException unreadable) {
+            ParallelCraftCheck.report("读取染色的模型资产失败: " + unreadable, false);
+        }
     }
 
     /** 用真实加载路径读一份定义。 */
@@ -112,6 +157,17 @@ final class ColorCheck {
             boolean mentions = String.valueOf(expected.getMessage()).contains(mention);
             ParallelCraftCheck.report(what + " — " + expected.getMessage(), mentions);
         }
+    }
+
+    /** 子串出现次数。 */
+    private static int countOf(String text, String needle) {
+        int count = 0;
+        int at = text.indexOf(needle);
+        while (at >= 0) {
+            count++;
+            at = text.indexOf(needle, at + needle.length());
+        }
+        return count;
     }
 
     private static void check(String what, String expected, String actual) {

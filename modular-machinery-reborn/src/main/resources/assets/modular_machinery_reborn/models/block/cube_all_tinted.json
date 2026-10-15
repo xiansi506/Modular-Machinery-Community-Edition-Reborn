@@ -1,0 +1,33 @@
+{
+  "credit": "Modular Machinery: Community Edition Reborn",
+  "__comment": [
+    "A cube_all whose faces carry tintindex 1, so a block colour handler can tint the casing texture",
+    "without touching the rest of a machine part's model.",
+    "",
+    "Why this file exists: the vanilla parent `block/cube_all` has no tint layer at all, so a colour",
+    "handler would have nothing to colour. The original did the same thing one level down — its",
+    "`blockcasing_plain` element carried `\"tintindex\": 1` on every face (see _mmce-src's",
+    "`blocklifeessenceprovider*.json`, which embed that element), and only that texture layer was tinted;",
+    "the machine's own overlay textures were not.",
+    "",
+    "Face order and uv/v values are the vanilla cube_all template's, so switching a model's parent from",
+    "`minecraft:block/cube_all` to this one changes nothing about its geometry."
+  ],
+  "textures": {
+    "particle": "#all"
+  },
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "down":  { "texture": "#all", "cullface": "down",  "tintindex": 1 },
+        "up":    { "texture": "#all", "cullface": "up",    "tintindex": 1 },
+        "north": { "texture": "#all", "cullface": "north", "tintindex": 1 },
+        "south": { "texture": "#all", "cullface": "south", "tintindex": 1 },
+        "west":  { "texture": "#all", "cullface": "west",  "tintindex": 1 },
+        "east":  { "texture": "#all", "cullface": "east",  "tintindex": 1 }
+      }
+    }
+  ]
+}
