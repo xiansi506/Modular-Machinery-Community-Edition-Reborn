@@ -292,6 +292,12 @@ public final class ParallelCraftCheck {
         // harness can load and drive it, which is why this section can be written against the production types
         // directly instead of by name.
         RequirementTypeCheck.requirementTypeRegistry();
+        // 波 5.3 (0.34.0): the first real compat module -- Mekanism chemical, i.e. the original's "gas". This is
+        // the only way to find out whether the wave-5.2 framework works for its stated purpose, because it
+        // drives that framework with a module that is NOT built in. Its boundary (what an offline harness can and
+        // cannot prove about a Mekanism API) was measured with a throwaway probe before this section was
+        // written, and the section pins that boundary with an assertion so the next person need not re-measure it.
+        MekanismCompatCheck.mekanismChemical();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");

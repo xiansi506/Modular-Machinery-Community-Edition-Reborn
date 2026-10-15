@@ -54,16 +54,18 @@ public final class ModCompat {
     /**
      * 本模组**已知**的兼容模块清单。
      *
-     * <p>空的是**事实，不是 TODO**：波 5.3 的每个模块都要先拿到该模组 1.20.1 的 API jar，
-     * 而本机 {@code libs/} 里只有 jei / kubejs / rhino（交接文档已核实）。所以这一波交付的是
-     * 「框架能用」，而不是「某个模块能用」。一个模块写好了就在这里加一行——**只需改这一行**，
-     * 主模组其余部分不必知道它的存在。
+     * <p>波 5.3 起有第一个真模块：{@code compat/mekanism/MekanismModule}（Mekanism 化学，旧版的「气体」）。
+     * 它的 {@code requiresModid()} 是 {@code "mekanism"}，所以没装那个模组时它不会被注册——
+     * **而这条能成立的前提是：本清单里的模块类在构造时不触发它依赖的 API 的类加载。**
+     * {@code MekanismModule} 满足这一条（构造器只赋值，所有 Mekanism 引用都在实例方法与方法体里）。
+     * 后来者加模块时必须同样满足，否则没装该模组的玩家会在**注册判断之前**就
+     * {@code NoClassDefFoundError}。
      *
-     * <p>写成 {@code List.of()} 而不是反射扫描：反射能省掉这一行，代价是「哪些模块在」变成运行时才知道的
-     * 事情，构建期没有任何东西能检查它。而这里的模块都是编译期就存在的类（它们要引用该模组的 API）。
+     * <p>写成 {@code List.of(...)} 而不是反射扫描：反射能省掉这一行，代价是「哪些模块在」变成运行时
+     * 才知道的事情，构建期没有任何东西能检查它。而这里的模块都是编译期就存在的类（它们要引用该模组的 API）。
      */
     private static List<CompatModule> modules() {
-        return List.of();
+        return List.of(new com.reborn.modularmachinery.compat.mekanism.MekanismModule());
     }
 
     private ModCompat() {

@@ -1,5 +1,6 @@
 package com.reborn.modularmachinery.machine;
 
+import mekanism.api.chemical.gas.IGasHandler;
 import net.minecraftforge.energy.IEnergyStorage;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.IItemHandler;
@@ -139,6 +140,43 @@ public final class HatchCollection {
 
     public List<IEnergyStorage> energyOutputs() {
         return this.energyOutputs;
+    }
+
+    /**
+     * 气体端口，**永远是空的**（见 {@link #gasInputs()} 的说明）。
+     *
+     * <p>做成 {@code static final} 常量而不是构造器参数，是因为「现在一个端口都没有」不是一个
+     * 需要逐实例保存的事实——那样会往 {@link #withTag} 与 {@link Builder#build} 各塞一个恒为空的参数，
+     * 也就是给未来的自己留两个必须记得传对的地方。等端口真的接通时，它会连同自己的标签列表一起
+     * 变成实例字段，那时这场改动本来就要动那些地方。
+     */
+    private static final List<IGasHandler> NO_GAS_PORTS = List.of();
+
+    /**
+     * 气体（Mekanism 化学体系）端口。
+     *
+     * <p><b>它们现在永远是空的，这是事实而不是占位。</b>化学端口还没有实现：旧版把它做在**已有的流体仓**
+     * 上（{@code HybridGasTank extends HybridTank}，宿主 {@code TileFluidTank} / {@code GuiContainerFluidHatch}，
+     * 全部 {@code @Optional.Method(modid = "mekanism")}），所以 1.20.1 这一侧的正确形状是「给流体仓加一个
+     * 可选的气体能力」，而不是新方块——那条路与本项目的 D8（方块只能在构造期注册）不冲突，
+     * 但它是**结算路径上的结构改动**，因此单独一轮做，见
+     * {@code docs/波5.3-勘测-Mekanism化学体系.md} §4。
+     *
+     * <p><b>为什么把这两个访问器先放进来：</b>需求类要能编译、要被断言驱动，就必须有一个统一的端口读取面。
+     * 若气体需求自己去别处取端口，那么等端口真的接通时，「哪几处能看气体端口」就会有第二个答案——
+     * 这正是本项目已经吃过一次的「两条入口各自演进」。
+     *
+     * <p><b>空列表的语义是安全的：</b>{@code GasIo} 对空列表一律答「没有 / 抽不到 / 灌不进」，
+     * 于是一条气体配方在没有化学端口的世界里表现为**开工失败**（并给出 {@code craftcheck.failure.gas.input}），
+     * 而不是崩溃或静默成功。
+     */
+    public List<IGasHandler> gasInputs() {
+        return NO_GAS_PORTS;
+    }
+
+    /** 气体输出端口。同 {@link #gasInputs()}：现在永远是空的。 */
+    public List<IGasHandler> gasOutputs() {
+        return NO_GAS_PORTS;
     }
 
     /**
