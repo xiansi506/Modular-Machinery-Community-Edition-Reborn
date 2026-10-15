@@ -446,7 +446,7 @@ final class MekanismCompatCheck {
             report("the fluid tank pretends to be empty while gas occupies the hatch (otherwise a fluid pipe "
                     + "could put liquid into a hatch that already holds gas)",
                     hatch.contains("class FluidTankWithGasPriority")
-                            && hatch.contains("gasBlocksFluid() ? net.minecraftforge.fluids.FluidStack.EMPTY")
+                            && hatch.contains("return net.minecraftforge.fluids.FluidStack.EMPTY;")
                             && hatch.contains("return gasBlocksFluid() ? 0 : super.fill("));
             report("...and clearing the fluid for gas is a REAL clear, reachable without the blocking logic "
                     + "(otherwise the old liquid reappears once the gas is drained)",

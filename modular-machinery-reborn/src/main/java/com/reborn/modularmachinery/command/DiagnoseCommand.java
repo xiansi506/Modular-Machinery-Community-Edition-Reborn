@@ -206,6 +206,11 @@ public final class DiagnoseCommand {
         // JadeForgeUtils#fromFluidHandler 实现，本模组不参与）。所以「Jade 不显示液体」只有两种可能：
         // 方块实体没交出那个能力，或者交出来了但罐是空的。这一节把两者分开。
         source.sendSuccess(() -> Component.literal("--- 流体能力（Jade 读的就是这里）---"), false);
+        // 闸门计数放在最前面：它回答「有没有发生过『罐里真有液体、却被闸门读成 0』」。
+        // 这是「游戏内界面看得见液体、Jade 只显示 0」这类现象的唯一可能来源，而它发生在一瞬，
+        // 只能靠计数事后问出来。
+        source.sendSuccess(() -> Component.literal("  "
+                + com.reborn.modularmachinery.block.MachineHatchBlockEntity.gateCounters()), false);
         for (int dx = -16; dx <= 16; dx++) {
             for (int dy = -16; dy <= 16; dy++) {
                 for (int dz = -16; dz <= 16; dz++) {
@@ -245,13 +250,26 @@ public final class DiagnoseCommand {
                     String rawText = raw.isEmpty() ? "空"
                             : raw.getFluid().builtInRegistryHolder().key().location()
                                     + " x" + raw.getAmount() + " mB";
+                    // **关键对比**：本类重写的 getCapability 与父类（Forge 的
+                    // CapabilityDispatcher，也就是「别的模组用 AttachCapabilitiesEvent 挂上来的能力」）
+                    // 会不会给出**不同的处理器**。如果不同，就说明有第三方能力盖在本模组之上——
+                    // 而 Jade 走的正是父类那条路（它按 CapabilityProvider 查），于是它读到别人的空罐。
+                    String dispatcher = "（父类未交出）";
+                    var viaSuper = hatch.fluidCapabilityViaSuper();
+                    if (viaSuper.isPresent()) {
+                        var other = viaSuper.orElse(null);
+                        var stack = other.getFluidInTank(0);
+                        dispatcher = "罐数=" + other.getTanks() + " 容量=" + other.getTankCapacity(0)
+                                + " 内容=" + (stack.isEmpty() ? "空"
+                                        : stack.getFluid().builtInRegistryHolder().key().location()
+                                                + " x" + stack.getAmount() + " mB")
+                                + " 同一个对象=" + (handler.isPresent()
+                                        && other == handler.orElse(null));
+                    }
                     final String line = "    " + at.toShortString() + " 种类=" + hatch.kind()
                             + " 罐真值=" + rawText
-                            + " ｜ 交出FLUID_HANDLER=" + handler.isPresent()
-                            + " 罐数=" + (handler.isPresent() ? handler.orElse(null).getTanks() : -1)
-                            + " 容量=" + capacity
-                            + "（<=0 时 Jade 会跳过这个罐）"
-                            + " ｜ Jade 会读到=" + contents;
+                            + " ｜ 本类交出=" + contents
+                            + " ｜ 父类(Forge 派发)交出=" + dispatcher;
                     source.sendSuccess(() -> Component.literal(line), false);
                 }
             }

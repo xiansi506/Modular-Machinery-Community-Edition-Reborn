@@ -209,7 +209,18 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         }
 
         @Override public net.minecraftforge.fluids.FluidStack getFluid() {
-            return gasBlocksFluid() ? net.minecraftforge.fluids.FluidStack.EMPTY : super.getFluid();
+            if (gasBlocksFluid()) {
+                // 计数：**闸门挡住过一次「真的装着东西」的读**。这是「界面上有液体、Jade 只显示 0」
+                // 这类现象的唯一可能来源，而它发生在一瞬间，日志抓不到，所以记成持久计数。
+                if (super.getFluidAmount() > 0) {
+                    GATED_READS_WITH_FLUID.incrementAndGet();
+                }
+                return net.minecraftforge.fluids.FluidStack.EMPTY;
+            }
+            if (super.getFluidAmount() > 0) {
+                OPEN_READS_WITH_FLUID.incrementAndGet();
+            }
+            return super.getFluid();
         }
 
         @Override public int getFluidAmount() {
@@ -243,6 +254,25 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
                 super.setFluid(net.minecraftforge.fluids.FluidStack.EMPTY);
             }
         }
+    }
+
+    /**
+     * 闸门的两个计数，给 {@code /mm-diagnose} 用。
+     *
+     * <p>为什么要静态：这两个数回答的是「**有没有**发生过闸门把真值挡成 0」，
+     * 而那个瞬间在游戏里抓不到（Jade 每次照到方块都会读一次）。静态计数让它能被事后问出来。
+     * 它们是**诊断量**而不是状态，不参与逻辑判断。
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger GATED_READS_WITH_FLUID =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicInteger OPEN_READS_WITH_FLUID =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 闸门计数的一行描述；给 {@code /mm-diagnose} 与探针用。 */
+    public static String gateCounters() {
+        return "放行且罐里有液体 " + OPEN_READS_WITH_FLUID.get() + " 次"
+                + " / **挡住且罐里真有液体** " + GATED_READS_WITH_FLUID.get() + " 次"
+                + "（后者 > 0 就说明这个闸门误伤了：界面上有液体而 Jade 读到 0）";
     }
 
     /**
@@ -344,6 +374,19 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
      * <p>映射器在 {@code FMLCommonSetupEvent} 里登记，而能力查询在那之后（玩家进世界才有方块实体），
      * 所以这里是「顺带问一句」，不需要自己判断时机。
      */
+    /**
+     * 诊断用：**父类**（Forge 的 {@code CapabilityDispatcher}）会为流体交出什么。
+     *
+     * <p>为什么需要它：{@code getCapability} 被本类重写了，所以「Jade 读到的」与「本类给出的」
+     * 在正常情况下来自同一个方法。但如果**有别的模组用 {@code AttachCapabilitiesEvent}
+     * 往这个方块实体上挂了自己的流体能力**，那么 Forge 的能力派发（也就是父类那一条路，
+     * Jade 走的正是它）会先给出**第三方**的处理器——于是出现「本类读到 32000、
+     * Jade 却读到 0」这种自相矛盾的读数。这个方法把父类那一条路单独问出来，用于分辨。
+     */
+    public LazyOptional<net.minecraftforge.fluids.capability.IFluidHandler> fluidCapabilityViaSuper() {
+        return super.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER, null);
+    }
+
     @Override
     public <T> LazyOptional<T> getCapability(Capability<T> capability, @Nullable Direction side) {
         // 记下每一次查询的能力名：这是「管道到底问了没有、问的是不是那个能力」的唯一低成分证据。
