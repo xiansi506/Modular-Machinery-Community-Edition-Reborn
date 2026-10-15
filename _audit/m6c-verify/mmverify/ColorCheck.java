@@ -138,7 +138,7 @@ final class ColorCheck {
                             && colorsText.contains("event.register("));
             ParallelCraftCheck.report("...并且注册给本模组的控制器与全部仓族（不是 Block.class："
                             + "全量注册会把别的模组方块卷进来，Jade 那次已经吃过一回）",
-                    colorsText.contains("MACHINE_CONTROLLER.get()")
+                    colorsText.contains("ModBlocks.controllerBlocks()")
                             && colorsText.contains("ModBlocks.hatchBlock(kind).get()")
                             // 判据是「注册**参数**里没有 Block.class」，不是「文件里没出现这几个字」——
                             // 类注释里正好在解释「为什么不用 Block.class」，按字面判会误伤注释。
@@ -193,7 +193,39 @@ final class ColorCheck {
                         .sorted()
                         .toList();
             }
-            ParallelCraftCheck.report("外壳模型都被找到了（" + casings.size() + " 个）", casings.size() >= 6);
+            // 0.62.1 修正：**仓**与**控制器**才是玩家会盯着看的地方，而它们原先都没有 tint 层
+        // （仓是普通 cube_all，控制器是自绘的六面模型）——所有者实机试过「按定义写了 color 但没变色」，
+        // 原因就在这里：`getColor` 根本没有被调用过。这一条断言钉住「仓模型都带 tint」。
+        List<Path> hatches;
+        try (Stream<Path> hatchStream = Files.list(MODELS)) {
+            hatches = hatchStream
+                    .filter(path -> path.getFileName().toString().endsWith("_hatch_.json")
+                            || path.getFileName().toString().matches(".*_hatch_[a-z]+\\.json"))
+                    .sorted()
+                    .toList();
+        }
+        int hatchesWithoutTint = 0;
+        for (Path hatch : hatches) {
+            if (!Files.readString(hatch).contains("cube_all_tinted")) {
+                hatchesWithoutTint++;
+                ParallelCraftCheck.report("仓模型 " + hatch.getFileName() + " 没有带 tint 的父模型"
+                        + "（它不会被染色）", false);
+            }
+        }
+        ParallelCraftCheck.report("全部仓模型都带 tint 层（" + hatches.size() + " 个，"
+                        + "缺 tint 的 " + hatchesWithoutTint + " 个）——"
+                        + "控制器与仓才是玩家会看的地方，0.62.1 之前它们都没有 tint",
+                !hatches.isEmpty() && hatchesWithoutTint == 0);
+
+        // 控制器：只有**正面**（north，机器的图案）不带 tint，其余五面要染色。
+        String controllerModel = Files.readString(MODELS.resolve("machine_controller.json"));
+        int controllerTinted = countOf(controllerModel, "\"tintindex\":1");
+        ParallelCraftCheck.report("控制器模型有五个面带 tint（实际 " + controllerTinted
+                        + "；正面是机器图案，故意不染）",
+                controllerTinted == 5 && !controllerModel.contains("\"north\":{\"texture\":\"#north\","
+                        + "\"cullface\":\"north\",\"tintindex\""));
+
+        ParallelCraftCheck.report("外壳模型都被找到了（" + casings.size() + " 个）", casings.size() >= 6);
             for (Path casing : casings) {
                 ParallelCraftCheck.report("...而且 " + casing.getFileName() + " 继承了带 tint 的父模型"
                                 + "（仍继承 vanilla cube_all 的话，这一种外壳不会跟着染色）",

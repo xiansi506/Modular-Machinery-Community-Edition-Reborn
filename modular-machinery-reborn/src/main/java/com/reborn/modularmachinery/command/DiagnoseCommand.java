@@ -192,6 +192,42 @@ public final class DiagnoseCommand {
         // 为什么单列一节：气体端口是**看不见**的——流体仓的界面只画流体，所以「气体进没进去」
         // 在游戏里没有任何显示。而这条路上有四个分岔（模块没注册 / 能力对象没拿到 / 管道没问 /
         // 问了但被拒），它们在日志里长得一模一样。这一节把四个都变成可读的一行。
+        // 波 6：染色。分三段问，因为「没变色」有几种完全不同的原因：
+        // 定义没解析出颜色 / 控制器没拿到 / 拿到的没同步给客户端 / 渲染层没 tint 层。
+        // 前三种这里能分开，第四种只能看模型（本版的控制器的仓的模型**没有** tint 层，见已知限制）。
+        source.sendSuccess(() -> Component.literal("--- 染色（color）---"), false);
+        {
+            final int definitionColor = controller.machineId() == null ? -1
+                    : com.reborn.modularmachinery.machine.MachineRegistry.byId(controller.machineId())
+                            .map(com.reborn.modularmachinery.machine.MachineDefinition::color).orElse(-1);
+            source.sendSuccess(() -> Component.literal("  这台机器的定义 color = "
+                    + (definitionColor < 0 ? "（没有机器 / 没读到）" : String.format("#%06X", definitionColor))
+                    + "（未设过时是 #FFFFFF）"), false);
+            source.sendSuccess(() -> Component.literal("  控制器自己的 machineColor = "
+                    + (controller.machineColor() == null ? "null（没被下发过）"
+                            : String.format("#%06X", controller.machineColor()))
+                    + "（这条是**服务端**的值；客户端那份靠方块实体同步）"), false);
+            int hatchesWithColor = 0;
+            int hatchesSeen = 0;
+            for (int dx = -16; dx <= 16; dx++) {
+                for (int dy = -16; dy <= 16; dy++) {
+                    for (int dz = -16; dz <= 16; dz++) {
+                        if (level.getBlockEntity(pos.offset(dx, dy, dz))
+                                instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch) {
+                            hatchesSeen++;
+                            if (hatch.machineColor() != null) {
+                                hatchesWithColor++;
+                            }
+                        }
+                    }
+                }
+            }
+            final int seen = hatchesSeen;
+            final int colored = hatchesWithColor;
+            source.sendSuccess(() -> Component.literal("  附近仓里被下发过颜色的: " + colored + " / " + seen
+                    + "（0 且上面那行非 null，说明下发没走到）"), false);
+        }
+
         source.sendSuccess(() -> Component.literal("--- 兼容端口（气体）---"), false);
         source.sendSuccess(() -> Component.literal("  已登记的端口映射器数量 = "
                 + com.reborn.modularmachinery.compat.ModCompat.portMapperCount()

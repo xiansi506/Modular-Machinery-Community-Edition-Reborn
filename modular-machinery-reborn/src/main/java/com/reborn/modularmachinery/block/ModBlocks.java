@@ -434,7 +434,14 @@ public final class ModBlocks {
                 output.accept(ModItems.WRENCH.get());
             }).build());
 
-    private static Block[] controllerBlocks() {
+    /**
+     * 每一个控制器方块：普通控制器、工厂控制器、以及每台机器自己的那两种。
+     *
+     * <p>0.62.1 起是 {@code public}：客户端要给**全部**控制器注册染色处理器，而这份名单是唯一的权威来源
+     * （它们共用同一个方块实体类型与同一个 {@code machine_controller} 模型）。
+     * 逐个枚举而不是注册给 {@code Block.class}——全量注册会把别的模组的方块也卷进来。
+     */
+    public static Block[] controllerBlocks() {
         List<Block> blocks = new ArrayList<>();
         blocks.add(MACHINE_CONTROLLER.get());
         blocks.add(FACTORY_CONTROLLER.get());

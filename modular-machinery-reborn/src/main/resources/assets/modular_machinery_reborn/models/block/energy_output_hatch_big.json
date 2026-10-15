@@ -1,1 +1,1 @@
-{"textures":{"all":"modular_machinery_reborn:block/energy_output_hatch_big"},"parent":"minecraft:block/cube_all"}
+{"textures":{"all":"modular_machinery_reborn:block/energy_output_hatch_big"},"parent":"modular_machinery_reborn:block/cube_all_tinted"}

@@ -51,9 +51,11 @@ public final class MachinePartColors implements BlockColor {
     public static void register(RegisterColorHandlersEvent.Block event) {
         MachinePartColors handler = new MachinePartColors();
         // 控制器（含数据化控制器：它们共用同一个方块实体类型）。
-        event.register(handler,
-                com.reborn.modularmachinery.block.ModBlocks.MACHINE_CONTROLLER.get(),
-                com.reborn.modularmachinery.block.ModBlocks.BLOCK_CASING.get());
+        // 全部控制器（普通 / 工厂 / 每台机器自己那两个）——它们共用同一个方块实体与同一个模型。
+        event.register(handler, com.reborn.modularmachinery.block.ModBlocks.controllerBlocks());
+        // 装饰外壳：模型有 tint 层，但它**没有方块实体**，所以永远不会被染色（与旧版一致）。
+        // 仍然注册：将来若给外壳加方块实体状态，落点已经在了。
+        event.register(handler, com.reborn.modularmachinery.block.ModBlocks.BLOCK_CASING.get());
         // 六个仓族各一个方块（等级由 blockstate 的 size 属性决定，所以一族一个块）。
         // 逐个注册而不是注册给 Block.class：Jade 那次教训说明「全量注册」会把别的模组方块也卷进来。
         for (com.reborn.modularmachinery.block.HatchKind kind
