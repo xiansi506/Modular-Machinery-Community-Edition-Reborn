@@ -27,5 +27,9 @@ public final class ModularMachineryJadePlugin implements IWailaPlugin {
         // 精确注册既省开销，也避免与别的模组的全局 provider 相互干扰。
         registration.registerBlockComponent(HatchFluidComponent.INSTANCE,
                 com.reborn.modularmachinery.block.MachineHatchBlock.class);
+        // 再把 Jade 通用流体组件**在本模组方块上的那一份**摘掉：它服务端读得对、客户端却画成空
+        // （所有者实例上实测到「空 : 0 mB」与「整栏不显示」两种错法），而本模组已自己给出正确的一份。
+        // 两份并存会让玩家看到两个互相矛盾的数字。
+        registration.addTooltipCollectedCallback(FluidStorageSuppressor.INSTANCE);
     }
 }

@@ -736,6 +736,18 @@ final class MekanismCompatCheck {
                             && !componentText.contains("saveWithoutMetadata()")
                             && withoutComments(Files.readString(hatchEntity))
                                     .contains("if (this.level != null && this.level.isClientSide)"));
+            // 通用流体组件那一份必须被摘掉，而且**只摘本模组方块上的**：
+            // 它服务端读得对、客户端画成空，两份并存会让玩家看到两个互相矛盾的数字；
+            // 而别的模组方块上的那一份绝不能动。
+            Path suppressor = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                    + "modularmachinery/integration/jade/FluidStorageSuppressor.java");
+            String suppressorText = withoutComments(Files.readString(suppressor));
+            report("Jade's universal fluid component is removed for this mod's hatch blocks only "
+                    + "(its id is exact, and the check is on our own block class)",
+                    suppressorText.contains("new ResourceLocation(\"jade\", \"fluid_storage\")")
+                            && suppressorText.contains("MachineHatchBlock")
+                            && suppressorText.contains("tooltip.remove(")
+                            && pluginText.contains("addTooltipCollectedCallback"));
         } catch (Exception exception) {
             report("reading the Jade plugin sources failed: " + exception, false);
         }
