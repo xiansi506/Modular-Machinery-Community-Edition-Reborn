@@ -218,6 +218,10 @@ public final class DiagnoseCommand {
                         continue;
                     }
                     // 用**空方向**查询，与 Jade 的做法一致（JadeForgeUtils 走 CapabilityProvider 的无方向查询）。
+                    //
+                    // 同时报**罐的真值**（绕开能力层直接问方块实体自己的罐）与**通过能力读到的值**。
+                    // 两者必须一致；不一致就说明「能力层给出的答案」与「罐里真实的东西」不同——
+                    // 而那正是「游戏内界面看得见、Jade 看不见」这一类现象的分岔点。
                     var handler = hatch.getCapability(
                             net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER, null);
                     // 内容要**手写**成「什么液体、多少」：FluidStack 没有覆写 toString()，
@@ -234,12 +238,20 @@ public final class DiagnoseCommand {
                                 : inTank.getFluid().builtInRegistryHolder().key().location()
                                         + " x" + inTank.getAmount() + " mB";
                     }
+                    // 罐的真值：直接问方块实体，不经过能力层。
+                    net.minecraftforge.fluids.FluidStack raw = hatch.fluidTank() == null
+                            ? net.minecraftforge.fluids.FluidStack.EMPTY
+                            : hatch.fluidTank().getFluid();
+                    String rawText = raw.isEmpty() ? "空"
+                            : raw.getFluid().builtInRegistryHolder().key().location()
+                                    + " x" + raw.getAmount() + " mB";
                     final String line = "    " + at.toShortString() + " 种类=" + hatch.kind()
-                            + " 交出FLUID_HANDLER=" + handler.isPresent()
+                            + " 罐真值=" + rawText
+                            + " ｜ 交出FLUID_HANDLER=" + handler.isPresent()
                             + " 罐数=" + (handler.isPresent() ? handler.orElse(null).getTanks() : -1)
                             + " 容量=" + capacity
                             + "（<=0 时 Jade 会跳过这个罐）"
-                            + " 内容=" + contents;
+                            + " ｜ Jade 会读到=" + contents;
                     source.sendSuccess(() -> Component.literal(line), false);
                 }
             }
