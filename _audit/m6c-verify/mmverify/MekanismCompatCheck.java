@@ -746,13 +746,17 @@ final class MekanismCompatCheck {
             // ITooltip.add(IElement)（不带 id 的重载）把流体元素加进去，所以 remove(id) 找不到它
             // —— 这是从 Jade 字节码里读出来的。现在改为按**内容**定位（方块显示名那一段），
             // 删掉它并插回本模组自己的行。
-            report("the universal fluid component's block is located by CONTENT (the block's own display"
-                    + " name), not by an id (Jade adds those elements with no id at all), and only for"
-                    + " this mod's hatch blocks",
+            // 按 id 移除那一版无效（Jade 用不带 id 的 add(IElement)）；按「显示名相等」定位那一版
+            // 也无效（所有者实测提示毫无变化）——两版在游戏里的表现一模一样，所以这一版除了
+            // 「多判据 + 兜底」之外，还带了**计数器**把「回调有没有被调用」变成可读事实。
+            report("the suppressor locates the row by several criteria with a fallback, only ever touches"
+                    + " this mod's hatch blocks, and exposes counters so that 'the callback never ran'"
+                    + " can be told apart from 'it ran but located nothing'",
                     suppressorText.contains("MachineHatchBlock")
                             && suppressorText.contains("getDisplayName()")
-                            && suppressorText.contains("tooltip.remove(")
-                            && suppressorText.contains("isNameRow")
+                            && suppressorText.contains("FALLBACK_ROW")
+                            && suppressorText.contains("AtomicInteger")
+                            && suppressorText.contains("counters()")
                             && pluginText.contains("addTooltipCollectedCallback"));
         } catch (Exception exception) {
             report("reading the Jade plugin sources failed: " + exception, false);

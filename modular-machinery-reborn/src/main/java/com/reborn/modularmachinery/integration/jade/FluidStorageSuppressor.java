@@ -2,6 +2,7 @@ package com.reborn.modularmachinery.integration.jade;
 
 import com.reborn.modularmachinery.block.MachineHatchBlock;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import snownee.jade.api.Accessor;
 import snownee.jade.api.BlockAccessor;
 import snownee.jade.api.ITooltip;
@@ -9,91 +10,118 @@ import snownee.jade.api.callback.JadeTooltipCollectedCallback;
 import snownee.jade.api.ui.IElement;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 把 Jade 通用流体组件在本模组仓方块上画的那一份整块去掉，并在这个位置放上本模组自己的两行。
+ * 去掉 Jade 通用流体组件在本模组仓方块上画的那一块。
  *
- * <h2>为什么不能用 {@code ITooltip.remove(id)}</h2>
+ * <h2>这个类为什么带计数器</h2>
  *
- * <p>那个 id 版本试过，**无效**：Jade 的 {@code ClientViewGroup.tooltip(...)} 是用
- * {@code ITooltip.add(IElement)}（**不带 id** 的那个重载）把流体元素加进提示的，
- * 所以按 id 移除什么也找不到。这是从 Jade 的字节码里读出来的，不是猜的
- * （{@code ClientViewGroup} 里只有 {@code add(IElement)} 与 {@code add(IElement, Align)}）。
+ * <p>它已经失败过两次，而两次失败在游戏里的表现**完全一样**（提示没有任何变化）：
+ * 可能是这个回调压根没被调用，也可能调用了但没定位到目标那一行。两者要的修法完全不同，
+ * 而它们从外面看不出来——本项目规矩 5 说的就是这一类。所以这里把两件事都记成持久计数：
+ * 回调被调用了几次、其中几次真的动手改了提示。计数由 {@code /mm-diagnose} 读出来。
  *
- * <h2>所以按「内容」定位</h2>
+ * <h2>与 Jade 的实际行为有关的两条事实（都取自它的字节码）</h2>
  *
- * <p>用 {@code ITooltip.get(int, Align)} 把该行的元素枚举出来，找**那个就是方块显示名**的元素
- * （与 {@code BlockAccessor.getBlockEntity().getDisplayName()} 相等）——那就是「流体输入仓」这一行的起点。
- * 从它开始、到下一行之前的内容就是通用流体组件的那一块（图标 + 名字 + 空框），删掉，
- * 再在同一个下标插入本模组自己的「液体」与「气体」两行。
- *
- * <p>只对本模组的 {@link MachineHatchBlock} 生效；别的模组方块一个字都不动。
+ * <ul>
+ *   <li>{@code ClientViewGroup.tooltip(...)} 用 {@code ITooltip.add(IElement)}（**不带 id**）把通用流体
+ *       元素加进提示 —— 所以 {@code ITooltip.remove(ResourceLocation)} 找不到它（第一次失败的原因）。</li>
+ *   <li>方块名那一行的元素文本与 {@code getDisplayName()} 不相等（第二次失败的原因：定位没命中），
+ *       所以这一版改用「文本包含」这一更松的判据，并保留一个只对**本模组方块**生效的兜底下标。</li>
+ * </ul>
  */
 public final class FluidStorageSuppressor implements JadeTooltipCollectedCallback {
 
     public static final FluidStorageSuppressor INSTANCE = new FluidStorageSuppressor();
 
+    /** 通用流体组件的注册 id（{@code Identifiers.UNIVERSAL_FLUID_STORAGE}）。 */
+    private static final ResourceLocation UNIVERSAL_FLUID_STORAGE =
+            new ResourceLocation("jade", "fluid_storage");
+
+    /** 定位全部失败时的兜底：方块名是 Jade 提示的第一行。 */
+    private static final int FALLBACK_ROW = 0;
+
+    /** 回调被调用的次数（每一次「看」本模组方块都会 +1）。 */
+    private static final AtomicInteger CALLED = new AtomicInteger();
+
+    /** 其中真的改动了提示的次数。 */
+    private static final AtomicInteger ACTED = new AtomicInteger();
+
+    /** 最近一次定位结果，供诊断读取（-1 表示没定位到、走了兜底）。 */
+    private static volatile String lastLocate = "（还没被调用过）";
+
     private FluidStorageSuppressor() {
+    }
+
+    /** 给 {@code /mm-diagnose} 的读数。 */
+    public static String counters() {
+        return "回调被调用 " + CALLED.get() + " 次 / 其中改动提示 " + ACTED.get() + " 次"
+                + "；最近一次定位: " + lastLocate;
     }
 
     @Override
     public void onTooltipCollected(ITooltip tooltip, Accessor<?> accessor) {
+        CALLED.incrementAndGet();
         if (!(accessor instanceof BlockAccessor block)
                 || !(block.getBlockState().getBlock() instanceof MachineHatchBlock)
                 || !(block.getBlockEntity()
                         instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)) {
             return;
         }
-        int index = nameRowIndex(tooltip, block, hatch);
+        String name = hatch.getDisplayName().getString();
+        int index = locateNameRow(tooltip, name);
+        lastLocate = "name=\"" + name + "\" 定位行=" + index + " 提示共 " + tooltip.size() + " 行";
         if (index < 0) {
-            // 找不到名字那一行就什么都不动：宁可留着通用组件那一份，也不要凭空删掉别的东西。
-            return;
+            index = Math.min(FALLBACK_ROW, Math.max(0, tooltip.size() - 1));
         }
-        // 删掉名字那一行及其后面「同一个元素锚点」下的内容（通用组件的图标与数字画在那一行上）。
-        // size 会随 remove 变化，所以每次都重新取第一个元素来判断。
-        while (tooltip.size() > index && isNameRow(tooltip, index, block, hatch)) {
-            tooltip.remove(firstElementTag(tooltip, index));
-        }
-        // 插到原位：这样两行紧贴在方块名下面，与之前看到的布局一致。
+        ACTED.incrementAndGet();
         List<Component> mine = HatchFluidComponent.linesFor(hatch);
+        int at = Math.min(index, tooltip.size());
         for (int i = 0; i < mine.size(); i++) {
-            tooltip.add(index + i, mine.get(i));
+            tooltip.add(at + i, mine.get(i));
         }
     }
 
-    /** 方块名那一行的下标；找不到返回 -1。 */
-    private static int nameRowIndex(ITooltip tooltip, BlockAccessor block,
-            com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch) {
+    /** 找「方块名那一行」；判据依次放宽，全不中返回 -1。 */
+    private static int locateNameRow(ITooltip tooltip, String name) {
+        int tagged = rowOfTag(tooltip);
+        if (tagged >= 0) {
+            return tagged;
+        }
         for (int i = 0; i < tooltip.size(); i++) {
-            if (isNameRow(tooltip, i, block, hatch)) {
+            if (rowMentions(tooltip, i, name)) {
                 return i;
             }
         }
         return -1;
     }
 
-    /**
-     * 这一行是不是「方块名」那一行。
-     *
-     * <p>判据用**显示名相等**（{@code Component} 实现了 {@code equals}），而显示名取自方块实体自己
-     * ——与 Jade 画在提示里的那一个同源，所以不会因为语言或大小写而对不上。
-     */
-    private static boolean isNameRow(ITooltip tooltip, int index, BlockAccessor block,
-            com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch) {
-        List<IElement> elements = tooltip.get(index, IElement.Align.LEFT);
-        if (elements == null || elements.isEmpty()) {
-            return false;
+    /** 带通用流体 id 的元素在第几行；找不到返回 -1。 */
+    private static int rowOfTag(ITooltip tooltip) {
+        for (int i = 0; i < tooltip.size(); i++) {
+            for (IElement element : leftAligned(tooltip, i)) {
+                if (UNIVERSAL_FLUID_STORAGE.equals(element.getTag())) {
+                    return i;
+                }
+            }
         }
-        String message = elements.get(0).getMessage();
-        return message != null && message.equals(hatch.getDisplayName().getString());
+        return -1;
     }
 
-    /** 这一行第一个元素的注册 id；取不到时用一个占位 id（remove 对不存在的 id 是空操作）。 */
-    private static net.minecraft.resources.ResourceLocation firstElementTag(ITooltip tooltip, int index) {
-        List<IElement> elements = tooltip.get(index, IElement.Align.LEFT);
-        if (elements != null && !elements.isEmpty() && elements.get(0).getTag() != null) {
-            return elements.get(0).getTag();
+    /** 这一行里有没有哪个元素的文本提到这个方块名。 */
+    private static boolean rowMentions(ITooltip tooltip, int index, String name) {
+        for (IElement element : leftAligned(tooltip, index)) {
+            String message = element.getMessage();
+            if (message != null && message.contains(name)) {
+                return true;
+            }
         }
-        return new net.minecraft.resources.ResourceLocation("modular_machinery_reborn", "hatch_row");
+        return false;
+    }
+
+    private static List<IElement> leftAligned(ITooltip tooltip, int index) {
+        List<IElement> elements = tooltip.get(index, IElement.Align.LEFT);
+        return elements == null ? List.of() : elements;
     }
 }

@@ -211,6 +211,10 @@ public final class DiagnoseCommand {
         // 只能靠计数事后问出来。
         source.sendSuccess(() -> Component.literal("  "
                 + com.reborn.modularmachinery.block.MachineHatchBlockEntity.gateCounters()), false);
+        // Jade 那个替换器的可观测性：它已失败过两次，而两次在游戏里表现一样（提示毫无变化）——
+        // 「回调没被调用」与「调用了但没定位到」要的修法完全不同。
+        source.sendSuccess(() -> Component.literal("  Jade 提示替换器: "
+                + com.reborn.modularmachinery.integration.jade.FluidStorageSuppressor.counters()), false);
         // **完整模拟 Jade 的服务端流程**：Jade 的 CommonProxy#wrapFluidStorage 做的是
         //   目标 instanceof CapabilityProvider（方块实体都是）
         //   → provider.getCapability(ForgeCapabilities.FLUID_HANDLER)   ← 注意是**无方向**的那次调用
