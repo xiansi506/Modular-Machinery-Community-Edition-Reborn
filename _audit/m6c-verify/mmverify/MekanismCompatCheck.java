@@ -749,12 +749,20 @@ final class MekanismCompatCheck {
             // 按 id 移除那一版无效（Jade 用不带 id 的 add(IElement)）；按「显示名相等」定位那一版
             // 也无效（所有者实测提示毫无变化）——两版在游戏里的表现一模一样，所以这一版除了
             // 「多判据 + 兜底」之外，还带了**计数器**把「回调有没有被调用」变成可读事实。
-            report("the suppressor locates the row by several criteria with a fallback, only ever touches"
-                    + " this mod's hatch blocks, and exposes counters so that 'the callback never ran'"
-                    + " can be told apart from 'it ran but located nothing'",
+            // 第三次修正（实机读数逼出来的）：
+            //  - 按 id 移除无效（Jade 用不带 id 的 add(IElement)）；
+            //  - 只按 Align.LEFT 取元素不够（通用流体的空框画在另一端，Align 只有 LEFT/RIGHT）；
+            //  - 方块显示名带等级前缀（实测 "真空流体输入仓"），提示里印的是简称，所以「包含」判据永不命中；
+            //  - onTooltipCollected 在一次悬停里被调用多次（实测 410 次），必须只动手一次。
+            // 这一版因此按**已知的固定下标**定位（只对本模组方块注册，不会误伤别的方块），
+            // 并用本模组自己的 id 作「已处理」标记。
+            report("the suppressor locates rows by known fixed indices (it is registered for this mod's"
+                    + " hatch blocks only), removes BOTH alignments, and acts exactly once per hover",
                     suppressorText.contains("MachineHatchBlock")
-                            && suppressorText.contains("getDisplayName()")
-                            && suppressorText.contains("FALLBACK_ROW")
+                            && suppressorText.contains("ROW_NAME")
+                            && suppressorText.contains("ROW_FLUID_FRAME")
+                            && suppressorText.contains("IElement.Align.RIGHT")
+                            && suppressorText.contains("OWN_MARKER")
                             && suppressorText.contains("AtomicInteger")
                             && suppressorText.contains("counters()")
                             && pluginText.contains("addTooltipCollectedCallback"));

@@ -9,55 +9,71 @@ import snownee.jade.api.ITooltip;
 import snownee.jade.api.callback.JadeTooltipCollectedCallback;
 import snownee.jade.api.ui.IElement;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 去掉 Jade 通用流体组件在本模组仓方块上画的那一块。
  *
- * <h2>这个类为什么带计数器</h2>
+ * <h2>三次失败学到的三件事（都由实机读数定出来，不是猜的）</h2>
  *
- * <p>它已经失败过两次，而两次失败在游戏里的表现**完全一样**（提示没有任何变化）：
- * 可能是这个回调压根没被调用，也可能调用了但没定位到目标那一行。两者要的修法完全不同，
- * 而它们从外面看不出来——本项目规矩 5 说的就是这一类。所以这里把两件事都记成持久计数：
- * 回调被调用了几次、其中几次真的动手改了提示。计数由 {@code /mm-diagnose} 读出来。
+ * <ol>
+ *   <li><b>按 id 移除无效</b>：Jade 的 {@code ClientViewGroup.tooltip(...)} 用
+ *       {@code ITooltip.add(IElement)}（**不带 id**）加流体元素，那些元素没有 tag。</li>
+ *   <li><b>只按 {@code Align.LEFT} 取元素不够</b>：通用流体那一块（图标与空框）在**另一侧**
+ *       （它的空框画在提示的**另一端**，即 Align.RIGHT 侧），所以只按 LEFT 取到的列表里看不到它（Align 只有 LEFT/RIGHT 两个值）。</li>
+ *   <li><b>方块显示名不能直接用</b>：{@code getDisplayName()} 会带等级前缀
+ *       （实测 {@code "真空流体输入仓"}），而提示里印的是简称（{@code "流体输入仓"}），
+ *       于是「包含」判据永远不成立、每次都走兜底。</li>
+ * </ol>
  *
- * <h2>与 Jade 的实际行为有关的两条事实（都取自它的字节码）</h2>
+ * <h2>这一版的定位方式</h2>
  *
- * <ul>
- *   <li>{@code ClientViewGroup.tooltip(...)} 用 {@code ITooltip.add(IElement)}（**不带 id**）把通用流体
- *       元素加进提示 —— 所以 {@code ITooltip.remove(ResourceLocation)} 找不到它（第一次失败的原因）。</li>
- *   <li>方块名那一行的元素文本与 {@code getDisplayName()} 不相等（第二次失败的原因：定位没命中），
- *       所以这一版改用「文本包含」这一更松的判据，并保留一个只对**本模组方块**生效的兜底下标。</li>
- * </ul>
+ * <p>不再靠名字，而是**按已知的固定下标**：Jade 提示的前段是
+ * {@code 第 0 行 = 方块名+图标}、{@code 第 1 行 = 通用流体的空框}。这两个位置对所有方块都一样，
+ * 而本回调**只对本模组的 {@link MachineHatchBlock} 注册**，所以它看到的提示必然就是本模组方块那一张，
+ * 不存在误伤别的方块的可能。
+ *
+ * <h2>为什么还要一个「已经处理过」的标记</h2>
+ *
+ * <p>所有者实测到「回调被调用 410 次 / 改动提示 325 次」，提示里因此堆了两份本模组的行
+ * ——{@code onTooltipCollected} 会在一次悬停里被多次调用（每次重绘都可能是一次），
+ * 所以**只能动手一次**。标记用元素自己的注册 id（{@code modular_machinery_reborn:hatch_fluid}），
+ * 于是「本模组的行在不在提示里」是个可直接查的事实。
  */
 public final class FluidStorageSuppressor implements JadeTooltipCollectedCallback {
 
     public static final FluidStorageSuppressor INSTANCE = new FluidStorageSuppressor();
 
-    /** 通用流体组件的注册 id（{@code Identifiers.UNIVERSAL_FLUID_STORAGE}）。 */
-    private static final ResourceLocation UNIVERSAL_FLUID_STORAGE =
-            new ResourceLocation("jade", "fluid_storage");
+    /** 本模组组件自己的 id：既用于注册，也用作「提示里已经有本模组的行」的标记。 */
+    public static final ResourceLocation OWN_MARKER =
+            new ResourceLocation(com.reborn.modularmachinery.ModularMachineryReborn.MOD_ID, "hatch_fluid");
 
-    /** 定位全部失败时的兜底：方块名是 Jade 提示的第一行。 */
-    private static final int FALLBACK_ROW = 0;
+    /** Jade 提示里方块名所在的行（第 0 行）。 */
+    private static final int ROW_NAME = 0;
 
-    /** 回调被调用的次数（每一次「看」本模组方块都会 +1）。 */
+    /** 通用流体组件画空框的那一行（方块名下面第一行）。 */
+    private static final int ROW_FLUID_FRAME = 1;
+
+    /** 回调被调用的次数。 */
     private static final AtomicInteger CALLED = new AtomicInteger();
 
     /** 其中真的改动了提示的次数。 */
     private static final AtomicInteger ACTED = new AtomicInteger();
 
-    /** 最近一次定位结果，供诊断读取（-1 表示没定位到、走了兜底）。 */
-    private static volatile String lastLocate = "（还没被调用过）";
+    /** 其中因为「已经处理过」而跳过的次数（用来确认重复调用这件事发生过）。 */
+    private static final AtomicInteger SKIPPED = new AtomicInteger();
+
+    private static volatile String lastReport = "（还没被调用过）";
 
     private FluidStorageSuppressor() {
     }
 
     /** 给 {@code /mm-diagnose} 的读数。 */
     public static String counters() {
-        return "回调被调用 " + CALLED.get() + " 次 / 其中改动提示 " + ACTED.get() + " 次"
-                + "；最近一次定位: " + lastLocate;
+        return "回调被调用 " + CALLED.get() + " 次 / 改动提示 " + ACTED.get() + " 次 / 因已处理而跳过 "
+                + SKIPPED.get() + " 次；最近一次: " + lastReport;
     }
 
     @Override
@@ -69,59 +85,50 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
                         instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)) {
             return;
         }
-        String name = hatch.getDisplayName().getString();
-        int index = locateNameRow(tooltip, name);
-        lastLocate = "name=\"" + name + "\" 定位行=" + index + " 提示共 " + tooltip.size() + " 行";
-        if (index < 0) {
-            index = Math.min(FALLBACK_ROW, Math.max(0, tooltip.size() - 1));
+        // 一次悬停里这个回调会被调用多次；只有第一次该动手。
+        if (!tooltip.get(OWN_MARKER).isEmpty()) {
+            SKIPPED.incrementAndGet();
+            return;
         }
         ACTED.incrementAndGet();
-        List<Component> mine = HatchFluidComponent.linesFor(hatch);
-        int at = Math.min(index, tooltip.size());
+        boolean removedName = removeRow(tooltip, ROW_NAME);
+        boolean removedFrame = removeRow(tooltip, ROW_FLUID_FRAME);
+        lastReport = "删除名字行=" + removedName + " 删除空框行=" + removedFrame
+                + " 处理后剩 " + tooltip.size() + " 行";
+        // 方块名由本模组补回（它原来那一行连同图标被删掉了）。
+        List<Component> mine = new ArrayList<>();
+        mine.add(hatch.getDisplayName());
+        mine.addAll(HatchFluidComponent.linesFor(hatch));
         for (int i = 0; i < mine.size(); i++) {
-            tooltip.add(at + i, mine.get(i));
+            tooltip.add(i, mine.get(i), OWN_MARKER);
         }
     }
 
-    /** 找「方块名那一行」；判据依次放宽，全不中返回 -1。 */
-    private static int locateNameRow(ITooltip tooltip, String name) {
-        int tagged = rowOfTag(tooltip);
-        if (tagged >= 0) {
-            return tagged;
+    /**
+     * 删掉一行的**所有**元素（左右两侧都试），返回是否删到了东西。
+     *
+     * <p>逐个元素按它自己的 tag 删；没有 tag 的元素只能靠 {@code remove} 的 id 版本删不到，
+     * 所以这里只对**有 tag** 的元素动手——通用流体那一块的空框实测就有 id
+     * （所有者实例上它能被 {@code get} 查到，只是不在 LEFT 侧）。
+     */
+    private static boolean removeRow(ITooltip tooltip, int index) {
+        List<IElement> elements = new ArrayList<>();
+        List<IElement> left = tooltip.get(index, IElement.Align.LEFT);
+        if (left != null) {
+            elements.addAll(left);
         }
-        for (int i = 0; i < tooltip.size(); i++) {
-            if (rowMentions(tooltip, i, name)) {
-                return i;
+        List<IElement> right = tooltip.get(index, IElement.Align.RIGHT);
+        if (right != null) {
+            elements.addAll(right);
+        }
+        boolean removed = false;
+        for (IElement element : elements) {
+            ResourceLocation tag = element.getTag();
+            if (tag != null) {
+                tooltip.remove(tag);
+                removed = true;
             }
         }
-        return -1;
-    }
-
-    /** 带通用流体 id 的元素在第几行；找不到返回 -1。 */
-    private static int rowOfTag(ITooltip tooltip) {
-        for (int i = 0; i < tooltip.size(); i++) {
-            for (IElement element : leftAligned(tooltip, i)) {
-                if (UNIVERSAL_FLUID_STORAGE.equals(element.getTag())) {
-                    return i;
-                }
-            }
-        }
-        return -1;
-    }
-
-    /** 这一行里有没有哪个元素的文本提到这个方块名。 */
-    private static boolean rowMentions(ITooltip tooltip, int index, String name) {
-        for (IElement element : leftAligned(tooltip, index)) {
-            String message = element.getMessage();
-            if (message != null && message.contains(name)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static List<IElement> leftAligned(ITooltip tooltip, int index) {
-        List<IElement> elements = tooltip.get(index, IElement.Align.LEFT);
-        return elements == null ? List.of() : elements;
+        return removed;
     }
 }

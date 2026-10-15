@@ -59,9 +59,13 @@ public final class HatchFluidComponent implements IBlockComponentProvider {
      */
     @Override
     public void appendTooltip(ITooltip tooltip, BlockAccessor accessor, IPluginConfig config) {
-        if (accessor.getBlockEntity() instanceof MachineHatchBlockEntity hatch) {
-            tooltip.addAll(linesFor(hatch));
-        }
+        // 什么都不做：本模组的行由 FluidStorageSuppressor 在「工具提示收集完成」那一步统一给出。
+        //
+        // 为什么不在两个地方都给：这个回调会在一次悬停里被多次调用（所有者实测 410 次 / 改动 325 次），
+        // 若这里也加、那里也加，提示里就会堆出好几份重复的行。只留一处，才可能做到「一件事只说一次」。
+        //
+        // 这个类仍然实现 IBlockComponentProvider 并被注册：它的 getUid() 就是本模组行的标记 id，
+        // 而 suppressor 用那个 id 判断「是不是已经处理过了」。见 FluidStorageSuppressor。
     }
 
     /**
