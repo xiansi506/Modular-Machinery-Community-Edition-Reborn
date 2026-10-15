@@ -46,6 +46,34 @@ public interface CompatModule {
     void register(CompatRegistry registry);
 
     /**
+     * 让这个模块把一个**它自己的**能力挂到主模组的方块实体上（波 5.3 起）。
+     *
+     * <p>什么时候需要它：模块要给机器加一种**端口**。旧版的气体仓就是这么做的——它挂在已有的流体仓上
+     * （{@code HybridGasTank extends HybridTank}），不是新方块；那条路与本项目的 D8 不冲突。
+     * 主模组不认识那种能力，所以由模块注册一个 {@link BlockEntityPortMapper}，主模组只负责在能力查询时
+     * 按顺序问它们（见 {@code MachineHatchBlockEntity#getCapability}）。
+     *
+     * <p>默认空实现，因为**大多数模块不需要**：一个只加需求类型的模块什么都不用挂。
+     */
+    default void ports(CompatRegistry registry) {
+    }
+
+    /**
+     * 注册这个模块**自己的** Forge 能力（波 5.3 起）。
+     *
+     * <p>什么时候需要它：模块的端口是一种**别的模组声明的能力**（旧版气体就是 Mekanism 的
+     * {@code IGasHandler}）。自己的能力必须自己注册，否则 Forge 的 {@code getCapability} 不会把查询
+     * 转给方块实体——那个能力就永远问不到。主模组不该认识它，所以这一步只能由模块做。
+     *
+     * <p><b>时机是 mod 构造期</b>（{@code RegisterCapabilitiesEvent}），比 {@link #register} 与
+     * {@link #ports} 都早。因此实现里**不能**依赖「本模块已经注册过需求类型」这类前提。
+     *
+     * <p>默认空实现：只加需求类型、不加端口的模块用不到它。
+     */
+    default void registerCapabilities(net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent event) {
+    }
+
+    /**
      * 这个模块需要哪个模组在场，{@code null} 表示不需要（或由模块自己判断）。
      *
      * <p>与 {@link RequirementType#requiresModid()} 是两件事而不是重复：这一条决定

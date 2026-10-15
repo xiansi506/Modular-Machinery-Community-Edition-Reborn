@@ -3,9 +3,12 @@ package com.reborn.modularmachinery.compat;
 import com.reborn.modularmachinery.ModularMachineryReborn;
 import com.reborn.modularmachinery.recipe.RequirementTypes;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -103,9 +106,22 @@ public final class ModCompat {
                 continue;
             }
             CompatRegistry registry = new CompatRegistry();
-            module.register(registry);
+            // register 与 ports 分开调，是因为它们失败的后果不同：register 失败会让这个模块的种类缺失，
+            // ports 失败只会让它少一种端口。**一个模块抛异常不能带走整个兼容层**——所以每个模块各包一层，
+            // 而且这一层必须 catch Throwable：没装依赖的模块在这里最典型的失败是
+            // NoClassDefFoundError（它的字段类型来自那个模组），那是 Error 不是 Exception。
+            try {
+                module.register(registry);
+                module.ports(registry);
+            } catch (Throwable failure) {
+                ModularMachineryReborn.LOGGER.error("[{}] Compat module {} failed to register; it is skipped. "
+                        + "If its required mod is installed, this is a defect in the module.",
+                        ModularMachineryReborn.MOD_ID, id, failure);
+                continue;
+            }
             REGISTERED.put(id, module);
             registered.add(module);
+            PORT_MAPPERS.addAll(registry.portMappers());
             ModularMachineryReborn.LOGGER.info("[{}] Compat module {} registered. Requirement kinds now: {}",
                     ModularMachineryReborn.MOD_ID, id, RequirementTypes.ids());
         }
@@ -127,5 +143,94 @@ public final class ModCompat {
     /** 把「已知模块清单」暴露给断言，免得断言自己抄一份（抄一份就迟早与实现不一致）。 */
     public static List<CompatModule> knownModules() {
         return modules();
+    }
+
+    // ------------------------------------------------------------------ 端口映射器
+
+    /**
+     * 模块登记的能力映射器，按登记顺序，**只增不减**。
+     *
+     * <p>{@code CopyOnWriteArrayList} 而不是普通 {@code ArrayList}：映射器在
+     * {@code FMLCommonSetupEvent} 里写一次，而 {@code MachineHatchBlockEntity#getCapability} 会从
+     * **任意线程**（区块加载、管道抽液、客户端同步）读它。一个读写并发的 {@code ArrayList} 在这里
+     * 可能给出一个中间状态，而那种失败极难复现。
+     */
+    private static final List<BlockEntityPortMapper> PORT_MAPPERS =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /**
+     * 按顺序问每个映射器「这个能力是不是你的」——主模组**不认识**任何一个兼容能力，这是唯一的入口。
+     *
+     * <p>在 {@code MachineHatchBlockEntity#getCapability} 里被调用，每次能力查询一次。映射器通常
+     * 只有一个（每个装了模块一种），所以线性扫描不是问题；而它换来的是「加一种端口不必动主模组」。
+     *
+     * @return 匹配到的 optional，或 {@code null} 表示没有映射器认领这个能力
+     */
+    @Nullable
+    public static LazyOptional<?> mapPort(Capability<?> capability, Object entity) {
+        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
+            LazyOptional<?> mapped = mapper.map(capability, entity);
+            if (mapped != null) {
+                return mapped;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 这个实体上**所有**模块提供的端口处理器，按登记顺序。
+     *
+     * <p>与 {@link #mapPort} 的区别是「问法」：那个方法是 Forge 的能力查询（一个实体 + 一个能力 → 一个结果），
+     * 这个是**端口收集**（一个实体 → 它所有的兼容端口）。后者没有能力对象可比，所以只能让每个映射器
+     * 自己回答「这个实体上你有什么」。
+     *
+     * <p>返回的是处理器本身而不是 {@code LazyOptional}，因为调用方（端口收集）要的是长期持有的引用，
+     * 与 Forge 的能力查询语义不同——{@link BlockEntityPortMapper#handlers} 就是为这件事存在的。
+     */
+    public static List<Object> portHandlers(Object entity) {
+        List<Object> handlers = new ArrayList<>();
+        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
+            handlers.addAll(mapper.handlers(entity));
+        }
+        return handlers;
+    }
+
+    /** 存档写：把每个模块的内容交给它自己序列化。由 {@code MachineHatchBlockEntity#saveAdditional} 调用。 */
+    public static void savePorts(net.minecraft.nbt.CompoundTag tag, Object entity) {
+        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
+            mapper.save(tag, entity);
+        }
+    }
+
+    /** 存档读：把每个模块的内容交给它自己反序列化。由 {@code MachineHatchBlockEntity#load} 调用。 */
+    public static void loadPorts(net.minecraft.nbt.CompoundTag tag, Object entity) {
+        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
+            mapper.load(tag, entity);
+        }
+    }
+
+    /**
+     * Forge 的 {@code RegisterCapabilitiesEvent} 入口：把每个模块自己的 Forge 能力注册上。
+     *
+     * <p><b>为什么这是必要的。</b>{@code IChemicalHandler}（及其窄化别名 {@code IGasHandler}）是 Mekanism
+     * 自己声明的 Forge 能力，主模组不会、也不该认识它。但一个能力**只有被注册**之后，
+     * Forge 的 {@code getCapability} 才会把查询转给方块实体——没有这一步，管道与 Mekanism 的机器
+     * 怎么问都问不到这台机器的气体仓。
+     *
+     * <p>同样必须 catch {@code Throwable}：没有 Mekanism 时，模块的
+     * {@code MekanismAPI.gasRegistry().get()}（在 {@code CapabilityManager.get} 内部）会以
+     * {@code NoClassDefFoundError} 告终。那本该如此——没装那个模组就不该有那种能力——但它必须是**安静地不做**，
+     * 而不是让整个模组构造失败。
+     */
+    public static void onRegisterCapabilities(net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent event) {
+        for (CompatModule module : modules()) {
+            try {
+                module.registerCapabilities(event);
+            } catch (Throwable unavailable) {
+                ModularMachineryReborn.LOGGER.info("[{}] Compat module {} declares no Forge capability here "
+                        + "(its own mod is probably absent): {}", ModularMachineryReborn.MOD_ID, module.id(),
+                        unavailable.getClass().getSimpleName());
+            }
+        }
     }
 }

@@ -38,3 +38,17 @@ description='''A Forge 1.20.1 reimplementation foundation for Modular Machinery:
     mandatory=false
     ordering="NONE"
     side="BOTH"
+# 波 5.3：Mekanism 的化学（旧版的「气体」）是本模组第一个真兼容模块。
+#
+# 这条声明**是有实质作用的，不是登记**，与上面两条不同：气体端口要把本模组的流体仓暴露成 Mekanism 的
+# `IChemicalHandler`，而能力注册发生在 mod 构造期——那时 Mekanism 必须**已经注册过它自己的能力**
+# （`IGasHandler.getCapability()` 只有在它自己的 `RegisterCapabilitiesEvent` 之后才拿得到）。
+# `ordering="AFTER"` 让 FML 保证那个先后。
+#
+# mandatory=false：没装 Mekanism 的进程照常启动，只是没有气体端口（`compat/` 的设计就是如此）。
+# 同样不写 versionRange：装了任意 1.20.1 的 Mekanism 都不该被本模组拒绝启动。
+[[dependencies.${mod_id}]]
+    modId="mekanism"
+    mandatory=false
+    ordering="AFTER"
+    side="BOTH"

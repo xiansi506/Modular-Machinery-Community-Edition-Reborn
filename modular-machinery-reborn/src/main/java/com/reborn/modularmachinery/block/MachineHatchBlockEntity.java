@@ -210,6 +210,17 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         return new com.reborn.modularmachinery.menu.MachineHatchMenu(id, inventory, this);
     }
 
+    /**
+     * 兼容模块的能力从这里进来（波 5.3）。
+     *
+     * <p><b>本类不认识任何一种兼容能力</b>——它只知道 {@code ModCompat.mapPort} 这个通用入口，
+     * 而那个入口背后的映射器由模块自己注册。这是「一个模块加一种端口不必改主模组」的落点，
+     * 也是没装那个模组时本类**不会碰到它的任何类型**的保证（详见
+     * {@code compat/BlockEntityPortMapper} 的类注释）。
+     *
+     * <p>映射器在 {@code FMLCommonSetupEvent} 里登记，而能力查询在那之后（玩家进世界才有方块实体），
+     * 所以这里是「顺带问一句」，不需要自己判断时机。
+     */
     @Override
     public <T> LazyOptional<T> getCapability(Capability<T> capability, @Nullable Direction side) {
         if (capability == ForgeCapabilities.ITEM_HANDLER) {
@@ -221,7 +232,22 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         if (capability == ForgeCapabilities.ENERGY) {
             return this.energyCapability.cast();
         }
+        LazyOptional<?> compat = com.reborn.modularmachinery.compat.ModCompat.mapPort(capability, this);
+        if (compat != null) {
+            return compat.cast();
+        }
         return super.getCapability(capability, side);
+    }
+
+    /**
+     * 兼容层的内容变了：存盘，并（流体仓需要）同步给客户端。
+     *
+     * <p>{@code public} 而不是包内可见：它由 {@code compat} 包里的气体罐作为回调调用，
+     * 而那个包不是本包。
+     */
+    public void markStorageChanged() {
+        // 气体让客户端的方块实体数据过期（与流体同一条理由：界面要画出装的是什么），所以 syncToClient = true。
+        onStorageChanged(true);
     }
 
     @Override
@@ -244,6 +270,8 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         if (this.energy != null) {
             tag.putInt(TAG_ENERGY, this.energy.getEnergyStored());
         }
+        // 兼容层的内容（例如流体仓上的气体）由各模块自己序列化，本类不知道里面是什么。
+        com.reborn.modularmachinery.compat.ModCompat.savePorts(tag, this);
     }
 
     @Override
@@ -259,5 +287,6 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             // EnergyStorage has no direct setter; fill it back up to the stored amount.
             this.energy.receiveEnergy(tag.getInt(TAG_ENERGY), false);
         }
+        com.reborn.modularmachinery.compat.ModCompat.loadPorts(tag, this);
     }
 }

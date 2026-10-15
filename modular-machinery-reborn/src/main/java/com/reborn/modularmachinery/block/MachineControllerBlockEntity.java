@@ -1005,6 +1005,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 // 绝大多数结构没有标签，此时 tag() 答 null，端口就按「无标签」入桶。
                 builder.add(hatch.kind(), hatch.itemHandler(), hatch.fluidTank(), hatch.energyStorage(),
                         effectivePattern.tag(relative));
+                // 波 5.3：**兼容端口**。主模组不知道那是什么能力（气体？灵气？），所以只把实体交出去，
+                // 由装了相应模组的兼容层回答。没装时这里什么都不加，桶保持为空。
+                builder.gasPorts(hatch, hatch.kind().isInput(), effectivePattern.tag(relative));
             }
         }
         // M6d-b: the smart-interface values travel with the ports (see HatchCollection's class comment). The

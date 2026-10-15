@@ -13,6 +13,7 @@ import com.reborn.modularmachinery.recipe.RequirementType;
 import mekanism.api.MekanismAPI;
 import mekanism.api.chemical.gas.Gas;
 import mekanism.api.chemical.gas.GasStack;
+import mekanism.api.chemical.gas.IGasHandler;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 
@@ -85,6 +86,44 @@ public final class MekanismModule implements CompatModule {
                 new GasHandler(true), MODID));
         ModularMachineryReborn.LOGGER.info("[{}] Mekanism chemical requirement kinds registered: gas, "
                 + "gas_pertick (per-tick).", ModularMachineryReborn.MOD_ID);
+    }
+
+    /**
+     * 把气体端口挂到流体仓上。
+     *
+     * <p>本方法**不直接引用** {@code MekanismAnchor}：它通过方法引用的形式传出去，而那个类在
+     * {@code ports} 被调用的**那一刻**才会被解析。这一条不是洁癖——本方法所在的类会被主模组的
+     * {@code ModCompat.modules()} 构造（每次启动都会，包括没装 Mekanism 的启动），
+     * 所以本类的**静态初始化与方法体之外的一切**都不能引用 Mekanism 类型。字段与方法体可以有，
+     * 因为它们在模块真的被注册之前不会被执行到。
+     */
+    @Override
+    public void ports(CompatRegistry registry) {
+        registry.port(MekanismAnchor.portMapper());
+        ModularMachineryReborn.LOGGER.info("[{}] Mekanism gas ports attached to the fluid hatches.",
+                ModularMachineryReborn.MOD_ID);
+    }
+
+    /**
+     * 注册 Mekanism 的化学能力。
+     *
+     * <p><b>这里什么都不用做</b>，而这一点值得写下来，免得下一个人（或我自己）再加一遍：
+     * Forge 的能力是**按类型**的身份对象，而 Mekanism 已经用 {@code @AutoRegisterCapability}
+     * 声明了 {@code IGasHandler}——所以 {@code Capabilities.GAS_HANDLER} 就是那个对象，
+     * 本模组必须**读**它而不是再注册一个（注册第二个只会得到另一个身份，两边的查询永远匹配不上）。
+     *
+     * <p>也不在这里缓存那个字段：能力对象的建立时机取决于模组加载顺序，而本方法跑的时机
+     * （{@code FMLCommonSetupEvent}）并不保证它已经建立。读取被推迟到能力查询真正发生的时候，
+     * 见 {@code MekanismAnchor} 里的说明。
+     */
+    @Override
+    public void registerCapabilities(net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent event) {
+        // 有意留空，理由见方法注释。
+    }
+
+    /** 气体端口那一半是否可用（给诊断用）。 */
+    public static boolean gasPortReady() {
+        return MekanismAnchor.gasHandlerAvailable();
     }
 
     /** {@code gas} 与 {@code gas_pertick} 共用的一份读写器，只差 {@code perTick} 一位。 */

@@ -35,6 +35,7 @@ public final class HatchCollection {
 
     public static final HatchCollection EMPTY = new HatchCollection(List.of(), List.of(), List.of(),
             List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+            List.of(), List.of(), List.of(), List.of(),
             () -> SmartInterfaceValueSource.NONE, () -> null);
 
     /**
@@ -54,6 +55,20 @@ public final class HatchCollection {
     private final List<IEnergyStorage> energyOutputs;
 
     /**
+     * 气体端口（Mekanism 化学），波 5.3 起。
+     *
+     * <p><b>为什么它住在流体仓上而不是一种新方块。</b>旧版就是这么做的：{@code HybridGasTank extends
+     * HybridTank} 的宿主是 {@code TileFluidTank} / {@code GuiContainerFluidHatch}，
+     * 全部 {@code @Optional.Method(modid = "mekanism")}。所以「气体端口」在本版等于
+     * 「流体仓多一种能力」，而这条路的形状与 D8（方块只能在构造期注册）不冲突。
+     *
+     * <p>这两个桶**只有在装了 Mekanism 时才可能非空**：往里放端口的映射器由那个模块注册，
+     * 没装它的时候 {@link Builder#gasPorts} 找不到任何映射器，桶就是空的。
+     */
+    private final List<IGasHandler> gasInputs;
+    private final List<IGasHandler> gasOutputs;
+
+    /**
      * 每个端口来自哪个打了标签的结构位置，与上面六个桶<strong>逐个对应</strong>。
      *
      * <p>这是旧版 {@code ProcessingComponent} 携带 {@code ComponentSelectorTag} 的对应层
@@ -69,6 +84,10 @@ public final class HatchCollection {
     private final List<String> fluidOutputTags;
     private final List<String> energyInputTags;
     private final List<String> energyOutputTags;
+
+    /** 与气体端口逐个对应，规则同上面六个。 */
+    private final List<String> gasInputTags;
+    private final List<String> gasOutputTags;
 
     /**
      * Where a smart-interface requirement reads its value. Never {@code null}: {@link
@@ -87,9 +106,11 @@ public final class HatchCollection {
     private HatchCollection(List<IItemHandler> itemInputs, List<IItemHandler> itemOutputs,
                             List<IFluidHandler> fluidInputs, List<IFluidHandler> fluidOutputs,
                             List<IEnergyStorage> energyInputs, List<IEnergyStorage> energyOutputs,
+                            List<IGasHandler> gasInputs, List<IGasHandler> gasOutputs,
                             List<String> itemInputTags, List<String> itemOutputTags,
                             List<String> fluidInputTags, List<String> fluidOutputTags,
                             List<String> energyInputTags, List<String> energyOutputTags,
+                            List<String> gasInputTags, List<String> gasOutputTags,
                             java.util.function.Supplier<SmartInterfaceValueSource> smartInterfaces,
                             java.util.function.Supplier<MachineDefinition> machine) {
         this.itemInputs = List.copyOf(itemInputs);
@@ -98,6 +119,8 @@ public final class HatchCollection {
         this.fluidOutputs = List.copyOf(fluidOutputs);
         this.energyInputs = List.copyOf(energyInputs);
         this.energyOutputs = List.copyOf(energyOutputs);
+        this.gasInputs = List.copyOf(gasInputs);
+        this.gasOutputs = List.copyOf(gasOutputs);
         // 断言而不是信任：一个长度不匹配的标签列表会让「端口 i 的标签」整体错位，
         // 而错位是静默的——它只会让某个需求读到另一个部件的端口。与其在世界里查，不如在这里就炸。
         this.itemInputTags = checkedTags(itemInputTags, this.itemInputs.size(), "itemInputs");
@@ -106,6 +129,8 @@ public final class HatchCollection {
         this.fluidOutputTags = checkedTags(fluidOutputTags, this.fluidOutputs.size(), "fluidOutputs");
         this.energyInputTags = checkedTags(energyInputTags, this.energyInputs.size(), "energyInputs");
         this.energyOutputTags = checkedTags(energyOutputTags, this.energyOutputs.size(), "energyOutputs");
+        this.gasInputTags = checkedTags(gasInputTags, this.gasInputs.size(), "gasInputs");
+        this.gasOutputTags = checkedTags(gasOutputTags, this.gasOutputs.size(), "gasOutputs");
         this.smartInterfaces = smartInterfaces;
         this.machine = machine;
     }
@@ -143,40 +168,24 @@ public final class HatchCollection {
     }
 
     /**
-     * 气体端口，**永远是空的**（见 {@link #gasInputs()} 的说明）。
+     * 气体（Mekanism 化学体系）**输入**端口。
      *
-     * <p>做成 {@code static final} 常量而不是构造器参数，是因为「现在一个端口都没有」不是一个
-     * 需要逐实例保存的事实——那样会往 {@link #withTag} 与 {@link Builder#build} 各塞一个恒为空的参数，
-     * 也就是给未来的自己留两个必须记得传对的地方。等端口真的接通时，它会连同自己的标签列表一起
-     * 变成实例字段，那时这场改动本来就要动那些地方。
-     */
-    private static final List<IGasHandler> NO_GAS_PORTS = List.of();
-
-    /**
-     * 气体（Mekanism 化学体系）端口。
+     * <p>与物品/流体/能源那六个桶同一套规则：桶由端口来自哪个方向决定（{@link Builder#gasPorts} 按
+     * {@code HatchKind#isInput()} 分桶），标签由结构位置决定，{@link #withTag} 按同一规则筛选——
+     * 于是一条带 {@code selector-tag} 的气体需求只看得到它那一段的端口，与别的需求类型完全一致。
      *
-     * <p><b>它们现在永远是空的，这是事实而不是占位。</b>化学端口还没有实现：旧版把它做在**已有的流体仓**
-     * 上（{@code HybridGasTank extends HybridTank}，宿主 {@code TileFluidTank} / {@code GuiContainerFluidHatch}，
-     * 全部 {@code @Optional.Method(modid = "mekanism")}），所以 1.20.1 这一侧的正确形状是「给流体仓加一个
-     * 可选的气体能力」，而不是新方块——那条路与本项目的 D8（方块只能在构造期注册）不冲突，
-     * 但它是**结算路径上的结构改动**，因此单独一轮做，见
-     * {@code docs/波5.3-勘测-Mekanism化学体系.md} §4。
-     *
-     * <p><b>为什么把这两个访问器先放进来：</b>需求类要能编译、要被断言驱动，就必须有一个统一的端口读取面。
-     * 若气体需求自己去别处取端口，那么等端口真的接通时，「哪几处能看气体端口」就会有第二个答案——
-     * 这正是本项目已经吃过一次的「两条入口各自演进」。
-     *
-     * <p><b>空列表的语义是安全的：</b>{@code GasIo} 对空列表一律答「没有 / 抽不到 / 灌不进」，
-     * 于是一条气体配方在没有化学端口的世界里表现为**开工失败**（并给出 {@code craftcheck.failure.gas.input}），
-     * 而不是崩溃或静默成功。
+     * <p><b>只有装了 Mekanism 时才可能非空。</b>往这里放端口的映射器由那个模块注册；没装它时
+     * {@link Builder#gasPorts} 找不到任何映射器，桶就是空的。而**空桶的语义是安全的**：
+     * {@code GasIo} 对空列表一律答「没有 / 抽不到 / 灌不进」，于是一条气体配方在没有气体端口的机器上
+     * 表现为**开工失败**（并给出 {@code craftcheck.failure.gas.input}），不是崩溃，也不是静默成功。
      */
     public List<IGasHandler> gasInputs() {
-        return NO_GAS_PORTS;
+        return this.gasInputs;
     }
 
-    /** 气体输出端口。同 {@link #gasInputs()}：现在永远是空的。 */
+    /** 气体**输出**端口。规则同 {@link #gasInputs()}。 */
     public List<IGasHandler> gasOutputs() {
-        return NO_GAS_PORTS;
+        return this.gasOutputs;
     }
 
     /**
@@ -205,12 +214,16 @@ public final class HatchCollection {
                 filter(this.fluidOutputs, this.fluidOutputTags, wanted),
                 filter(this.energyInputs, this.energyInputTags, wanted),
                 filter(this.energyOutputs, this.energyOutputTags, wanted),
+                filter(this.gasInputs, this.gasInputTags, wanted),
+                filter(this.gasOutputs, this.gasOutputTags, wanted),
                 filterTags(this.itemInputTags, wanted),
                 filterTags(this.itemOutputTags, wanted),
                 filterTags(this.fluidInputTags, wanted),
                 filterTags(this.fluidOutputTags, wanted),
                 filterTags(this.energyInputTags, wanted),
                 filterTags(this.energyOutputTags, wanted),
+                filterTags(this.gasInputTags, wanted),
+                filterTags(this.gasOutputTags, wanted),
                 this.smartInterfaces,
                 this.machine);
     }
@@ -238,6 +251,8 @@ public final class HatchCollection {
         describeBucket(out, "fluid output", this.fluidOutputs.size(), this.fluidOutputTags);
         describeBucket(out, "energy input", this.energyInputs.size(), this.energyInputTags);
         describeBucket(out, "energy output", this.energyOutputs.size(), this.energyOutputTags);
+        describeBucket(out, "gas input", this.gasInputs.size(), this.gasInputTags);
+        describeBucket(out, "gas output", this.gasOutputs.size(), this.gasOutputTags);
         return List.copyOf(out);
     }
 
@@ -298,12 +313,14 @@ public final class HatchCollection {
 
     public boolean isEmpty() {
         return this.itemInputs.isEmpty() && this.itemOutputs.isEmpty() && this.fluidInputs.isEmpty()
-                && this.fluidOutputs.isEmpty() && this.energyInputs.isEmpty() && this.energyOutputs.isEmpty();
+                && this.fluidOutputs.isEmpty() && this.energyInputs.isEmpty() && this.energyOutputs.isEmpty()
+                && this.gasInputs.isEmpty() && this.gasOutputs.isEmpty();
     }
 
     public int hatchCount() {
         return this.itemInputs.size() + this.itemOutputs.size() + this.fluidInputs.size()
-                + this.fluidOutputs.size() + this.energyInputs.size() + this.energyOutputs.size();
+                + this.fluidOutputs.size() + this.energyInputs.size() + this.energyOutputs.size()
+                + this.gasInputs.size() + this.gasOutputs.size();
     }
 
     /** Total FE currently held by the structure's energy input hatches. */
@@ -336,6 +353,8 @@ public final class HatchCollection {
         private final List<IFluidHandler> fluidOutputs = new ArrayList<>();
         private final List<IEnergyStorage> energyInputs = new ArrayList<>();
         private final List<IEnergyStorage> energyOutputs = new ArrayList<>();
+        private final List<IGasHandler> gasInputs = new ArrayList<>();
+        private final List<IGasHandler> gasOutputs = new ArrayList<>();
 
         /** 与上面六个桶逐个对应，见 {@link HatchCollection#itemInputTags} 的说明。 */
         private final List<String> itemInputTags = new ArrayList<>();
@@ -344,6 +363,8 @@ public final class HatchCollection {
         private final List<String> fluidOutputTags = new ArrayList<>();
         private final List<String> energyInputTags = new ArrayList<>();
         private final List<String> energyOutputTags = new ArrayList<>();
+        private final List<String> gasInputTags = new ArrayList<>();
+        private final List<String> gasOutputTags = new ArrayList<>();
 
         /** Defaults to "nothing", so a collection built without a controller keeps behaving as it always did. */
         private SmartInterfaceValueSource smartInterfaces = SmartInterfaceValueSource.NONE;
@@ -408,6 +429,32 @@ public final class HatchCollection {
         }
 
         /**
+         * 把某个方块实体的**兼容能力**也收成端口（波 5.3 起）。
+         *
+         * <p>与 {@link #add} 分开，是因为它走的是**完全不同的机制**：那个方法拿的是主模组自己知道的三样东西
+         * （物品/流体/能源），而这里问的是「有没有哪个兼容模块愿意对这个实体提供它自己的能力」——
+         * 主模组并不知道那是什么能力。所以本方法只把实体交给
+         * {@link com.reborn.modularmachinery.compat.ModCompat#portHandlers}，由模块自己回答。
+         *
+         * <p>没装那个模组时这里什么都不会发生（没有映射器），于是气体桶保持为空——而空桶的语义是安全的：
+         * {@code GasIo} 对空列表一律答「没有」，一条气体配方于是**开工失败**而不是崩溃或静默成功。
+         *
+         * @param entity      结构位置上的方块实体
+         * @param input       这个位置是输入方向还是输出方向（由仓口种类决定，与物品/流体同一条规则）
+         * @param selectorTag 该位置的 {@code selector-tag}
+         */
+        public Builder gasPorts(Object entity, boolean input, @javax.annotation.Nullable String selectorTag) {
+            String tag = (selectorTag == null || selectorTag.isEmpty()) ? UNTAGGED : selectorTag;
+            for (Object handler : com.reborn.modularmachinery.compat.ModCompat.portHandlers(entity)) {
+                if (handler instanceof IGasHandler gas) {
+                    (input ? this.gasInputs : this.gasOutputs).add(gas);
+                    (input ? this.gasInputTags : this.gasOutputTags).add(tag);
+                }
+            }
+            return this;
+        }
+
+        /**
          * Registers a bare handler as a port. Used to fold the controller's own slots and buffer in as fallback
          * ports so the recipe engine sees a single uniform set of ports.
          *
@@ -442,9 +489,9 @@ public final class HatchCollection {
 
         public HatchCollection build() {
             return new HatchCollection(this.itemInputs, this.itemOutputs, this.fluidInputs, this.fluidOutputs,
-                    this.energyInputs, this.energyOutputs,
+                    this.energyInputs, this.energyOutputs, this.gasInputs, this.gasOutputs,
                     this.itemInputTags, this.itemOutputTags, this.fluidInputTags, this.fluidOutputTags,
-                    this.energyInputTags, this.energyOutputTags,
+                    this.energyInputTags, this.energyOutputTags, this.gasInputTags, this.gasOutputTags,
                     () -> this.smartInterfaces, this.machine);
         }
     }

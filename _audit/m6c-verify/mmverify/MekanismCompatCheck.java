@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import com.reborn.modularmachinery.compat.CompatModule;
 import com.reborn.modularmachinery.compat.ModCompat;
 import com.reborn.modularmachinery.compat.mekanism.MekanismModule;
+import com.reborn.modularmachinery.machine.HatchCollection;
 import com.reborn.modularmachinery.recipe.IOType;
 import com.reborn.modularmachinery.recipe.MachineRequirement;
 import com.reborn.modularmachinery.recipe.RecipeModifier;
@@ -102,7 +103,8 @@ final class MekanismCompatCheck {
             registrationMakesGasLoadable(gas);
             theApiReallyIsGameOnly();
             sourceLevelDivergences();
-            // 摘除那一段必须最后跑：它把两个种类从注册表里拿走（没装 Mekanism 的方向）。
+            // 端口那一半：先把离线能证的结构与「没装时为空」证掉，再让摘除那一段收尾。
+            portWiring(gasPerTick);
             requiresModidWithdrawal();
         } finally {
             // 这一节往全局注册表里加了东西并（在摘除那一段里）动过它，必须还回去：
@@ -299,8 +301,110 @@ final class MekanismCompatCheck {
         }
     }
 
-    // ================================================================== (8) the fallback door
+    // ================================================================== (7b) the port half
 
+    /**
+     * 端口那一半：**离线只能证结构与「没装时为空」**，不能证真的装了气体。
+     *
+     * <p>为什么证的只有这些：一个可用的气体端口需要一个真实的 {@code IGasHandler} 实现，而构造它（{@link
+     * com.reborn.modularmachinery.compat.mekanism.HybridGasTank}）要 {@code GasStack}，那要气体注册表——
+     * 见 {@link #theApiReallyIsGameOnly()}。所以这一节断言的是**接线**：
+     *
+     * <ol>
+     *   <li>没装 Mekanism 时 {@code gasPortReady()} 为 false，端口收集拿到的是空列表——于是气体配方
+     *       表现为开工失败而不是崩溃（这一条本身就是可观察的行为，值得钉住）；</li>
+     *   <li>端口收集那条路**存在且被调用**：{@code MachineControllerBlockEntity} 真的把实体交给了
+     *       {@code Builder.gasPorts}。这一条只能读源码，但它挡的是一整类缺陷——桥做好了却没人调用，
+     *       而「没人调用」在离线环境里是**完全静默**的（气体桶永远是空的，与「没装 Mekanism」无法区分）；</li>
+     *   <li>桥必须**同时**实现能力查询与端口收集两条路：只做前者则管道能用而配方看不到，
+     *       只做后者则配方能用而管道灌不进去。两条都断在源码上。</li>
+     * </ol>
+     */
+    private static void portWiring(RequirementType gasPerTick) {
+        report("without Mekanism the gas capability is unavailable, so gasPortReady() is false",
+                !MekanismModule.gasPortReady());
+
+        report("...and the compat layer offers no port handlers for any entity (no mapper is registered)",
+                ModCompat.portHandlers(new Object()).isEmpty());
+
+        // 端口收集这条路：一个不认识的对象交进去，什么都不该发生（不崩、不加端口）。
+        HatchCollection ports = HatchCollection.builder()
+                .gasPorts(new Object(), true, null)
+                .gasPorts(new Object(), false, "line_1")
+                .build();
+        check("a gas-less machine collects zero gas inputs", 0, ports.gasInputs().size());
+        check("...and zero gas outputs", 0, ports.gasOutputs().size());
+        report("...and asking did not invent a port out of an arbitrary object", ports.isEmpty());
+
+        // 端口的描述行**只为有端口的桶输出行**（六个桶都是这个约定，不是为气体新立的）。
+        // 所以这里断言那个约定本身，而「气体桶也接进了诊断」只能断在源码上——见下面的读源码那一段。
+        // `/mm-diagnose` 是唯一能看见 selector-tag 的地方，所以气体端口漏进诊断就是一个真问题。
+        List<String> described = ports.describePorts();
+        check("describePorts() emits no row for an empty bucket (the convention all six buckets follow)",
+                "[]", described.toString());
+
+        // 标签筛选必须覆盖气体桶：漏了它，一条带 selector-tag 的气体需求就会看到**全部**气体端口。
+        check("withTag filters the gas buckets too (an empty bucket stays empty in either case)", 0,
+                ports.withTag("line_1").gasInputs().size());
+
+        // 两条路都必须实现——只做一条的话，管道与配方会有一边永远不工作。
+        Path source = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "compat/mekanism/MekanismAnchor.java");
+        Path controller = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                + "modularmachinery/block/MachineControllerBlockEntity.java");
+        try {
+            String anchor = withoutComments(Files.readString(source));
+            report("the bridge implements the capability query (map) — without it a Mekanism pipe could "
+                    + "never ask this hatch", anchor.contains("public LazyOptional<?> map("));
+            report("...and the port collection (handlers) — without it a recipe could never see a gas port",
+                    anchor.contains("public java.util.List<?> handlers("));
+            report("...and persistence (save/load) — without it a gas-filled hatch loses its contents on "
+                    + "reload", anchor.contains("public void save(net.minecraft.nbt.CompoundTag tag, Object entity)")
+                            && anchor.contains("public void load(net.minecraft.nbt.CompoundTag tag, Object entity)"));
+
+            // 注意：这里必须用**去掉注释**的文本。实测过——直接对原文找 "builder.gasPorts(hatch,"，
+            // 把那一行注释掉也照样通过，因为被注释的那一行同样包含这个字符串。
+            String controllerText = withoutComments(Files.readString(controller));
+            report("the controller really hands each hatch to the compat port collection (a bridge nobody calls "
+                    + "is indistinguishable from 'Mekanism absent', and that failure is silent)",
+                    controllerText.contains("builder.gasPorts(hatch,"));
+
+            // 诊断输出：`selector-tag` 在世界上看不见，`/mm-diagnose` 是唯一能看它的地方，
+            // 所以气体桶漏进诊断就是一个真问题（而它只在有气体端口时才看得见，离线造不出来）。
+            Path collection = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                    + "modularmachinery/machine/HatchCollection.java");
+            String collectionText = withoutComments(Files.readString(collection));
+            report("describePorts() also walks the two gas buckets (otherwise a gas port bound to a "
+                    + "selector-tag would be invisible to the one tool that can show tags)",
+                    collectionText.contains("describeBucket(out, \"gas input\"")
+                            && collectionText.contains("describeBucket(out, \"gas output\""));
+            report("withTag filters the two gas buckets as well (otherwise a tagged gas requirement would see "
+                    + "every gas port)", collectionText.contains("filter(this.gasInputs, this.gasInputTags, wanted)")
+                            && collectionText.contains("filter(this.gasOutputs, this.gasOutputTags, wanted)"));
+        } catch (Exception exception) {
+            report("reading the port sources failed: " + exception, false);
+        }
+
+        // 主模组**一个 Mekanism 类型都不该出现**，除了隔离在 compat/mekanism 里的那些。
+        // 这条是这一整节存在的理由：方块实体每个世界都会被加载，包括没装 Mekanism 的进程。
+        Path hatchEntity = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                + "modularmachinery/block/MachineHatchBlockEntity.java");
+        try {
+            String text = Files.readString(hatchEntity);
+            report("the hatch block entity mentions no Mekanism type (it would fail to load on a server "
+                    + "without Mekanism)", !text.contains("mekanism"));
+            report("...and it reaches the compat ports only through the generic entry point",
+                    text.contains("ModCompat.mapPort(") && text.contains("ModCompat.savePorts(")
+                            && text.contains("ModCompat.loadPorts("));
+        } catch (Exception exception) {
+            report("reading the hatch block entity failed: " + exception, false);
+        }
+
+        check("a gas requirement still reports its per-tick kind after the port work", "gas_pertick",
+                gasPerTick.id().getPath());
+    }
+
+    // ================================================================== (8) the fallback door
     /**
      * 没装 Mekanism 时这个模块**一次也不注册**——而且注册表里**不会留下半个种类**。
      *
@@ -344,6 +448,77 @@ final class MekanismCompatCheck {
     }
 
     private static final String WHERE = "a requirement of mmverify:gas";
+
+    /**
+     * 去掉 Java 源码里的注释，**保留字符串字面量**。
+     *
+     * <p>为什么必须做这件事：本节的源码断言分两类——一类读**报错文案**（字符串字面量，注释里没有），
+     * 一类读**有没有调用某方法**（可执行代码）。后一类若直接对原文 {@code contains}，
+     * 那么把那一行**注释掉**同样会让断言通过——实际测过：把
+     * {@code builder.gasPorts(hatch, …)} 注释掉之后，1536 条断言**全绿**。
+     * 那正是本项目最忌讳的「过宽的断言等于没断言」：它把一个静默失效伪装成通过。
+     *
+     * <p>保留字符串字面量的原因：报错文案是断言的对象，而文案里出现 {@code //} 或 {@code /*}
+     * （例如一段示例路径）不该被当成注释吃掉。
+     */
+    private static String withoutComments(String source) {
+        StringBuilder out = new StringBuilder(source.length());
+        int i = 0;
+        int n = source.length();
+        while (i < n) {
+            char c = source.charAt(i);
+            if (c == '"') {
+                // 字符串字面量：整段照抄，跳过转义。
+                out.append(c);
+                i++;
+                while (i < n) {
+                    char s = source.charAt(i);
+                    out.append(s);
+                    i++;
+                    if (s == '\\' && i < n) {
+                        out.append(source.charAt(i));
+                        i++;
+                    } else if (s == '"') {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if (c == '\'') {
+                out.append(c);
+                i++;
+                while (i < n) {
+                    char s = source.charAt(i);
+                    out.append(s);
+                    i++;
+                    if (s == '\\' && i < n) {
+                        out.append(source.charAt(i));
+                        i++;
+                    } else if (s == '\'') {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < n && source.charAt(i + 1) == '/') {
+                while (i < n && source.charAt(i) != '\n') {
+                    i++;
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < n && source.charAt(i + 1) == '*') {
+                i += 2;
+                while (i + 1 < n && !(source.charAt(i) == '*' && source.charAt(i + 1) == '/')) {
+                    i++;
+                }
+                i = Math.min(n, i + 2);
+                continue;
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
+    }
 
     private static String firstLine(String message) {
         if (message == null) {
