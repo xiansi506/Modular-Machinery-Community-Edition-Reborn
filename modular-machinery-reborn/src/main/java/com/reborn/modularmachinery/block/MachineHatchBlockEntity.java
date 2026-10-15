@@ -280,8 +280,18 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
      *
      * <p>走**通用入口** {@code ModCompat.namedValues}——本类不认识任何模块，也不该认识：
      * 它每个世界都会被加载，包括没装那个模组的进程。没装 Mekanism 时这个 map 是空的，本方法恒为 false。
+     *
+     * <p><b>它只在服务端返回 true（0.51.0 修正）。</b>理由：这条闸门是给**管道**用的，
+     * 而管道的行为由服务端裁定；而客户端的气体罐是从**上一次同步过来的 NBT** 里读出来的，
+     * 那份数据可能已经过时（气体被抽空时并不必然再同步一次）。若让闸门在客户端也生效，
+     * 就会把客户端那个**明明装着液体**的罐读成空——症状正是所有者截图上那一幕：
+     * 服务端的读数、界面 tooltip 都是 32000 mB，而 Jade 插件在客户端读到的却是「空」。
+     * 客户端只该显示它真正存着的东西。
      */
     private boolean gasBlocksFluid() {
+        if (this.level != null && this.level.isClientSide) {
+            return false;
+        }
         String amount = com.reborn.modularmachinery.compat.ModCompat.namedValues(this).get("gas.amount");
         if (amount == null) {
             return false;

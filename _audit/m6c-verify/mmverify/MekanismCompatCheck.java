@@ -709,6 +709,8 @@ final class MekanismCompatCheck {
                 + "integration/jade/ModularMachineryJadePlugin.java");
         Path component = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
                 + "integration/jade/HatchFluidComponent.java");
+        Path hatchEntity = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "block/MachineHatchBlockEntity.java");
         try {
             String pluginText = withoutComments(Files.readString(plugin));
             String componentText = withoutComments(Files.readString(component));
@@ -724,12 +726,16 @@ final class MekanismCompatCheck {
                     + "(not Block.class: precise registration avoids fighting other mods' global providers)",
                     pluginText.contains("registerBlockComponent(HatchFluidComponent.INSTANCE")
                             && pluginText.contains("MachineHatchBlock.class"));
-            report("the component reads the fluid from the synced save NBT (tank/Fluid/Amount) rather than"
-                    + " depending on Jade's universal fluid provider",
-                    componentText.contains("\"tank\"")
-                            && componentText.contains("\"Fluid\"")
-                            && componentText.contains("\"Amount\"")
-                            && componentText.contains("saveWithoutMetadata()"));
+            // 0.51.0 修正：组件**不再**读存档 NBT，而是读客户端自己的罐。
+            // 原来读 NBT 时，罐的 getFluid() 会问「有没有气体」，而客户端的气体罐来自上一次同步的旧 NBT
+            // ——于是它把客户端明明装着液体的罐读成空（所有者截图上就是这个症状）。
+            // 同时那道闸门也改成只在服务端生效。
+            report("the component reads the client-side tank itself rather than the save NBT "
+                    + "(and the gas gate is server-side only, so the client shows what it really holds)",
+                    componentText.contains("hatch.fluidTank()")
+                            && !componentText.contains("saveWithoutMetadata()")
+                            && withoutComments(Files.readString(hatchEntity))
+                                    .contains("if (this.level != null && this.level.isClientSide)"));
         } catch (Exception exception) {
             report("reading the Jade plugin sources failed: " + exception, false);
         }

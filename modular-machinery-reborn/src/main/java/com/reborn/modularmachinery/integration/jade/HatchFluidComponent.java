@@ -3,10 +3,8 @@ package com.reborn.modularmachinery.integration.jade;
 import com.reborn.modularmachinery.ModularMachineryReborn;
 import com.reborn.modularmachinery.block.MachineHatchBlockEntity;
 import com.reborn.modularmachinery.block.HatchKind;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.fluids.FluidStack;
 import snownee.jade.api.BlockAccessor;
 import snownee.jade.api.IBlockComponentProvider;
 import snownee.jade.api.ITooltip;
@@ -47,13 +45,6 @@ public final class HatchFluidComponent implements IBlockComponentProvider {
     private static final ResourceLocation UID =
             new ResourceLocation(ModularMachineryReborn.MOD_ID, "hatch_fluid");
 
-    /** 存档 NBT 里罐的键；与 {@code MachineHatchBlockEntity} 的 {@code TAG_TANK} 一致。 */
-    private static final String TAG_TANK = "tank";
-
-    /** Forge {@code FluidTank#writeToNBT} 用的两个键。 */
-    private static final String TAG_FLUID = "Fluid";
-    private static final String TAG_AMOUNT = "Amount";
-
     private HatchFluidComponent() {
     }
 
@@ -75,9 +66,18 @@ public final class HatchFluidComponent implements IBlockComponentProvider {
         if (hatch.kind().family() != HatchKind.Family.FLUID) {
             return;
         }
-        CompoundTag tag = hatch.saveWithoutMetadata();
-        FluidStack fluid = readFluid(tag);
         int capacity = Math.max(1, hatch.tier().fluidCapacity());
+        // **读客户端自己的罐**（0.51.0 修正：不再读存档 NBT）。
+        //
+        // 为什么改：本组件第一版读的是 `saveWithoutMetadata()` 里的 tank 标签，所有者实测显示「空」，
+        // 而同一个仓在界面上是满的。原因是那个罐的 `getFluid()` 会问「罐里是不是有气体」，
+        // 而**客户端的气体罐来自上一次同步过来的旧 NBT**——于是它把客户端这个明明装着液体的罐
+        // 读成了空（服务端不受影响，因为服务端的气体罐是真实状态）。同一次修正还让那道闸门
+        // 只在服务端生效（见 MachineHatchBlockEntity#gasBlocksFluid），这里再直接读罐，
+        // 两处合起来保证「客户端显示的」就是「客户端真正存着的」。
+        net.minecraftforge.fluids.FluidStack fluid = hatch.fluidTank() == null
+                ? net.minecraftforge.fluids.FluidStack.EMPTY
+                : hatch.fluidTank().getFluid();
         if (!fluid.isEmpty()) {
             tooltip.add(fluid.getDisplayName());
             tooltip.add(Component.literal(fluid.getAmount() + " mB / " + capacity + " mB"));
@@ -88,22 +88,5 @@ public final class HatchFluidComponent implements IBlockComponentProvider {
         // 看起来像是本模组什么都没做。
         tooltip.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"));
         tooltip.add(Component.literal("0 mB / " + capacity + " mB"));
-    }
-
-    /** 从同步过来的存档 NBT 里读出罐的内容；读不到就是空。 */
-    private static FluidStack readFluid(CompoundTag tag) {
-        if (!tag.contains(TAG_TANK)) {
-            return FluidStack.EMPTY;
-        }
-        CompoundTag tank = tag.getCompound(TAG_TANK);
-        if (!tank.contains(TAG_FLUID)) {
-            return FluidStack.EMPTY;
-        }
-        FluidStack stack = FluidStack.loadFluidStackFromNBT(tank.getCompound(TAG_FLUID));
-        if (stack.isEmpty() || tank.getInt(TAG_AMOUNT) <= 0) {
-            return FluidStack.EMPTY;
-        }
-        stack.setAmount(tank.getInt(TAG_AMOUNT));
-        return stack;
     }
 }
