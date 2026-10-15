@@ -37,10 +37,21 @@ final class HybridGasTank implements IGasHandler {
 
     private final MachineHatchBlockEntity hatch;
     private final FluidTank fluid;
+    /**
+     * 气罐的容量。
+     *
+     * <p><b>它不再借 {@code fluid.getCapacity()}</b>：那是流体罐的**总**容量，而气罐的空间要靠
+     * 「总容量减去当前装着的流体」算出来，否则两种东西会同时挤进同一个罐里——旧版的
+     * {@code HybridGasTank} 根本不可能出现那个状态（`setFluid` 与 `setGas` 互相覆盖同一个罐）。
+     *
+     * <p>取值在构造时定下（{@code fluid.getCapacity()}），因为流体仓的容量由它的等级决定、永不改变。
+     */
+    private final long capacity;
+
     /** 每当内容变化时通知宿主去存盘并（流体那一半需要）同步给客户端。 */
     private final Runnable onChanged;
 
-    /** 当前气体，数量为 1 的载体；{@code EMPTY_GAS} 表示罐里是流体或空的。 */
+    /** 当前气体，数量为 1 的载体；{@code EMPTY_GAS} 表示罐里是气以外的状态或空的。 */
     private GasStack stored = GasStack.EMPTY;
     private long amount;
 
@@ -48,6 +59,7 @@ final class HybridGasTank implements IGasHandler {
         this.hatch = hatch;
         this.fluid = fluid;
         this.onChanged = onChanged;
+        this.capacity = Math.max(1L, fluid.getCapacity());
     }
 
     /** 这个仓是否已经有气体那一半（只有流体仓才该有）。 */
@@ -81,7 +93,7 @@ final class HybridGasTank implements IGasHandler {
 
     @Override
     public long getTankCapacity(int tank) {
-        return tank == 0 ? this.fluid.getCapacity() : 0L;
+        return tank == 0 ? this.capacity : 0L;
     }
 
     @Override
@@ -90,10 +102,11 @@ final class HybridGasTank implements IGasHandler {
     }
 
     /**
-     * 灌入。**先看这一罐是不是已经装着别的东西**——旧版 {@code HybridGasTank} 一个罐只装一样。
+     * 灌入。**一个罐要么装流体、要么装气体**（旧版 {@code HybridGasTank} 的语义：`setFluid` 与 `setGas`
+     * 互相覆盖同一个 {@code HybridTank}）。
      *
-     * <p>数量用 {@code long} 收（{@code IGasHandler} 的签名如此），但罐容量是 {@code int}，
-     * 所以按容量减去已存量来夹。
+     * <p><b>流体会挡住气体，而灌气体会把流体清掉。</b>两条都是上面那句话的直接后果，缺一条就不自洽：
+     * 只挡不清则永远进不去（流体仓里通常有流体），只清不挡则两种东西同时存在（旧版不可能出现的状态）。
      */
     @Override
     public GasStack insertChemical(int tank, GasStack stack, Action action) {
@@ -112,14 +125,28 @@ final class HybridGasTank implements IGasHandler {
             MEKANISM_PROBE.note("参数不对（tank=" + tank + " 或空栈）");
             return stack == null ? GasStack.EMPTY : stack;
         }
+        // 罐里已经有流体：**先把它清掉再收气体**。旧版就是这么做的——一个罐只装一样。
+        // 这一条不是「顺手清一下」：流体仓里通常真有流体，若只挡不清，气体永远进不来，
+        // 而症状只是「什么都没发生」（251 次被拒的那一类）。
+        if (this.fluid.getFluidAmount() > 0L) {
+            if (action.execute()) {
+                this.fluid.setFluid(FluidStack.EMPTY);
+                this.onChanged.run();
+            }
+            // 清掉之后这一份气体可以整份收下（容量是同一个罐的容量）。
+            // 注意：这里**继续往下走**，不提前返回——否则第一次灌气只会清流体、不回气体，
+            // 管道会以为一点都没进去而反复重试。
+        }
         if (!sameType(stack)) {
-            // 罐里是流体（或有别种气体）：不受理。回整份，表示一点都没进去。
-            MEKANISM_PROBE.note("被拒：罐里装着别的东西（present=" + describe(this.stored) + "）");
+            // 罐里是**别种气体**：不受理。回整份，表示一点都没进去。
+            MEKANISM_PROBE.note("被拒：罐里是别种气体（现在 " + describe(this.stored)
+                    + "，来的是 " + describe(stack) + "）");
             return stack;
         }
-        long free = getTankCapacity(0) - this.amount;
+        long free = this.capacity - this.amount;
         if (free <= 0L) {
-            MEKANISM_PROBE.note("被拒：容量已满（free=" + free + "）");
+            MEKANISM_PROBE.note("被拒：气罐已满（容量 " + this.capacity + "，已存 " + this.amount
+                    + "，来的是 " + describe(stack) + "）");
             return stack;
         }
         long accepted = Math.min(free, stack.getAmount());
@@ -130,8 +157,7 @@ final class HybridGasTank implements IGasHandler {
         if (action.execute()) {
             MEKANISM_PROBE.noteExecute();
             this.amount += accepted;
-            // 装了气体就把流体清掉：一个罐只装一样（旧版 setFluid/setGas 互相覆盖）。
-            this.fluid.setFluid(FluidStack.EMPTY);
+            this.stored = new GasStack(stack, 1L);
             changed();
         }
         MEKANISM_PROBE.note("受理 " + describe(stack) + " 的 " + accepted + " mB（" + action + "）");
@@ -193,7 +219,7 @@ final class HybridGasTank implements IGasHandler {
         String content = this.amount <= 0L || this.stored.isEmpty()
                 ? "空"
                 : describe(this.stored) + " x" + this.amount + " mB";
-        return content + " / 容量 " + getTankCapacity(0) + " mB";
+        return content + " / 容量 " + this.capacity + " mB";
     }
 
     /** 这个罐上的插入尝试统计，给 {@code /mm-diagnose} 用。 */
@@ -258,7 +284,7 @@ final class HybridGasTank implements IGasHandler {
             return;
         }
         this.stored = new GasStack(type, 1L);
-        this.amount = Math.min(saved, getTankCapacity(0));
+        this.amount = Math.min(saved, this.capacity);
     }
 
     /** 只在盒子内用，见 {@link MekanismAnchor}；这里复用同一段「注册表可能不在」的处理。 */
@@ -293,7 +319,7 @@ final class HybridGasTank implements IGasHandler {
 
     private void setGas(GasStack stack) {
         this.stored = new GasStack(stack, 1L);
-        this.amount = Math.min(stack.getAmount(), getTankCapacity(0));
+        this.amount = Math.min(stack.getAmount(), this.capacity);
         this.fluid.setFluid(FluidStack.EMPTY);
         changed();
     }
