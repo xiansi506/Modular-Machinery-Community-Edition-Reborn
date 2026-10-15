@@ -742,11 +742,17 @@ final class MekanismCompatCheck {
             Path suppressor = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
                     + "modularmachinery/integration/jade/FluidStorageSuppressor.java");
             String suppressorText = withoutComments(Files.readString(suppressor));
-            report("Jade's universal fluid component is removed for this mod's hatch blocks only "
-                    + "(its id is exact, and the check is on our own block class)",
-                    suppressorText.contains("new ResourceLocation(\"jade\", \"fluid_storage\")")
-                            && suppressorText.contains("MachineHatchBlock")
+            // 按 id 移除那一版**无效**：Jade 的 ClientViewGroup.tooltip(...) 用
+            // ITooltip.add(IElement)（不带 id 的重载）把流体元素加进去，所以 remove(id) 找不到它
+            // —— 这是从 Jade 字节码里读出来的。现在改为按**内容**定位（方块显示名那一段），
+            // 删掉它并插回本模组自己的行。
+            report("the universal fluid component's block is located by CONTENT (the block's own display"
+                    + " name), not by an id (Jade adds those elements with no id at all), and only for"
+                    + " this mod's hatch blocks",
+                    suppressorText.contains("MachineHatchBlock")
+                            && suppressorText.contains("getDisplayName()")
                             && suppressorText.contains("tooltip.remove(")
+                            && suppressorText.contains("isNameRow")
                             && pluginText.contains("addTooltipCollectedCallback"));
         } catch (Exception exception) {
             report("reading the Jade plugin sources failed: " + exception, false);

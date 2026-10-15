@@ -59,12 +59,23 @@ public final class HatchFluidComponent implements IBlockComponentProvider {
      */
     @Override
     public void appendTooltip(ITooltip tooltip, BlockAccessor accessor, IPluginConfig config) {
-        if (!(accessor.getBlockEntity() instanceof MachineHatchBlockEntity hatch)) {
-            return;
+        if (accessor.getBlockEntity() instanceof MachineHatchBlockEntity hatch) {
+            tooltip.addAll(linesFor(hatch));
         }
-        // 只对流体仓说这件事：气体仓有自己的名字（气体那一半目前由兼容层显示）。
+    }
+
+    /**
+     * 这个仓该显示的行（液体两行，装了 Mekanism 且仓里有气体时再加一行）。
+     *
+     * <p>由 {@link FluidStorageSuppressor} **复用**：它把 Jade 通用流体组件画在方块名那一行上的图标与
+     * 空框去掉之后，用这里的行填补原位。这样「同一件事」在提示里只出现一次，而且是本模组给的那一份。
+     *
+     * <p>非流体仓返回空表（气体仓的名字由别处负责）。
+     */
+    public static java.util.List<Component> linesFor(MachineHatchBlockEntity hatch) {
+        java.util.List<Component> lines = new java.util.ArrayList<>(3);
         if (hatch.kind().family() != HatchKind.Family.FLUID) {
-            return;
+            return lines;
         }
         int capacity = Math.max(1, hatch.tier().fluidCapacity());
         // **读客户端自己的罐**（0.51.0 修正：不再读存档 NBT）。
@@ -72,21 +83,24 @@ public final class HatchFluidComponent implements IBlockComponentProvider {
         // 为什么改：本组件第一版读的是 `saveWithoutMetadata()` 里的 tank 标签，所有者实测显示「空」，
         // 而同一个仓在界面上是满的。原因是那个罐的 `getFluid()` 会问「罐里是不是有气体」，
         // 而**客户端的气体罐来自上一次同步过来的旧 NBT**——于是它把客户端这个明明装着液体的罐
-        // 读成了空（服务端不受影响，因为服务端的气体罐是真实状态）。同一次修正还让那道闸门
-        // 只在服务端生效（见 MachineHatchBlockEntity#gasBlocksFluid），这里再直接读罐，
-        // 两处合起来保证「客户端显示的」就是「客户端真正存着的」。
+        // 读成了空。同一次修正还让那道闸门只在服务端生效（见 MachineHatchBlockEntity#gasBlocksFluid）。
         net.minecraftforge.fluids.FluidStack fluid = hatch.fluidTank() == null
                 ? net.minecraftforge.fluids.FluidStack.EMPTY
                 : hatch.fluidTank().getFluid();
-        if (!fluid.isEmpty()) {
-            tooltip.add(fluid.getDisplayName());
-            tooltip.add(Component.literal(fluid.getAmount() + " mB / " + capacity + " mB"));
-            return;
+        if (fluid.isEmpty()) {
+            // 空的时候也要说话：**「空」与「这个方块没有流体那一半」是两件事**。
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"));
+            lines.add(Component.literal("0 mB / " + capacity + " mB"));
+        } else {
+            lines.add(fluid.getDisplayName());
+            lines.add(Component.literal(fluid.getAmount() + " mB / " + capacity + " mB"));
         }
-        // 空的时候也要说话：**「空」与「这个方块没有流体那一半」是两件事**，
-        // 而 Jade 通用组件在空罐时只画一个空框（所有者截图上那个 `空 : 0 mB`），
-        // 看起来像是本模组什么都没做。
-        tooltip.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"));
-        tooltip.add(Component.literal("0 mB / " + capacity + " mB"));
+        // 气体那一行可选：没装 Mekanism（或仓里没有气体那一半）时返回 null，这里就不加。
+        String[] gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasTooltip(hatch);
+        if (gas != null) {
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.gashatch.tank",
+                    gas[0], gas[1]));
+        }
+        return lines;
     }
 }

@@ -1,63 +1,99 @@
 package com.reborn.modularmachinery.integration.jade;
 
-import com.reborn.modularmachinery.ModularMachineryReborn;
-import net.minecraft.resources.ResourceLocation;
+import com.reborn.modularmachinery.block.MachineHatchBlock;
+import net.minecraft.network.chat.Component;
 import snownee.jade.api.Accessor;
+import snownee.jade.api.BlockAccessor;
 import snownee.jade.api.ITooltip;
 import snownee.jade.api.callback.JadeTooltipCollectedCallback;
+import snownee.jade.api.ui.IElement;
+
+import java.util.List;
 
 /**
- * 摘掉 Jade 通用流体组件在本模组仓方块上画的那一份。
+ * 把 Jade 通用流体组件在本模组仓方块上画的那一份整块去掉，并在这个位置放上本模组自己的两行。
  *
- * <h2>为什么必须摘</h2>
+ * <h2>为什么不能用 {@code ITooltip.remove(id)}</h2>
  *
- * <p>那个组件按 {@code BlockEntity.class} 注册，服务端向方块实体要流体能力、再把结果发给客户端。
- * 本模组这一侧的服务端读数**四条全部一致**（罐真值 / 本类交出 / Jade 流程模拟 / 界面 tooltip
- * 都是 32000 mB），而它在客户端画出来的是 `空 : 0 mB` 与「这一栏没有显示」两种错法
- * （所有者实例上两种都出现过；它读服务端却渲染成空这一点，本模组改不动）。
+ * <p>那个 id 版本试过，**无效**：Jade 的 {@code ClientViewGroup.tooltip(...)} 是用
+ * {@code ITooltip.add(IElement)}（**不带 id** 的那个重载）把流体元素加进提示的，
+ * 所以按 id 移除什么也找不到。这是从 Jade 的字节码里读出来的，不是猜的
+ * （{@code ClientViewGroup} 里只有 {@code add(IElement)} 与 {@code add(IElement, Align)}）。
  *
- * <p>所以：本模组现在**自己**把流体内容报给 Jade（{@link HatchFluidComponent}，读客户端自己的罐，
- * 与界面 tooltip 同源），那就该把**同一件事的第二份、而且错的那一份**从本模组的方块上摘掉——
- * 否则玩家看到的是两个互相矛盾的数字。
+ * <h2>所以按「内容」定位</h2>
  *
- * <h2>做法与边界</h2>
+ * <p>用 {@code ITooltip.get(int, Align)} 把该行的元素枚举出来，找**那个就是方块显示名**的元素
+ * （与 {@code BlockAccessor.getBlockEntity().getDisplayName()} 相等）——那就是「流体输入仓」这一行的起点。
+ * 从它开始、到下一行之前的内容就是通用流体组件的那一块（图标 + 名字 + 空框），删掉，
+ * 再在同一个下标插入本模组自己的「液体」与「气体」两行。
  *
- * <p>用 Jade 的「工具提示收集完成」回调，按它自己的 id（{@code jade:fluid_storage}）移除，
- * 且**只对 {@link com.reborn.modularmachinery.block.MachineHatchBlock} 生效**——
- * 绝不去动别的模组方块上的东西。
- *
- * <p>id 用 {@code ResourceLocation} 直接构造而不是引用 Jade 的 {@code Identifiers} 常量：
- * 那个常量是 {@code jade} 命名空间 + {@code fluid_storage}（已用 javap 取到其 {@code <clinit>} 的值）。
- * 直接写字符串少一处对 Jade 内部结构的依赖，也便于日后核对。
+ * <p>只对本模组的 {@link MachineHatchBlock} 生效；别的模组方块一个字都不动。
  */
 public final class FluidStorageSuppressor implements JadeTooltipCollectedCallback {
 
     public static final FluidStorageSuppressor INSTANCE = new FluidStorageSuppressor();
-
-    /**
-     * Jade 通用流体组件的 id（{@code Identifiers.UNIVERSAL_FLUID_STORAGE}）。
-     *
-     * <p>只在 id 已被双方写进同一个命名空间时才可能撞车：本模组自己的组件是
-     * {@code modular_machinery_reborn:hatch_fluid}，与它不同。
-     */
-    private static final ResourceLocation UNIVERSAL_FLUID_STORAGE =
-            new ResourceLocation("jade", "fluid_storage");
 
     private FluidStorageSuppressor() {
     }
 
     @Override
     public void onTooltipCollected(ITooltip tooltip, Accessor<?> accessor) {
-        // getBlockState() 在 BlockAccessor 上（实体方块的那一套不带它），所以这里判类型。
-        if (accessor instanceof snownee.jade.api.BlockAccessor block
-                && block.getBlockState().getBlock()
-                        instanceof com.reborn.modularmachinery.block.MachineHatchBlock) {
-            tooltip.remove(UNIVERSAL_FLUID_STORAGE);
+        if (!(accessor instanceof BlockAccessor block)
+                || !(block.getBlockState().getBlock() instanceof MachineHatchBlock)
+                || !(block.getBlockEntity()
+                        instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)) {
+            return;
+        }
+        int index = nameRowIndex(tooltip, block, hatch);
+        if (index < 0) {
+            // 找不到名字那一行就什么都不动：宁可留着通用组件那一份，也不要凭空删掉别的东西。
+            return;
+        }
+        // 删掉名字那一行及其后面「同一个元素锚点」下的内容（通用组件的图标与数字画在那一行上）。
+        // size 会随 remove 变化，所以每次都重新取第一个元素来判断。
+        while (tooltip.size() > index && isNameRow(tooltip, index, block, hatch)) {
+            tooltip.remove(firstElementTag(tooltip, index));
+        }
+        // 插到原位：这样两行紧贴在方块名下面，与之前看到的布局一致。
+        List<Component> mine = HatchFluidComponent.linesFor(hatch);
+        for (int i = 0; i < mine.size(); i++) {
+            tooltip.add(index + i, mine.get(i));
         }
     }
 
-    /** 供断言与日志引用的描述（本模组摘掉的那一项）。 */
-    public static String suppressedId() {
-        return ModularMachineryReborn.MOD_ID + " suppresses " + UNIVERSAL_FLUID_STORAGE;
+    /** 方块名那一行的下标；找不到返回 -1。 */
+    private static int nameRowIndex(ITooltip tooltip, BlockAccessor block,
+            com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch) {
+        for (int i = 0; i < tooltip.size(); i++) {
+            if (isNameRow(tooltip, i, block, hatch)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 这一行是不是「方块名」那一行。
+     *
+     * <p>判据用**显示名相等**（{@code Component} 实现了 {@code equals}），而显示名取自方块实体自己
+     * ——与 Jade 画在提示里的那一个同源，所以不会因为语言或大小写而对不上。
+     */
+    private static boolean isNameRow(ITooltip tooltip, int index, BlockAccessor block,
+            com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch) {
+        List<IElement> elements = tooltip.get(index, IElement.Align.LEFT);
+        if (elements == null || elements.isEmpty()) {
+            return false;
+        }
+        String message = elements.get(0).getMessage();
+        return message != null && message.equals(hatch.getDisplayName().getString());
+    }
+
+    /** 这一行第一个元素的注册 id；取不到时用一个占位 id（remove 对不存在的 id 是空操作）。 */
+    private static net.minecraft.resources.ResourceLocation firstElementTag(ITooltip tooltip, int index) {
+        List<IElement> elements = tooltip.get(index, IElement.Align.LEFT);
+        if (elements != null && !elements.isEmpty() && elements.get(0).getTag() != null) {
+            return elements.get(0).getTag();
+        }
+        return new net.minecraft.resources.ResourceLocation("modular_machinery_reborn", "hatch_row");
     }
 }
