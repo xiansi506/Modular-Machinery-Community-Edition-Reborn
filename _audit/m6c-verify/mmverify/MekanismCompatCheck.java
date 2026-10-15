@@ -105,6 +105,8 @@ final class MekanismCompatCheck {
             sourceLevelDivergences();
             // 端口那一半：先把离线能证的结构与「没装时为空」证掉，再让摘除那一段收尾。
             portWiring(gasPerTick);
+            // 实机报告换来的那一条：可选依赖的 versionRange 不能省。
+            modsTomlOptionalDependencies();
             requiresModidWithdrawal();
         } finally {
             // 这一节往全局注册表里加了东西并（在摘除那一段里）动过它，必须还回去：
@@ -402,6 +404,75 @@ final class MekanismCompatCheck {
 
         check("a gas requirement still reports its per-tick kind after the port work", "gas_pertick",
                 gasPerTick.id().getPath());
+    }
+
+    // ================================================================== (9) mods.toml
+
+    /**
+     * 每一个可选依赖都必须写 `versionRange`——**省略会被解析成空范围，而空范围不匹配任何版本**。
+     *
+     * <p>这一条是实机报告换来的：0.34.0 启动时 Forge 打出
+     * {@code Unsupported installed optional dependencies: Mod ID: 'kubejs', … Expected range: '',
+     * Actual version: '2001.6.5-build.26'}，三个可选依赖全部命中。我当时的理由是「不写版本区间，
+     * 免得把玩家挡在门外」——而那个决定的实际后果**正好相反**。
+     *
+     * <p>两个陷阱值得写下来，因为我都差点踩实：
+     * <ol>
+     *   <li><b>Forge 只对「装了的」可选依赖做这个判断。</b>所以拿一个没装的模组当反例（我最初就是拿
+     *       Botania 的 {@code gardenofglass} 举例）会得出「这样写没问题」的错误结论——那一条从来没被检查过。</li>
+     *   <li><b>这个错误不会让游戏开不起来</b>（它是 ERROR 级日志，不是异常；报告里那次崩溃是另一个模组
+     *       {@code CustomSkinLoader} 缺类）。所以它只能靠**读日志**发现，而这正是最容易被跳过的一类。</li>
+     * </ol>
+     *
+     * <p>断言在**手写的源文件**上做，不在打包产物上：这条错误来自 mods.toml 的文本，
+     * 而源文件就是权威。这里刻意做一个很轻的解析——按 {@code [[dependencies.…]]} 切块，
+     * 每块里找 {@code mandatory} 与 {@code versionRange}——因为要断言的正是「两者必须同时出现」。
+     */
+    private static void modsTomlOptionalDependencies() {
+        Path toml = Path.of("C:/mmwork/modular-machinery-reborn/src/main/resources/META-INF/mods.toml");
+        String text;
+        try {
+            text = Files.readString(toml);
+        } catch (Exception exception) {
+            report("could not read " + toml + ": " + exception, false);
+            return;
+        }
+        // 切块：每个 "[[dependencies..." 到下一个 "[[" 之前。
+        String[] blocks = text.split("(?m)^\\s*\\[\\[");
+        int optional = 0;
+        int missingRange = 0;
+        List<String> offenders = new ArrayList<>();
+        for (String block : blocks) {
+            if (!block.startsWith("dependencies.")) {
+                continue;
+            }
+            boolean isOptional = block.matches("(?s).*mandatory\\s*=\\s*false.*");
+            if (!isOptional) {
+                continue;
+            }
+            optional++;
+            String modId = "?";
+            java.util.regex.Matcher id = java.util.regex.Pattern.compile("modId\\s*=\\s*\"([^\"]+)\"")
+                    .matcher(block);
+            if (id.find()) {
+                modId = id.group(1);
+            }
+            if (!block.matches("(?s).*versionRange\\s*=\\s*\"[^\"]+\".*")) {
+                missingRange++;
+                offenders.add(modId);
+            }
+        }
+        report("the mod declares at least one optional dependency (otherwise this check is vacuous): "
+                + optional, optional > 0);
+        check("every optional dependency states a versionRange (omitting it means 'matches no version', so "
+                + "the mod would log an error on every instance that HAS the dependency): "
+                + (offenders.isEmpty() ? "all " + optional + " have one" : "missing on " + offenders),
+                0, missingRange);
+
+        // 范围本身必须能容纳一个真实版本——「写了但写错」与「没写」是同一种失败。
+        report("...and each range is one a real version satisfies (maven's 'containsVersion' is what Forge "
+                + "runs; a range no real version satisfies is the same bug as an empty one)",
+                text.contains("versionRange=\"[1,)"));
     }
 
     // ================================================================== (8) the fallback door

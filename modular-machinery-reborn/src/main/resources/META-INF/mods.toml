@@ -26,29 +26,39 @@ description='''A Forge 1.20.1 reimplementation foundation for Modular Machinery:
 #   - jei：本模组一直走 META-INF/services/mezz.jei.api.IModPlugin（ServiceLoader），也与它无关。
 # 也就是说，这两行只是把既有的软关系**登记**下来。
 #
-# 有意不写 versionRange：装了任意版本的 jei/kubejs 都不该被本模组拒绝启动，而「未装」的情形由
-# mandatory=false 表达。写出一个我没实测过的版本区间，风险是把玩家挡在门外，而收益是零。
+# ⚠️ **versionRange 不能省。** 0.34.0 实机报告第一行就是这件事：
+#     `[ModSorter/LOADING]: Unsupported installed optional dependencies: Mod ID: 'kubejs', …
+#      Expected range: '', Actual version: '2001.6.5-build.26'`
+# 三个都装了、三个都报。**省略 versionRange 会被 Forge 解析成空范围，而空范围不匹配任何版本**——
+# 于是「可选」在装了那个模组的玩家身上变成了一条错误（Forge 只对**装了的**可选依赖做这个判断，
+# 所以「没装时不报」并不说明写法没问题；我最初就是拿 Botania 的 gardenofglass 当反例，
+# 差点得出错误结论——那一条没装，所以它从来没被检查过）。
+#
+# 下界宽度按生态既有写法取：JEI 那一侧几乎一律是 `[15,)`（`almostunified` 用 `[15.1.0.18,)`），
+# Minecolonies 用 `[1,)`。这里统一用 `[1,)`：对本模组而言「任何真实版本都可以」，
+# 而把玩家挡在门外的风险最小。
 [[dependencies.${mod_id}]]
     modId="jei"
     mandatory=false
+    versionRange="[1,)"
     ordering="NONE"
     side="BOTH"
 [[dependencies.${mod_id}]]
     modId="kubejs"
     mandatory=false
+    versionRange="[1,)"
     ordering="NONE"
     side="BOTH"
 # 波 5.3：Mekanism 的化学（旧版的「气体」）是本模组第一个真兼容模块。
 #
 # 这条声明**是有实质作用的，不是登记**，与上面两条不同：气体端口要把本模组的流体仓暴露成 Mekanism 的
-# `IChemicalHandler`，而能力注册发生在 mod 构造期——那时 Mekanism 必须**已经注册过它自己的能力**
-# （`IGasHandler.getCapability()` 只有在它自己的 `RegisterCapabilitiesEvent` 之后才拿得到）。
-# `ordering="AFTER"` 让 FML 保证那个先后。
+# `IChemicalHandler`，而能力对象必须在**读取时**已经就绪。`ordering="AFTER"` 让 FML 保证
+# Mekanism 先构造。
 #
 # mandatory=false：没装 Mekanism 的进程照常启动，只是没有气体端口（`compat/` 的设计就是如此）。
-# 同样不写 versionRange：装了任意 1.20.1 的 Mekanism 都不该被本模组拒绝启动。
 [[dependencies.${mod_id}]]
     modId="mekanism"
     mandatory=false
+    versionRange="[1,)"
     ordering="AFTER"
     side="BOTH"
