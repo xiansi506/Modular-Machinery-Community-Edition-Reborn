@@ -368,7 +368,10 @@ public final class SelectionExport {
             return null;
         }
         BlockEntity entity = level.getBlockEntity(pos);
-        String nbt = entity == null ? null : nbtToJson(withoutCoordinates(entity.saveWithoutMetadata()));
+        // The casing block entity stores only the runtime tint copied from its formed machine controller.
+        // That value belongs to the machine definition, not to the exported structure fragment.
+        String nbt = entity == null || entity instanceof com.reborn.modularmachinery.block.MachineCasingBlockEntity
+                ? null : nbtToJson(withoutCoordinates(entity.saveWithoutMetadata()));
         return new BlockSample(descriptor, nbt);
     }
 }

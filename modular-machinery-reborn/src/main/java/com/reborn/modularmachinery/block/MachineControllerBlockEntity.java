@@ -31,8 +31,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.Connection;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
@@ -157,6 +159,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * {@code client.MachinePartColors} 读它。
      */
     @javax.annotation.Nullable private Integer machineColor;
+    /** Relative positions of casing/hatch block entities tinted by this controller; persisted for teardown. */
+    private final List<BlockPos> colorizedPartOffsets = new ArrayList<>();
 
     /** The machine this controller is tied to, or {@code null} for the generic controller. */
     @Nullable
@@ -1509,9 +1513,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * 旧版是靠控制器遍历 pattern 里的方块位置去 `tryColorize` 的）。所以「哪个部件属于哪台机器」
      * 只有控制器知道，下发也就只能是它的活。
      *
-     * <p>只推给**有方块实体**的位置：纯装饰外壳（{@code BlockCasing}）没有方块实体，收不了颜色——
-     * 这一点与旧版一致（旧版的 `tryColorize` 只对 `ColorableMachineTile` 生效，
-     * 而外壳的模型也没有 tint 层，所以它本来就不参与染色）。
+     * <p>颜色会下发给结构中的仓与外壳。外壳原先没有方块实体，导致模型虽有 tint 层却无法取得机器颜色；
+     * {@link MachineCasingBlockEntity} 现在负责保存和同步该值。
      */
     /** 定义的染色值；没有定义时 {@code null}（= 不染色）。 */
     @javax.annotation.Nullable
@@ -1520,12 +1523,33 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
     private void distributeMachineColor(@javax.annotation.Nullable Integer color,
                                         @javax.annotation.Nullable MachinePattern pattern) {
+        Integer previousColor = this.machineColor;
+        List<BlockPos> nextOffsets = new ArrayList<>();
+        if (pattern != null && color != null) {
+            for (BlockPos relative : pattern.positions().keySet()) {
+                BlockEntity part = this.level == null ? null : this.level.getBlockEntity(this.worldPosition.offset(relative));
+                if (part instanceof MachineHatchBlockEntity || part instanceof MachineCasingBlockEntity) {
+                    nextOffsets.add(new BlockPos(relative.getX(), relative.getY(), relative.getZ()));
+                }
+            }
+        }
+
+        // If the formed pattern changed or disappeared, remove only the tint this controller previously applied
+        // from parts that no longer belong to its current pattern.
+        for (BlockPos previous : this.colorizedPartOffsets) {
+            if (!nextOffsets.contains(previous)) {
+                clearPartColor(previous, previousColor);
+            }
+        }
+
         this.machineColor = color;
         setChanged();
         if (this.level != null && !this.level.isClientSide) {
             this.level.sendBlockUpdated(this.worldPosition, getBlockState(), getBlockState(),
                     net.minecraft.world.level.block.Block.UPDATE_ALL);
         }
+        this.colorizedPartOffsets.clear();
+        this.colorizedPartOffsets.addAll(nextOffsets);
         if (this.level == null || pattern == null) {
             return;
         }
@@ -1533,10 +1557,50 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // 不发明「搜索半径」：那会把相邻的、属于别的机器的部件也算进来（本项目对「看起来合理」的容忍度很低），
         // 而 pattern 恰好就是「这台机器占哪些格子」的权威答案。
         for (BlockPos relative : pattern.positions().keySet()) {
-            if (this.level.getBlockEntity(this.worldPosition.offset(relative))
-                    instanceof MachineHatchBlockEntity hatch) {
+            BlockEntity part = this.level.getBlockEntity(this.worldPosition.offset(relative));
+            if (part instanceof MachineHatchBlockEntity hatch) {
                 hatch.setMachineColor(color);
+            } else if (part instanceof MachineCasingBlockEntity casing) {
+                casing.setMachineColor(color);
             }
+        }
+    }
+
+    /** Clear this controller's persisted tint assignments before its block entity is removed. */
+    public void clearDistributedMachineColor(Direction facing) {
+        if (this.level == null || this.level.isClientSide) {
+            return;
+        }
+        Integer colorToClear = this.machineColor;
+        for (BlockPos relative : this.colorizedPartOffsets) {
+            clearPartColor(relative, colorToClear);
+        }
+        // Compatibility with saves created before colorizedPartOffsets existed: while the controller and
+        // structure are still present during onRemove, recover the matched pattern and clear its parts.
+        if (this.colorizedPartOffsets.isEmpty() && this.formed && colorToClear != null) {
+            MachineRegistry.Match match = MachineRegistry.findMatch(this.level, this.worldPosition, facing,
+                    blueprintMachineId(), this.boundMachine);
+            if (match != null) {
+                for (BlockPos relative : match.pattern().positions().keySet()) {
+                    clearPartColor(relative, colorToClear);
+                }
+            }
+        }
+        this.colorizedPartOffsets.clear();
+        this.machineColor = null;
+    }
+
+    private void clearPartColor(BlockPos relative, @javax.annotation.Nullable Integer expectedColor) {
+        if (this.level == null || expectedColor == null) {
+            return;
+        }
+        BlockEntity part = this.level.getBlockEntity(this.worldPosition.offset(relative));
+        if (part instanceof MachineHatchBlockEntity hatch
+                && java.util.Objects.equals(hatch.machineColor(), expectedColor)) {
+            hatch.setMachineColor(null);
+        } else if (part instanceof MachineCasingBlockEntity casing
+                && java.util.Objects.equals(casing.machineColor(), expectedColor)) {
+            casing.setMachineColor(null);
         }
     }
 
@@ -1604,6 +1668,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (machineColor != null) {
             tag.putInt("machineColor", machineColor);
         }
+        tag.put("machineColorParts", new LongArrayTag(this.colorizedPartOffsets.stream()
+                .mapToLong(BlockPos::asLong).toArray()));
         if (activeRecipeId != null) {
             tag.putString("activeRecipe", activeRecipeId.toString());
         }
@@ -1637,6 +1703,12 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         activeDuration = Math.max(1, tag.getInt("activeDuration"));
         machineId = tag.contains("machine") ? ResourceLocation.tryParse(tag.getString("machine")) : null;
         machineColor = tag.contains("machineColor") ? tag.getInt("machineColor") : null;
+        this.colorizedPartOffsets.clear();
+        if (tag.contains("machineColorParts", Tag.TAG_LONG_ARRAY)) {
+            for (long packed : tag.getLongArray("machineColorParts")) {
+                this.colorizedPartOffsets.add(BlockPos.of(packed));
+            }
+        }
         activeRecipeId = tag.contains("activeRecipe") ? ResourceLocation.tryParse(tag.getString("activeRecipe")) : null;
         // M6e. A factory controller is a factory by virtue of its block plus the formed machine, and the
         // definition is available here, so the mode can be restored before the first tick. That matters: the
@@ -1673,5 +1745,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     @Override
     public Packet<ClientGamePacketListener> getUpdatePacket() {
         return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    @Override
+    public void onDataPacket(Connection connection, ClientboundBlockEntityDataPacket packet) {
+        Integer previousColor = this.machineColor;
+        super.onDataPacket(connection, packet);
+        if (this.level != null && this.level.isClientSide
+                && !java.util.Objects.equals(previousColor, this.machineColor)) {
+            this.level.sendBlockUpdated(this.worldPosition, getBlockState(), getBlockState(), Block.UPDATE_CLIENTS);
+        }
     }
 }

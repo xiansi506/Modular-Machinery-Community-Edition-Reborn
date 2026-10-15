@@ -306,6 +306,10 @@ public final class ModBlocks {
     public static final RegistryObject<Block> BLOCK_CASING = BLOCKS.register("blockcasing",
             () -> new BlockCasing(BlockBehaviour.Properties.of().strength(3.0f).requiresCorrectToolForDrops()));
 
+    public static final RegistryObject<BlockEntityType<MachineCasingBlockEntity>> CASING_ENTITY =
+            BLOCK_ENTITIES.register("machine_casing", () -> BlockEntityType.Builder
+                    .of(MachineCasingBlockEntity::new, BLOCK_CASING.get()).build(null));
+
     public static final List<RegistryObject<Item>> CASING_ITEMS = new ArrayList<>();
 
     /** One block per hatch family; see {@link HatchKind}. */

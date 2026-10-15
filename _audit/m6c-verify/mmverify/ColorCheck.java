@@ -217,13 +217,16 @@ final class ColorCheck {
                         + "控制器与仓才是玩家会看的地方，0.62.1 之前它们都没有 tint",
                 !hatches.isEmpty() && hatchesWithoutTint == 0);
 
-        // 控制器：只有**正面**（north，机器的图案）不带 tint，其余五面要染色。
+        // 控制器：0.62.3 起**六个面**都参与染色。
+        //
+        // 我 0.62.1 那一版故意不染正面（north 是 legacy_controller_front 图案），理由写在当时的日志里；
+        // 所有者实机试过之后那位会话改成六面全染。**这条断言改的是预期，不是放宽判据**——
+        // 数量仍要精确相等，所以「漏染一个面」或「多染一个面」照样会失败。
         String controllerModel = Files.readString(MODELS.resolve("machine_controller.json"));
         int controllerTinted = countOf(controllerModel, "\"tintindex\":1");
-        ParallelCraftCheck.report("控制器模型有五个面带 tint（实际 " + controllerTinted
-                        + "；正面是机器图案，故意不染）",
-                controllerTinted == 5 && !controllerModel.contains("\"north\":{\"texture\":\"#north\","
-                        + "\"cullface\":\"north\",\"tintindex\""));
+        ParallelCraftCheck.report("控制器模型六个面都带 tint（实际 " + controllerTinted
+                        + "；0.62.3 起正面也染色）",
+                controllerTinted == 6);
 
         ParallelCraftCheck.report("外壳模型都被找到了（" + casings.size() + " 个）", casings.size() >= 6);
             for (Path casing : casings) {

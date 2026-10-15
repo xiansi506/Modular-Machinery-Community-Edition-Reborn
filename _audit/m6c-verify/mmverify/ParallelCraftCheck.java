@@ -4421,6 +4421,14 @@ public final class ParallelCraftCheck {
         setField(controller, blockEntity, "items",
                 Class.forName("net.minecraftforge.items.ItemStackHandler")
                         .getConstructor(int.class).newInstance(9));
+        // 0.62.9 新增：控制器开始**记住它给哪些部件上过色**（`colorizedPartOffsets`），
+        // 而 `load()` 的第一件事就是 `clear()` 它。`allocateInstance` 不跑构造器，
+        // 所以 `private final List<BlockPos> ... = new ArrayList<>()` 这句初始化在这里不会发生。
+        //
+        // **这是这套装置的已知代价，不是产品缺陷**：真实世界的方块实体一定走过构造器。
+        // 但代价是「每加一个集合字段，这里就要补一行」，否则 `load()` 那条断言会以 NPE 的形式
+        // 假失败——0.62.9 上已经发生过一次。
+        setField(controller, blockEntity, "colorizedPartOffsets", new ArrayList<Object>());
         return blockEntity;
     }
 

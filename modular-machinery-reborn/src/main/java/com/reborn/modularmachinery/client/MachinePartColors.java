@@ -1,6 +1,7 @@
 package com.reborn.modularmachinery.client;
 
 import com.reborn.modularmachinery.ModularMachineryReborn;
+import com.reborn.modularmachinery.block.MachineCasingBlockEntity;
 import com.reborn.modularmachinery.block.MachineHatchBlockEntity;
 import net.minecraft.client.color.block.BlockColor;
 import net.minecraft.core.BlockPos;
@@ -29,11 +30,11 @@ import net.minecraftforge.fml.common.Mod;
  *
  * <p>只有**背景层带 {@code tintindex}** 的模型会被调用。本版给 {@code overlay_base} 的背景层
  * （{@code bg_*}）加了 tint——与旧版 {@code blockmodel_overlay.json} 完全一致（那一层的六个面带
- * {@code "tintindex": 1}，而覆盖层 {@code ov_*} 不带，所以机器自己的图案保持原色）。
+ * {@code "tintindex": 1}，而覆盖层 {@code ov_*} 不带，所以 overlay 图案保持原色）。
  * 控制器与升级总线用的是这套父子模型。
  *
- * <p>没有设为 tint 的方块（例如各级仓走的是普普通通的 {@code cube_all}）不会走到这里，
- * 因此也不会被染色——这与旧版一致：旧版那些仓的模型同样没有 tint 层。
+ * <p>控制器、结构外壳与各级仓都注册到这个处理器。外壳和仓使用整面 tint 模型；控制器与升级总线
+ * 使用两层模型，只有背景层参与染色。控制器正面使用单独贴图，按当前外观要求也参与染色。
  *
  * <h2>为什么「没设过」返回白色而不是「不返回」</h2>
  *
@@ -53,8 +54,7 @@ public final class MachinePartColors implements BlockColor {
         // 控制器（含数据化控制器：它们共用同一个方块实体类型）。
         // 全部控制器（普通 / 工厂 / 每台机器自己那两个）——它们共用同一个方块实体与同一个模型。
         event.register(handler, com.reborn.modularmachinery.block.ModBlocks.controllerBlocks());
-        // 装饰外壳：模型有 tint 层，但它**没有方块实体**，所以永远不会被染色（与旧版一致）。
-        // 仍然注册：将来若给外壳加方块实体状态，落点已经在了。
+        // 六种外壳共用一个方块与一个颜色存储实体。
         event.register(handler, com.reborn.modularmachinery.block.ModBlocks.BLOCK_CASING.get());
         // 六个仓族各一个方块（等级由 blockstate 的 size 属性决定，所以一族一个块）。
         // 逐个注册而不是注册给 Block.class：Jade 那次教训说明「全量注册」会把别的模组方块也卷进来。
@@ -70,6 +70,9 @@ public final class MachinePartColors implements BlockColor {
             return NO_TINT;
         }
         BlockEntity entity = level.getBlockEntity(pos);
+        if (entity instanceof MachineCasingBlockEntity casing && casing.machineColor() != null) {
+            return casing.machineColor();
+        }
         if (entity instanceof MachineHatchBlockEntity hatch && hatch.machineColor() != null) {
             return hatch.machineColor();
         }

@@ -194,7 +194,7 @@ public final class DiagnoseCommand {
         // 问了但被拒），它们在日志里长得一模一样。这一节把四个都变成可读的一行。
         // 波 6：染色。分三段问，因为「没变色」有几种完全不同的原因：
         // 定义没解析出颜色 / 控制器没拿到 / 拿到的没同步给客户端 / 渲染层没 tint 层。
-        // 前三种这里能分开，第四种只能看模型（本版的控制器的仓的模型**没有** tint 层，见已知限制）。
+        // 解析、下发与邻近部件状态在这里可查；客户端最终渲染仍需实机确认。
         source.sendSuccess(() -> Component.literal("--- 染色（color）---"), false);
         {
             final int definitionColor = controller.machineId() == null ? -1
@@ -209,14 +209,21 @@ public final class DiagnoseCommand {
                     + "（这条是**服务端**的值；客户端那份靠方块实体同步）"), false);
             int hatchesWithColor = 0;
             int hatchesSeen = 0;
+            int casingsWithColor = 0;
+            int casingsSeen = 0;
             for (int dx = -16; dx <= 16; dx++) {
                 for (int dy = -16; dy <= 16; dy++) {
                     for (int dz = -16; dz <= 16; dz++) {
-                        if (level.getBlockEntity(pos.offset(dx, dy, dz))
-                                instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch) {
+                        var nearby = level.getBlockEntity(pos.offset(dx, dy, dz));
+                        if (nearby instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch) {
                             hatchesSeen++;
                             if (hatch.machineColor() != null) {
                                 hatchesWithColor++;
+                            }
+                        } else if (nearby instanceof com.reborn.modularmachinery.block.MachineCasingBlockEntity casing) {
+                            casingsSeen++;
+                            if (casing.machineColor() != null) {
+                                casingsWithColor++;
                             }
                         }
                     }
@@ -226,6 +233,11 @@ public final class DiagnoseCommand {
             final int colored = hatchesWithColor;
             source.sendSuccess(() -> Component.literal("  附近仓里被下发过颜色的: " + colored + " / " + seen
                     + "（0 且上面那行非 null，说明下发没走到）"), false);
+            final int coloredCasings = casingsWithColor;
+            final int seenCasings = casingsSeen;
+            source.sendSuccess(() -> Component.literal("  附近结构外壳里被下发过颜色的: "
+                    + coloredCasings + " / " + seenCasings
+                    + "（未染色的附近外壳可能不属于这台机器）"), false);
         }
 
         source.sendSuccess(() -> Component.literal("--- 兼容端口（气体）---"), false);
@@ -251,6 +263,8 @@ public final class DiagnoseCommand {
         // 「回调没被调用」与「调用了但没定位到」要的修法完全不同。
         source.sendSuccess(() -> Component.literal("  Jade 提示替换器: "
                 + com.reborn.modularmachinery.integration.jade.FluidStorageSuppressor.counters()), false);
+        source.sendSuccess(() -> Component.literal("  Jade 本模组流体条: "
+                + com.reborn.modularmachinery.integration.jade.HatchFluidStorageProvider.diagnostics()), false);
         // 气体读盘：所有者报过「上一会话的 brine 在新会话里是空的」。那一行让它可判定。
         source.sendSuccess(() -> Component.literal("  气体读盘: "
                 + com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasRestoreCounters()), false);

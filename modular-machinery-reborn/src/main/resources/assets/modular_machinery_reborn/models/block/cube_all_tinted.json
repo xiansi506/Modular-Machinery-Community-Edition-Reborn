@@ -1,5 +1,6 @@
 {
   "credit": "Modular Machinery: Community Edition Reborn",
+  "parent": "block/block",
   "__comment": [
     "A cube_all whose faces carry tintindex 1, so a block colour handler can tint the casing texture",
     "without touching the rest of a machine part's model.",

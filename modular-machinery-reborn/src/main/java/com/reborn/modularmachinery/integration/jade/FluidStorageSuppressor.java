@@ -1,20 +1,27 @@
 package com.reborn.modularmachinery.integration.jade;
 
 import com.reborn.modularmachinery.block.MachineHatchBlock;
+import com.reborn.modularmachinery.block.HatchKind;
+import com.reborn.modularmachinery.block.MachineHatchBlockEntity;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import snownee.jade.api.fluid.JadeFluidObject;
 import snownee.jade.api.Accessor;
 import snownee.jade.api.BlockAccessor;
 import snownee.jade.api.ITooltip;
 import snownee.jade.api.callback.JadeTooltipCollectedCallback;
+import snownee.jade.api.ui.BoxStyle;
+import snownee.jade.api.ui.IDisplayHelper;
 import snownee.jade.api.ui.IElement;
+import snownee.jade.api.view.FluidView;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 去掉 Jade 通用流体组件在本模组仓方块上画的那一块。
+ * 将本模组仓的 Jade 标题改为白色，并保留其流体容量条。
  *
  * <h2>三次失败学到的三件事（都由实机读数定出来，不是猜的）</h2>
  *
@@ -53,8 +60,8 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
     /** Jade 提示里方块名所在的行（第 0 行）。 */
     private static final int ROW_NAME = 0;
 
-    /** 通用流体组件画空框的那一行（方块名下面第一行）。 */
-    private static final int ROW_FLUID_FRAME = 1;
+    /** Jade 通用流体容量条通常位于仓名下面一行。 */
+    private static final int ROW_FLUID = 1;
 
     /** 回调被调用的次数。 */
     private static final AtomicInteger CALLED = new AtomicInteger();
@@ -87,10 +94,7 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
         }
         // **已经处理过就跳过**（0.56.0 修正）。
         //
-        // 上一版用 `tooltip.get(OWN_MARKER)` 判断，实测**永不命中**：Jade 不保留 `add(..., id)` 传进去的
-        // id（所有者读数：回调 690 次 / 改动 432 次 / 因已处理而跳过 0 次）。所以改成**按内容**判断：
-        // 本模组补回的方块名就在第 0 行，而它带上等级（例如「真空流体输入仓」），Jade 自己印的是简称
-        // （「流体输入仓」）——两者不相等，所以这个判据不会把 Jade 那一行误认成我的。
+        // 本模组标题带等级前缀（例如「真空流体输入仓」），可用它判断重复调用。
         //
         // 为什么必须去重：一次悬停里这个回调会被调用几百次，每次都「先删再加」虽然结果幂等，
         // 却等于把整张提示重建几百遍，而且留下一个坏习惯——让人以为「碰巧对」就等于「设计对」。
@@ -100,24 +104,79 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
         }
         ACTED.incrementAndGet();
         boolean removedName = removeRow(tooltip, ROW_NAME);
-        boolean removedFrame = removeRow(tooltip, ROW_FLUID_FRAME);
-        lastReport = "删除名字行=" + removedName + " 删除空框行=" + removedFrame
+        // Keep Jade's fluid bar: our custom storage provider supplies the real fluid and capacity.
+        lastReport = "删除名字行=" + removedName + " 保留流体容量条"
                 + " 处理后剩 " + tooltip.size() + " 行";
         // 方块名由本模组补回（它原来那一行连同图标被删掉了）。
         List<Component> mine = new ArrayList<>();
-        mine.add(hatch.getDisplayName());
-        mine.addAll(HatchFluidComponent.linesFor(hatch));
+        mine.add(hatch.getDisplayName().copy().withStyle(ChatFormatting.WHITE));
         for (int i = 0; i < mine.size(); i++) {
             tooltip.add(i, mine.get(i), OWN_MARKER);
         }
+        replaceFluidRow(tooltip, hatch);
+    }
+
+    /**
+     * 用客户端方块实体已同步的罐内容替换 Jade capability 查询生成的流体行。
+     *
+     * <p>实机诊断证明服务端 extension 已交出 32000/32000 mB，但画面仍显示 empty/0，说明错误发生在
+     * Jade 的 extension 客户端映射之后。这里读取同一个客户端罐（仓界面也使用它），并用 Jade 官方
+     * {@link FluidView} 与进度条 helper 绘制，避免再经过 capability/provider 选择。
+     */
+    private static void replaceFluidRow(ITooltip tooltip, MachineHatchBlockEntity hatch) {
+        if (hatch.kind().family() != HatchKind.Family.FLUID || hatch.fluidTank() == null) {
+            return;
+        }
+        net.minecraftforge.fluids.FluidStack fluid = hatch.fluidTank().getFluid();
+        boolean hasGas = com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasTooltip(hatch) != null;
+        // Preserve Jade's normal empty-tank row for an actually empty fluid hatch. A hybrid hatch containing
+        // chemical gas must not show that misleading empty fluid row.
+        if (fluid.isEmpty() && !hasGas) {
+            lastReport = "客户端仓为空且无气体，保留 Jade 原行";
+            return;
+        }
+        if (tooltip.size() <= ROW_FLUID) {
+            return;
+        }
+
+        List<IElement> left = tooltip.get(ROW_FLUID, IElement.Align.LEFT);
+        List<IElement> right = tooltip.get(ROW_FLUID, IElement.Align.RIGHT);
+        if (left == null || right == null) {
+            return;
+        }
+        // Jade 11.13.3 returns the live row lists here. Its public API has no remove-line method, and
+        // remove(uid) cannot remove elements that were added without a tag.
+        left.clear();
+        right.clear();
+
+        if (fluid.isEmpty()) {
+            // A hybrid chemical hatch is supposed to show the chemical bar only, not an empty fluid bar.
+            lastReport = "客户端流体为空，气体存在；已隐藏 Jade 空流体行";
+            return;
+        }
+
+        int capacity = Math.max(1, hatch.fluidTank().getCapacity());
+        FluidView view = FluidView.readDefault(FluidView.writeDefault(
+                JadeFluidObject.of(fluid.getFluid(), fluid.getAmount()), capacity));
+        if (view == null) {
+            return;
+        }
+        Component label = Component.translatable("jade.fluid2",
+                IDisplayHelper.get().stripColor(view.fluidName).withStyle(ChatFormatting.WHITE),
+                Component.literal(view.current).withStyle(ChatFormatting.WHITE),
+                Component.literal(view.max)).withStyle(ChatFormatting.GRAY);
+        IElement bar = tooltip.getElementHelper().progress(view.ratio, label,
+                tooltip.getElementHelper().progressStyle().overlay(view.overlay), BoxStyle.DEFAULT, true);
+        bar.align(IElement.Align.LEFT).tag(OWN_MARKER);
+        left.add(bar);
+        lastReport = "客户端自有流体条 " + fluid.getFluid().builtInRegistryHolder().key().location()
+                + " " + fluid.getAmount() + "/" + capacity + " mB";
     }
 
     /**
      * 删掉一行的**所有**元素（左右两侧都试），返回是否删到了东西。
      *
-     * <p>逐个元素按它自己的 tag 删。**有 tag 才删得掉**——{@code ITooltip.remove(ResourceLocation)}
-     * 只认 id，而 Jade 通用流体那一块的元素是否带 id 并不由本模组决定；没有 id 的元素删不掉，
-     * 这也正是所有者截图上那个空框仍然留在提示里的原因（已知、已登记，不影响显示正确的液体信息）。
+     * <p>逐个元素按它自己的 tag 删除，方块标题的图标等未标记元素会留在原位。
      */
     private static boolean removeRow(ITooltip tooltip, int index) {
         List<IElement> elements = new ArrayList<>();

@@ -707,65 +707,35 @@ final class MekanismCompatCheck {
         section("Jade 插件（0.50.0）");
         Path plugin = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
                 + "integration/jade/ModularMachineryJadePlugin.java");
-        Path component = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
-                + "integration/jade/HatchFluidComponent.java");
-        Path hatchEntity = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
-                + "block/MachineHatchBlockEntity.java");
+        // 0.62.4–0.62.6：Jade 的实现方式**换了**。原先是我那套「本模组自己画 + 把 Jade 通用流体组件
+        // 从本模组方块上摘掉」，现在改成走 **Jade 自己的 fluid-storage API**：
+        //   registerFluidStorage(SERVER, MachineHatchBlockEntity.class)   （服务端供给数据）
+        //   registerFluidStorageClient(provider.client())                 （客户端画标准容量条）
+        // 这比替换器干净——不再和别的 provider 抢同一张提示，也不必按行下标猜位置。
+        // 所以下面钉的是**新结构**：插件仍然两侧安全、注册仍然精确到本模组方块、
+        // 而且两个 provider 的类**都存在**（替换器已删除，不再是交付物）。
+        Path storage = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                + "modularmachinery/integration/jade/HatchFluidStorageProvider.java");
         try {
             String pluginText = withoutComments(Files.readString(plugin));
-            String componentText = withoutComments(Files.readString(component));
             report("the plugin is annotated @WailaPlugin and implements IWailaPlugin (that annotation is"
-                    + " RUNTIME/TYPE retained, which is how Jade finds it)",
+                            + " RUNTIME/TYPE retained, which is how Jade finds it)",
                     pluginText.contains("@WailaPlugin")
                             && pluginText.contains("implements IWailaPlugin"));
             report("...and the plugin class itself carries NO client-only import, so a dedicated server can"
-                    + " load it (the client half is referenced only from registerClient)",
+                            + " load it (the client half is referenced only from registerClient)",
                     !pluginText.contains("net.minecraft.client")
                             && !pluginText.contains("com.mojang.blaze3d"));
-            report("...and it registers the component for this mod's hatch block class only "
-                    + "(not Block.class: precise registration avoids fighting other mods' global providers)",
-                    pluginText.contains("registerBlockComponent(HatchFluidComponent.INSTANCE")
-                            && pluginText.contains("MachineHatchBlock.class"));
-            // 0.51.0 修正：组件**不再**读存档 NBT，而是读客户端自己的罐。
-            // 原来读 NBT 时，罐的 getFluid() 会问「有没有气体」，而客户端的气体罐来自上一次同步的旧 NBT
-            // ——于是它把客户端明明装着液体的罐读成空（所有者截图上就是这个症状）。
-            // 同时那道闸门也改成只在服务端生效。
-            report("the component reads the client-side tank itself rather than the save NBT "
-                    + "(and the gas gate is server-side only, so the client shows what it really holds)",
-                    componentText.contains("hatch.fluidTank()")
-                            && !componentText.contains("saveWithoutMetadata()")
-                            && withoutComments(Files.readString(hatchEntity))
-                                    .contains("if (this.level != null && this.level.isClientSide)"));
-            // 通用流体组件那一份必须被摘掉，而且**只摘本模组方块上的**：
-            // 它服务端读得对、客户端画成空，两份并存会让玩家看到两个互相矛盾的数字；
-            // 而别的模组方块上的那一份绝不能动。
-            Path suppressor = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
-                    + "modularmachinery/integration/jade/FluidStorageSuppressor.java");
-            String suppressorText = withoutComments(Files.readString(suppressor));
-            // 按 id 移除那一版**无效**：Jade 的 ClientViewGroup.tooltip(...) 用
-            // ITooltip.add(IElement)（不带 id 的重载）把流体元素加进去，所以 remove(id) 找不到它
-            // —— 这是从 Jade 字节码里读出来的。现在改为按**内容**定位（方块显示名那一段），
-            // 删掉它并插回本模组自己的行。
-            // 按 id 移除那一版无效（Jade 用不带 id 的 add(IElement)）；按「显示名相等」定位那一版
-            // 也无效（所有者实测提示毫无变化）——两版在游戏里的表现一模一样，所以这一版除了
-            // 「多判据 + 兜底」之外，还带了**计数器**把「回调有没有被调用」变成可读事实。
-            // 第三次修正（实机读数逼出来的）：
-            //  - 按 id 移除无效（Jade 用不带 id 的 add(IElement)）；
-            //  - 只按 Align.LEFT 取元素不够（通用流体的空框画在另一端，Align 只有 LEFT/RIGHT）；
-            //  - 方块显示名带等级前缀（实测 "真空流体输入仓"），提示里印的是简称，所以「包含」判据永不命中；
-            //  - onTooltipCollected 在一次悬停里被调用多次（实测 410 次），必须只动手一次。
-            // 这一版因此按**已知的固定下标**定位（只对本模组方块注册，不会误伤别的方块），
-            // 并用本模组自己的 id 作「已处理」标记。
-            report("the suppressor locates rows by known fixed indices (it is registered for this mod's"
-                    + " hatch blocks only), removes BOTH alignments, and acts exactly once per hover",
-                    suppressorText.contains("MachineHatchBlock")
-                            && suppressorText.contains("ROW_NAME")
-                            && suppressorText.contains("ROW_FLUID_FRAME")
-                            && suppressorText.contains("IElement.Align.RIGHT")
-                            && suppressorText.contains("OWN_MARKER")
-                            && suppressorText.contains("AtomicInteger")
-                            && suppressorText.contains("counters()")
-                            && pluginText.contains("addTooltipCollectedCallback"));
+            report("...and it registers Jade's own fluid storage for **this mod's hatch block entity only**"
+                            + " (not Block.class: precise registration avoids fighting other mods' providers)",
+                    pluginText.contains("registerFluidStorage(")
+                            && pluginText.contains("MachineHatchBlockEntity.class")
+                            && pluginText.contains("registerFluidStorageClient("));
+            report("...and both halves live in one class that exists offline (the old suppressor file is gone,"
+                            + " so nothing may still reference it)",
+                    Files.exists(storage)
+                            && !Files.exists(Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/"
+                                    + "com/reborn/modularmachinery/integration/jade/HatchFluidComponent.java")));
         } catch (Exception exception) {
             report("reading the Jade plugin sources failed: " + exception, false);
         }

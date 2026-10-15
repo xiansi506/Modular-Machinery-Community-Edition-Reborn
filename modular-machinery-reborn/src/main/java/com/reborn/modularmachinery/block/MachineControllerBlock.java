@@ -116,6 +116,25 @@ public final class MachineControllerBlock extends Block implements EntityBlock {
     }
 
     @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new MachineControllerBlockEntity(pos, state); }
+
+    @Override
+    public void playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
+        if (!level.isClientSide
+                && level.getBlockEntity(pos) instanceof MachineControllerBlockEntity controller) {
+            controller.clearDistributedMachineColor(state.getValue(FACING));
+        }
+        super.playerWillDestroy(level, pos, state, player);
+    }
+
+    @Override
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean moving) {
+        if (!state.is(newState.getBlock())
+                && level.getBlockEntity(pos) instanceof MachineControllerBlockEntity controller) {
+            controller.clearDistributedMachineColor(state.getValue(FACING));
+        }
+        super.onRemove(state, level, pos, newState, moving);
+    }
+
     @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
         return type == ModBlocks.MACHINE_CONTROLLER_ENTITY.get() ? (l, p, s, be) -> MachineControllerBlockEntity.tick(l, p, s, (MachineControllerBlockEntity) be) : null;
     }
