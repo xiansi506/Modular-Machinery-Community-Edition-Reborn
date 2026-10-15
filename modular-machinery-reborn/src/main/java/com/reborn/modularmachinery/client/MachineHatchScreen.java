@@ -196,7 +196,9 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
                             display.display(menu.energyCapacity())),
                     display.labelComponent()));
         }
-        // 气体那一行先算，因为它的有无会决定要不要显示流体那两行（见下）。
+        // 气体那一行先算：**一个仓里只能有一种东西**（互斥，见
+        // MachineHatchBlockEntity#FluidTankWithGasPriority），但工具提示要把两件事**都**说清楚——
+        // 有气体时也要让玩家知道「液体那一半被气体占着」，而不是干脆不提。
         //
         // 波 5.3：流体仓的界面只画流体，所以气体进了仓在游戏里除了 Jade 没有显示——
         // 所有者实测反馈正是「玉模组显示、游戏内界面不显示」（规矩 6：看不见的状态必须能被看见或问出来）。
@@ -206,23 +208,25 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
         String[] gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule
                 .gasTooltip(menu.hatch());
 
+        // 流体那一行**总是**出现（没装 Mekanism 时这就是从前那个 tooltip，一字不差）。
+        // 这一条是所有者实测逼出来的：Jade 那条路**不受本模组控制**——他这台实例上
+        // SkyResources3 的 Jade 插件是「对所有方块注册、且不判断是不是自家方块」，会把
+        // 方块名那一段替换掉并渲染成它自己的空机器（全是 0 / 空闲），于是我的流体栏显示不出来。
+        // 游戏内界面是本模组自己的，所以把它做成玩家能依赖的那一份。
         FluidStack fluid = menu.hatch().fluidTank().getFluid();
         List<Component> lines = new java.util.ArrayList<>(3);
-        // **一个仓里只能有一种东西**（互斥，见 MachineHatchBlockEntity#FluidTankWithGasPriority）。
-        // 所以有气体时就不报「液体：空 / 0 mB」——那两行虽然是真的，却只是噪音，
-        // 而且与旧版不一致：旧版一个罐只显示它装的那样东西。
-        // 反过来，以后若加上「液体挡住气体」，这里同样只会显示液体那两行（那时 gas 是 null）。
-        if (gas == null) {
-            if (fluid.isEmpty() || menu.fluidAmount() <= 0) {
-                lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"));
-                lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank", 0,
-                        menu.fluidCapacity()));
-            } else {
-                lines.add(fluid.getDisplayName());
-                lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank",
-                        menu.fluidAmount(), menu.fluidCapacity()));
-            }
+        if (fluid.isEmpty() || menu.fluidAmount() <= 0) {
+            lines.add(gas == null
+                    ? Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty")
+                    : Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.blocked_by_gas"));
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank", 0,
+                    menu.fluidCapacity()));
         } else {
+            lines.add(fluid.getDisplayName());
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank",
+                    menu.fluidAmount(), menu.fluidCapacity()));
+        }
+        if (gas != null) {
             lines.add(Component.translatable("tooltip.modular_machinery_reborn.gashatch.tank",
                     gas[0], gas[1]));
         }

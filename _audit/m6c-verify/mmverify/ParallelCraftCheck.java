@@ -1414,7 +1414,7 @@ public final class ParallelCraftCheck {
         // hatch's tooltip gained a gas line, so that a gas inside a fluid hatch is visible in game
             // (`…energy.type` plus `.fe` / `.rf` / `.ic2_eu` / `.gt_eu`), which are the original's
             // `tooltip.energy.type.*` keys carried under this mod's namespace.
-            check("the language files' key count", 190, zhMap.size());
+            check("the language files' key count", 191, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to

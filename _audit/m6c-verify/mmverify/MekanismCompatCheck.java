@@ -424,13 +424,16 @@ final class MekanismCompatCheck {
             report("...and it reads the generic compat accessors rather than any module type "
                     + "(the screen must not need to know which module supplies the gas)",
                     screenText.contains("ModCompat.namedValues(") || screenText.contains(".gasTooltip("));
-            // 工具提示只报**装着的那样东西**：有气体时不再印「液体：空 / 0 mB」那两行。
-            // 与旧版一致——旧版一个罐只显示它装的那样东西——否则互斥之后那两行只是噪音。
-            report("the tooltip shows the gas line INSTEAD of the fluid pair when gas is present "
-                    + "(not both; the fluid pair would only be noise once the two are exclusive)",
-                    screenText.contains("if (gas == null) {")
-                            && screenText.contains("gashatch.tank\",")
-                            && screenText.contains("gas[0], gas[1]"));
+            // 工具提示把两件事**都**说清楚：流体那一行总是出现（没装 Mekanism 时就是从前那个 tooltip），
+            // 有气体时再加气体那一行、并且把「空」换成「空（气体占着这个仓）」。
+            // 为什么不是「只显示装着的那样」：Jade 那条路不受本模组控制（实测被 SkyResources3 的
+            // 全局 Jade 插件压掉），所以游戏内界面这一份必须是玩家能依赖的完整说法。
+            report("the tooltip always states the fluid side, and adds the gas line when gas is present "
+                    + "(the in-game tooltip must not depend on Jade to say what is in the hatch)",
+                    screenText.contains("gashatch.tank\",")
+                            && screenText.contains("gas[0], gas[1]")
+                            && screenText.contains("fluidhatch.blocked_by_gas")
+                            && screenText.contains("fluidhatch.tank"));
 
             String anchor = withoutComments(Files.readString(source));
             report("...and the gas module reports the two names the bar reads (gas.amount / gas.capacity)",

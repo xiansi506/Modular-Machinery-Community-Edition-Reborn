@@ -733,8 +733,8 @@ final class MocNamespaceCheck {
         // the fluid hatch's tooltip gained a gas line (	ooltip.modular_machinery_reborn.gashatch.tank) so that a
         // gas inside a fluid hatch is finally visible in game -- the owner reported that Jade showed it and the
         // hatch screen did not.
-        check("en_us.json key count", 190, en.size());
-        check("zh_cn.json key count", 190, zh.size());
+        check("en_us.json key count", 191, en.size());
+        check("zh_cn.json key count", 191, zh.size());
         Set<String> enKeys = new TreeSet<>(en.keySet());
         Set<String> zhKeys = new TreeSet<>(zh.keySet());
         report("the two files carry identical key sets (" + enKeys.size() + " keys each)", enKeys.equals(zhKeys));
