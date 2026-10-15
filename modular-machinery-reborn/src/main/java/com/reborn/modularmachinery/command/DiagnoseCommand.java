@@ -220,13 +220,26 @@ public final class DiagnoseCommand {
                     // 用**空方向**查询，与 Jade 的做法一致（JadeForgeUtils 走 CapabilityProvider 的无方向查询）。
                     var handler = hatch.getCapability(
                             net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER, null);
+                    // 内容要**手写**成「什么液体、多少」：FluidStack 没有覆写 toString()，
+                    // 直接拼对象只会打出 `net.minecraftforge.fluids.FluidStack@2b3b25cc`——
+                    // 那一行等于没问（探针说废话比不说更糟）。同理容量也要按 Jade 的判据写出。
+                    String contents = "（没有能力）";
+                    int capacity = -1;
+                    if (handler.isPresent()) {
+                        var tank = handler.orElse(null);
+                        capacity = tank.getTankCapacity(0);
+                        net.minecraftforge.fluids.FluidStack inTank = tank.getFluidInTank(0);
+                        contents = inTank.isEmpty()
+                                ? "空"
+                                : inTank.getFluid().builtInRegistryHolder().key().location()
+                                        + " x" + inTank.getAmount() + " mB";
+                    }
                     final String line = "    " + at.toShortString() + " 种类=" + hatch.kind()
-                            + " 交出 FLUID_HANDLER=" + handler.isPresent()
+                            + " 交出FLUID_HANDLER=" + handler.isPresent()
                             + " 罐数=" + (handler.isPresent() ? handler.orElse(null).getTanks() : -1)
-                            + (handler.isPresent()
-                                    ? " 容量=" + handler.orElse(null).getTankCapacity(0)
-                                            + " 内容=" + handler.orElse(null).getFluidInTank(0)
-                                    : "");
+                            + " 容量=" + capacity
+                            + "（<=0 时 Jade 会跳过这个罐）"
+                            + " 内容=" + contents;
                     source.sendSuccess(() -> Component.literal(line), false);
                 }
             }
