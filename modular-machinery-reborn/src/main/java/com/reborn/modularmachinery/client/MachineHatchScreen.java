@@ -164,16 +164,18 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
             lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank",
                     menu.fluidAmount(), menu.fluidCapacity()));
         }
-        // 波 5.3：**气体那一行**。流体仓的界面只画流体，所以气体进了仓在游戏里没有任何显示——
-        // 所有者实测反馈正是「气体的情况正好相反」（玉模组显示、游戏内界面不显示）。
-        // 一个看不见的状态必须能被看见或问出来（规矩 6），界面是最直接的落点。
+        // 波 5.3：**气体那一行**。流体仓的界面只画流体，所以气体进了仓在游戏里除了 Jade 没有显示——
+        // 所有者实测反馈正是「玉模组显示、游戏内界面不显示」（规矩 6：看不见的状态必须能被看见或问出来）。
         //
-        // 取值走 MekanismModule.describeGasPort：它**不新建**气体罐（显示不该有副作用），
-        // 没装 Mekanism 时返回 null，那一行就不出现——这一段在没装 Mekanism 的实例上与从前完全一样。
-        String gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule
-                .describeGasPort(menu.hatch());
+        // 取值走 MekanismModule.gasTooltip：它读的是**方块实体里同步过来的存档 NBT**（`gas` 标签），
+        // 不是内存里的气体罐——后者只在「这条路上被走到过」时才存在，而客户端可能从没发生过能力查询
+        // （查询来自管道与机器，在服务端）。没装 Mekanism 时它返回 null，这一行就不出现，
+        // 于是没装 Mekanism 的实例与从前完全一样。
+        String[] gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule
+                .gasTooltip(menu.hatch());
         if (gas != null) {
-            lines.add(Component.translatable("tooltip.modular_machinery_reborn.gashatch.tank", gas));
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.gashatch.tank",
+                    gas[0], gas[1]));
         }
         return lines;
     }

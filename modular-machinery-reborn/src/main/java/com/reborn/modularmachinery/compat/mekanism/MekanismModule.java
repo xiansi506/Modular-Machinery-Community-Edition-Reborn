@@ -155,6 +155,16 @@ public final class MekanismModule implements CompatModule {
         return MekanismAnchor.describeTankInserts(entity);
     }
 
+    /**
+     * 界面 tooltip 要的两个字段：{@code {内容, 容量}}；没有气体时返回 {@code null}。
+     *
+     * <p>读的是同步过来的存档 NBT 而不是内存里的气体罐，理由见 {@code MekanismAnchor#gasTooltip}。
+     */
+    @javax.annotation.Nullable
+    public static String[] gasTooltip(Object entity) {
+        return MekanismAnchor.gasTooltip(entity);
+    }
+
     /** {@code gas} 与 {@code gas_pertick} 共用的一份读写器，只差 {@code perTick} 一位。 */
     private static final class GasHandler implements RequirementType.Handler {
 

@@ -256,6 +256,42 @@ final class MekanismAnchor {
     }
 
     /**
+     * 界面 tooltip 要的两个字段：气体的内容与容量。
+     *
+     * <p><b>它读的是方块实体里同步过来的 NBT（{@code gas} 标签），不是内存里的气体罐。</b>
+     * 这一条是所有者实测逼出来的：气体确实在仓里（Jade 显示 `mekanism:brine`、界面 tooltip 也读到了
+     * 内存里的罐），但**内存里的罐只在「这条路上被走到过」时才存在**——客户端可能从来
+     * 没发生过一次能力查询（查询来自管道与机器，而它们在服务端），于是内存里根本没有那个条目。
+     * 存档 NBT 则是**方块实体同步时一定会带过来的**（{@code getUpdateTag} → {@code saveWithoutMetadata}
+     * → 本模块的 {@code save} 写了 {@code gas}），所以读它才是稳的。
+     *
+     * <p>返回 {@code {内容, 容量}}；读不到气体标签时返回 {@code null}（那一行就不显示）。
+     */
+    @Nullable
+    static String[] gasTooltip(Object entity) {
+        if (!(entity instanceof MachineHatchBlockEntity hatch) || !(entity instanceof net.minecraft.world.level.block.entity.BlockEntity be)) {
+            return null;
+        }
+        net.minecraft.nbt.CompoundTag tag = be.saveWithoutMetadata();
+        if (!tag.contains(HybridGasTank.TAG_GAS)) {
+            return null;
+        }
+        net.minecraft.nbt.CompoundTag gas = tag.getCompound(HybridGasTank.TAG_GAS);
+        long amount = gas.getLong("amount");
+        String id = gas.getString("id");
+        if (amount <= 0L || id.isEmpty()) {
+            return null;
+        }
+        // 容量从**这个仓自己的等级**算：流体仓的容量由等级决定，而气体与流体共用同一个罐。
+        long capacity = 0L;
+        net.minecraftforge.fluids.capability.templates.FluidTank fluid = hatch.fluidTank();
+        if (fluid != null) {
+            capacity = Math.max(1L, fluid.getCapacity());
+        }
+        return new String[] {id + " x" + amount + " mB", Long.toString(capacity)};
+    }
+
+    /**
      * Mekanism 的能力对象，**隔离在这一个方法里**，原因见 {@link Mapper} 的注释。
      *
      * <p>{@code mekanism.common.capabilities.Capabilities} 而不是自己注册一个 {@code Capability}：

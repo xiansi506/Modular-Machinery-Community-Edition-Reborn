@@ -214,12 +214,27 @@ final class HybridGasTank implements IGasHandler {
         return stack.getTypeRegistryName() + " x" + stack.getAmount();
     }
 
-    /** 这个罐的当前内容，给 {@code /mm-diagnose} 用。 */
+    /** 这个罐的当前内容，给 {@code /mm-diagnose} 用（一行，含容量）。 */
     String describeContents() {
-        String content = this.amount <= 0L || this.stored.isEmpty()
+        return "气体 " + describeShort() + " / 容量 " + this.capacity + " mB";
+    }
+
+    /**
+     * 这个罐的内容，**不含容量**——给界面 tooltip 用（容量由语言键的另一个 {@code %s} 承担）。
+     *
+     * <p>拆成两个方法是有原因的：上一版把「含容量的整句」塞进了一个只有一个 {@code %s} 的语言键，
+     * 于是 tooltip 印成 `mekanism:brine x1 x32000 mB / 容量 32000 mB`——同一件事印了两遍。
+     * 界面要的是**两个字段**（内容、容量），不是一句已经拼好的话。
+     */
+    String describeShort() {
+        return this.amount <= 0L || this.stored.isEmpty()
                 ? "空"
                 : describe(this.stored) + " x" + this.amount + " mB";
-        return content + " / 容量 " + this.capacity + " mB";
+    }
+
+    /** 这个罐的容量。 */
+    long capacity() {
+        return this.capacity;
     }
 
     /** 这个罐上的插入尝试统计，给 {@code /mm-diagnose} 用。 */
