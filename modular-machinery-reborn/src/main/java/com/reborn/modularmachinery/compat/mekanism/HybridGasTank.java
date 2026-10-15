@@ -298,6 +298,11 @@ final class HybridGasTank implements IGasHandler {
      * <p>读到一个**注册表里没有**的气体时**静默清空**而不是抛异常：一份存档可能在装了某个模组时写下气体、
      * 之后那个模组被卸掉。抛异常会让**整个世界打不开**，而清空只是丢掉一个仓里的内容——
      * 后者可以恢复，前者不行。
+     *
+     * <p><b>但要记下「为什么读不出来」</b>（0.57.0）：区分「存档里写着一种注册表里没有的气体」（那就是
+     * 上一个自然段说的情况，清空是对的）与「**注册表此刻还没就绪**」（那是本模组的时机问题，
+     * 气体本来读得回来）。两者都会走到 {@code lookup} 返回 null，而它们在玩家眼里都只是
+     * 「气罐空了」——所以这里把两种情形分别计数，由 {@code /mm-diagnose} 读出来。
      */
     void readFromNbt(CompoundTag tag) {
         this.stored = GasStack.EMPTY;
@@ -310,13 +315,41 @@ final class HybridGasTank implements IGasHandler {
         if (saved <= 0L) {
             return;
         }
-        ResourceLocation id = ResourceLocation.tryParse(gas.getString("id"));
+        String idText = gas.getString("id");
+        ResourceLocation id = ResourceLocation.tryParse(idText);
         Gas type = id == null ? null : lookup(id);
         if (type == null) {
+            // 记下原始文本：这是「存档里写了什么」的唯一证据，而它读不出来时最容易丢的就是它。
+            lastUnreadable = (idText + " x" + saved + " mB（" + (id == null ? "id 无法解析" : "注册表此刻没有它")
+                    + "）");
+            UNREADABLE.incrementAndGet();
             return;
         }
         this.stored = new GasStack(type, 1L);
         this.amount = Math.min(saved, this.capacity);
+        RESTORED.incrementAndGet();
+    }
+
+    /** 读盘时「存档里写了气体、但这次读不出来」的次数。 */
+    private static final java.util.concurrent.atomic.AtomicInteger UNREADABLE =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 读盘成功恢复气体的次数。 */
+    private static final java.util.concurrent.atomic.AtomicInteger RESTORED =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    private static volatile String lastUnreadable = "（没有）";
+
+    /**
+     * 气体读盘的两个计数与最近一次读不出来的原始内容，给 {@code /mm-diagnose} 用。
+     *
+     * <p>为什么必须有：所有者报过「上一个会话灌进去的 brine，在新会话里是空的」。
+     * 这件事可能是他抽走了，也可能是**写得进去、读不回来**——而后者从游戏里看只是「罐空了」，
+     * 没有任何线索。这一行让下一次出现时能立刻判定，而不是靠回忆。
+     */
+    static String restoreCounters() {
+        return "读盘恢复成功 " + RESTORED.get() + " 次 / **存档里有却读不出来** " + UNREADABLE.get()
+                + " 次；最近一次读不出来的是: " + lastUnreadable;
     }
 
     /** 只在盒子内用，见 {@link MekanismAnchor}；这里复用同一段「注册表可能不在」的处理。 */

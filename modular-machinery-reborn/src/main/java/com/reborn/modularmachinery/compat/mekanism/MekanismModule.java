@@ -126,6 +126,10 @@ public final class MekanismModule implements CompatModule {
         // 有意留空，理由见方法注释。
     }
 
+    /** 气体读盘的计数与最近一次「存档里有却读不出来」的内容；给 /mm-diagnose 用。 */
+    public static String gasRestoreCounters() {
+        return HybridGasTank.restoreCounters();
+    }
     /** 气体端口那一半是否可用（给诊断用）。 */
     public static boolean gasPortReady() {
         return MekanismAnchor.gasHandlerAvailable();

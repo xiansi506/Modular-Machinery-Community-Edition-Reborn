@@ -215,6 +215,9 @@ public final class DiagnoseCommand {
         // 「回调没被调用」与「调用了但没定位到」要的修法完全不同。
         source.sendSuccess(() -> Component.literal("  Jade 提示替换器: "
                 + com.reborn.modularmachinery.integration.jade.FluidStorageSuppressor.counters()), false);
+        // 气体读盘：所有者报过「上一会话的 brine 在新会话里是空的」。那一行让它可判定。
+        source.sendSuccess(() -> Component.literal("  气体读盘: "
+                + com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasRestoreCounters()), false);
         // **完整模拟 Jade 的服务端流程**：Jade 的 CommonProxy#wrapFluidStorage 做的是
         //   目标 instanceof CapabilityProvider（方块实体都是）
         //   → provider.getCapability(ForgeCapabilities.FLUID_HANDLER)   ← 注意是**无方向**的那次调用
