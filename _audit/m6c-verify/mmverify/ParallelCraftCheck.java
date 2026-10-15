@@ -1418,7 +1418,7 @@ public final class ParallelCraftCheck {
         // hatch's tooltip gained a gas line, so that a gas inside a fluid hatch is visible in game
             // (`…energy.type` plus `.fe` / `.rf` / `.ic2_eu` / `.gt_eu`), which are the original's
             // `tooltip.energy.type.*` keys carried under this mod's namespace.
-            check("the language files' key count", 191, zhMap.size());
+            check("the language files' key count", 193, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to
@@ -3742,6 +3742,30 @@ public final class ParallelCraftCheck {
                 EnergyRequirement.FAILURE_ENERGY_INPUT);
         check("the energy output message is the original's, typo included ('hatch are full')",
                 "craftcheck.failure.energy.output.space", EnergyRequirement.FAILURE_ENERGY_OUTPUT_SPACE);
+
+        // 0.59.0: the gas pair. 兼容层会产出这两个键，而它们在语言文件里**曾经缺失**——
+        // 于是装了 Mekanism 的实例里，气体不够时状态行显示的是**原始键名**而不是文案。
+        // 措辞取自旧版 `zh_CN.lang` / `en_US.lang` 的原文（那两句当时就已存在，只是没有 Mekanism 就没人用得上）。
+        //
+        // 判据用的是**本版自己的语言文件**（不是旧版的），因为玩家看到的是它；
+        // 而措辞本身与旧版 zh_CN.lang / en_US.lang 逐字相同（上面那两条 check 钉的就是这件事）。
+        Path gasLang = Path.of("C:/mmwork/modular-machinery-reborn/src/main/resources/assets/"
+                + "modular_machinery_reborn/lang");
+        try {
+            Map<String, String> zhGas = flatJson(gasLang.resolve("zh_cn.json"));
+            Map<String, String> enGas = flatJson(gasLang.resolve("en_us.json"));
+            check("the gas input message is the original's wording (zh)", "缺少气体输入！",
+                    zhGas.get("craftcheck.failure.gas.input"));
+            check("the gas input message is the original's wording (en)", "Missing gas input!",
+                    enGas.get("craftcheck.failure.gas.input"));
+            check("the gas output-space message is the original's wording (zh)", "没有足够的库存空间用于气体输出！",
+                    zhGas.get("craftcheck.failure.gas.output.space"));
+            check("the gas output-space message is the original's wording (en)",
+                    "Not enough space for gas output(s)!",
+                    enGas.get("craftcheck.failure.gas.output.space"));
+        } catch (Exception exception) {
+            report("reading the gas messages failed: " + exception, false);
+        }
 
         // The ends are inclusive, exactly as the original compared them (`value >= min && value <= max`).
         report("min == the stored value satisfies",

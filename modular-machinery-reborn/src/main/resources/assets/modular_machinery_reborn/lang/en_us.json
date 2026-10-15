@@ -197,6 +197,8 @@
   "craftcheck.failure.item.output.space": "Not enough inventory space for item output(s)!",
   "craftcheck.failure.fluid.input": "Missing fluid input!",
   "craftcheck.failure.fluid.output.space": "Not enough tank space for fluid output(s)!",
+  "craftcheck.failure.gas.input": "Missing gas input!",
+  "craftcheck.failure.gas.output.space": "Not enough space for gas output(s)!",
   "craftcheck.failure.energy.input": "Not enough energy!",
   "craftcheck.failure.energy.output.space": "Energy output hatch are full",
   "component.missing.modularmachinery.interface.number": "No Smart Data Interface found!",

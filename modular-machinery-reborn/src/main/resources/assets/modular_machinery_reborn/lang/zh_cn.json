@@ -197,6 +197,8 @@
   "craftcheck.failure.item.output.space": "没有足够的库存空间用于物品输出！",
   "craftcheck.failure.fluid.input": "缺少液体输入！",
   "craftcheck.failure.fluid.output.space": "没有足够的库存空间用于流体输出！",
+  "craftcheck.failure.gas.input": "缺少气体输入！",
+  "craftcheck.failure.gas.output.space": "没有足够的库存空间用于气体输出！",
   "craftcheck.failure.energy.input": "缺少能量输入！",
   "craftcheck.failure.energy.output.space": "能源输出仓已满",
   "component.missing.modularmachinery.interface.number": "没有找到对应类型的智能数据接口！",
