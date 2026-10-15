@@ -230,6 +230,13 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
             lines.add(Component.translatable("tooltip.modular_machinery_reborn.gashatch.tank",
                     gas[0], gas[1]));
         }
+        // 最后一行写**这个方块的位置**。
+        //
+        // 为什么值得写在 tooltip 里：排查「界面显示得不一致」时，最大的干扰是**看的不是同一个方块**
+        // （这台机器周围有好几个流体仓）。`/mm-diagnose` 每行都带坐标，而 Jade 与界面不带——
+        // 于是两边对不上时无法判断是「读数不同」还是「看的不是同一个仓」。这一行让两者可比。
+        lines.add(Component.literal(menu.hatch().getBlockPos().toShortString())
+                .withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
         return lines;
     }
 
