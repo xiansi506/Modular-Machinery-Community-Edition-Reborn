@@ -72,8 +72,16 @@ public final class MachineSchema {
             "registryname", "localizedname", "parts", "failure-action", "requires-blueprint",
             "max-parallelism", "internal-parallelism", "parallelizable", "modifiers",
             "has-factory", "factory-only", "max-threads", "core-threads", "smart-interfaces",
-            "dynamic-patterns");
-
+            "dynamic-patterns",
+            // 0.60.0: `color`。它此前在 UNIMPLEMENTED_ROOT_FIELDS 里（「识别但不求值」），
+            // 所以从来不需要出现在这份名单里。做完第一小步（解析与保存）之后**必须**加进来——
+            // 否则加载器会把它当成陌生字段并警告「this loader does not know: color」，
+            // 而那会让包作者以为字段名写错了。
+            //
+            // 这个坑是复现器输出里的 WARN 抓到的，不是看代码看出来的：断言全绿、日志里却在抱怨。
+            // 与「过宽的断言」同类——**测试通过不等于没有警告**。
+            
+            "color");
     /**
      * Root fields the loader evaluates but the script API cannot yet write — <b>empty as of 0.31.0</b>, and kept
      * as an empty list on purpose.
@@ -268,9 +276,13 @@ public final class MachineSchema {
                     String.join(", ", KNOWN_ROOT_FIELDS));
         }
 
+        // 波 6 第 2 项（color）的第一小步：**解析并保存**颜色。染色本身（模型 tint 层 + 颜色处理器）
+        // 是下一小步——这一步证明的是「定义里写什么颜色，读出来就是什么」，而那是离线可证的。
+        // 解析规则见 MachineRootFields#color / MachineDefinition#parseColor。
         return new MachineDefinition(id, localizedName, builder.build(), failureAction, requiresBlueprint,
                 maxParallelism, internalParallelism, parallelizable, modifiers,
-                maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces, dynamicPatterns);
+                maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces, dynamicPatterns)
+                .withColor(MachineRootFields.color(root, String.valueOf(where)));
     }
 
     // 0.31.0 removed rejectDeferred(JsonObject, Object, boolean) and its call above read()'s body. It existed to
@@ -633,7 +645,7 @@ public final class MachineSchema {
      * {@code hide-components-when-formed} / {@code controller-bounding-box} 属于尚未排期的批次。
      */
     private static final String[] UNIMPLEMENTED_ROOT_FIELDS = {
-            "color", "prefix", "hide-components-when-formed", "controller-bounding-box"
+            "prefix", "hide-components-when-formed", "controller-bounding-box"
     };
 
     /**

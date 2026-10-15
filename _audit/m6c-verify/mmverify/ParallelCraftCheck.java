@@ -302,6 +302,8 @@ public final class ParallelCraftCheck {
         // 只在 registerClient 里被引用），因为 Jade 会在两侧都加载插件类，而这条约束离线可证。
         MekanismCompatCheck.jadePlugin();
         MekanismCompatCheck.jeiRequirementDispatch();
+        // 波 6 第 2 项（color）的第一小步：解析与保存。
+        ColorCheck.colorParsing();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
