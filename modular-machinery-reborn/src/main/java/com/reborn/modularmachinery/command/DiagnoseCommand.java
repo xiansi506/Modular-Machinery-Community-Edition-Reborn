@@ -221,39 +221,38 @@ public final class DiagnoseCommand {
         //   → 拿不到就 null；拿到就逐罐 getTankCapacity / getFluidInTank
         // 这一行把这条链**原样跑一遍**（走父类 CapabilityProvider，与本类重写的那次调用区分开），
         // 于是「Jade 会看到什么」不再是推断，而是这一行的读数。
-        {
-            net.minecraft.world.level.block.entity.BlockEntity asProvider = null;
-            for (int dx = -16; dx <= 16 && asProvider == null; dx++) {
-                for (int dy = -16; dy <= 16 && asProvider == null; dy++) {
-                    for (int dz = -16; dz <= 16 && asProvider == null; dz++) {
-                        if (level.getBlockEntity(pos.offset(dx, dy, dz))
-                                instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch
-                                && hatch.kind().family()
-                                        == com.reborn.modularmachinery.block.HatchKind.Family.FLUID) {
-                            asProvider = hatch;
-                        }
+        //
+        // **逐个仓都报**（0.56.0 修正）：上一版只报「扫描到的第一个」流体仓，而所有者看的是另一个，
+        // 于是那一行显示「空」、看起来像与界面的 32000 mB 矛盾——一次**探针自己造成的误导**。
+        // 探针报错比没有探针更糟，所以这里改为每行都带坐标，并且不再替玩家挑一个。
+        source.sendSuccess(() -> Component.literal(
+                "  Jade 流程模拟（走 CapabilityProvider 的无方向查询，逐个仓）:"), false);
+        for (int dx = -16; dx <= 16; dx++) {
+            for (int dy = -16; dy <= 16; dy++) {
+                for (int dz = -16; dz <= 16; dz++) {
+                    BlockPos at = pos.offset(dx, dy, dz);
+                    if (!(level.getBlockEntity(at)
+                            instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)
+                            || hatch.kind().family()
+                                    != com.reborn.modularmachinery.block.HatchKind.Family.FLUID) {
+                        continue;
                     }
+                    var viaProvider = hatch.getCapability(
+                            net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER);
+                    String summary;
+                    if (!viaProvider.isPresent()) {
+                        summary = "没拿到 FLUID_HANDLER → 按 Jade 的代码它 return null（什么都不显示）";
+                    } else {
+                        var handler = viaProvider.orElse(null);
+                        var stack = handler.getFluidInTank(0);
+                        summary = "罐数=" + handler.getTanks() + " 容量=" + handler.getTankCapacity(0)
+                                + " 内容=" + (stack.isEmpty() ? "空（Jade 会显示 jade.fluid.empty）"
+                                        : stack.getFluid().builtInRegistryHolder().key().location()
+                                                + " x" + stack.getAmount() + " mB");
+                    }
+                    final String line = "    " + at.toShortString() + " → " + summary;
+                    source.sendSuccess(() -> Component.literal(line), false);
                 }
-            }
-            if (asProvider == null) {
-                source.sendSuccess(() -> Component.literal(
-                        "  （±16 格内没有流体仓，无法模拟 Jade 的服务端流程）"), false);
-            } else {
-                var viaProvider = asProvider.getCapability(
-                        net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER);
-                String summary;
-                if (!viaProvider.isPresent()) {
-                    summary = "没拿到 FLUID_HANDLER → 按 Jade 的代码它会 return null（什么都不显示）";
-                } else {
-                    var handler = viaProvider.orElse(null);
-                    var stack = handler.getFluidInTank(0);
-                    summary = "罐数=" + handler.getTanks() + " 容量=" + handler.getTankCapacity(0)
-                            + " 内容=" + (stack.isEmpty() ? "空（Jade 会显示 jade.fluid.empty）"
-                                    : stack.getFluid().builtInRegistryHolder().key().location()
-                                            + " x" + stack.getAmount() + " mB");
-                }
-                final String line = "  Jade 流程模拟（走 CapabilityProvider 的无方向查询）: " + summary;
-                source.sendSuccess(() -> Component.literal(line), false);
             }
         }
         for (int dx = -16; dx <= 16; dx++) {

@@ -85,8 +85,16 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
                         instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)) {
             return;
         }
-        // 一次悬停里这个回调会被调用多次；只有第一次该动手。
-        if (!tooltip.get(OWN_MARKER).isEmpty()) {
+        // **已经处理过就跳过**（0.56.0 修正）。
+        //
+        // 上一版用 `tooltip.get(OWN_MARKER)` 判断，实测**永不命中**：Jade 不保留 `add(..., id)` 传进去的
+        // id（所有者读数：回调 690 次 / 改动 432 次 / 因已处理而跳过 0 次）。所以改成**按内容**判断：
+        // 本模组补回的方块名就在第 0 行，而它带上等级（例如「真空流体输入仓」），Jade 自己印的是简称
+        // （「流体输入仓」）——两者不相等，所以这个判据不会把 Jade 那一行误认成我的。
+        //
+        // 为什么必须去重：一次悬停里这个回调会被调用几百次，每次都「先删再加」虽然结果幂等，
+        // 却等于把整张提示重建几百遍，而且留下一个坏习惯——让人以为「碰巧对」就等于「设计对」。
+        if (rowStartsWith(tooltip, ROW_NAME, hatch.getDisplayName().getString())) {
             SKIPPED.incrementAndGet();
             return;
         }
@@ -107,9 +115,9 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
     /**
      * 删掉一行的**所有**元素（左右两侧都试），返回是否删到了东西。
      *
-     * <p>逐个元素按它自己的 tag 删；没有 tag 的元素只能靠 {@code remove} 的 id 版本删不到，
-     * 所以这里只对**有 tag** 的元素动手——通用流体那一块的空框实测就有 id
-     * （所有者实例上它能被 {@code get} 查到，只是不在 LEFT 侧）。
+     * <p>逐个元素按它自己的 tag 删。**有 tag 才删得掉**——{@code ITooltip.remove(ResourceLocation)}
+     * 只认 id，而 Jade 通用流体那一块的元素是否带 id 并不由本模组决定；没有 id 的元素删不掉，
+     * 这也正是所有者截图上那个空框仍然留在提示里的原因（已知、已登记，不影响显示正确的液体信息）。
      */
     private static boolean removeRow(ITooltip tooltip, int index) {
         List<IElement> elements = new ArrayList<>();
@@ -130,5 +138,14 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
             }
         }
         return removed;
+    }
+    /** 这一行第一个元素的文本是不是以给定字符串开头。 */
+    private static boolean rowStartsWith(ITooltip tooltip, int index, String prefix) {
+        List<IElement> left = tooltip.get(index, IElement.Align.LEFT);
+        if (left == null || left.isEmpty()) {
+            return false;
+        }
+        String message = left.get(0).getMessage();
+        return message != null && message.startsWith(prefix);
     }
 }
