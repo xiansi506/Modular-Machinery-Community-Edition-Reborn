@@ -1409,10 +1409,12 @@ public final class ParallelCraftCheck {
             // the MOC namespace added the original's two tile.modularmachinery.machinecontroller.deprecated.tip
             // keys verbatim; 176 in 0.29.0, when the construct tool gained the original's own tooltip plus its
             // six message.structurebuild.* lines — all seven under the ORIGINAL's key names, so section AA1 can
-            // diff them against _mmce-src's .lang files key for key. 189 now: the four energy unit labels, the six craftcheck.failure.* lines, and the three dynamic-structure preview keys
+            // diff them against _mmce-src's .lang files key for key. 189 at 0.32.0: the four energy unit labels, the six
+        // craftcheck.failure.* lines, and the three dynamic-structure preview keys. 190 from 0.37.0: the fluid
+        // hatch's tooltip gained a gas line, so that a gas inside a fluid hatch is visible in game
             // (`…energy.type` plus `.fe` / `.rf` / `.ic2_eu` / `.gt_eu`), which are the original's
             // `tooltip.energy.type.*` keys carried under this mod's namespace.
-            check("the language files' key count", 189, zhMap.size());
+            check("the language files' key count", 190, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to

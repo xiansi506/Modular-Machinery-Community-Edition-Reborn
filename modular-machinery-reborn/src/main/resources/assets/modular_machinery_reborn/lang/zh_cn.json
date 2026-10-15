@@ -62,6 +62,7 @@
   "tooltip.modular_machinery_reborn.energyhatch.charge": "当前储能：%s / %s %s",
   "tooltip.modular_machinery_reborn.fluidhatch.empty": "空",
   "tooltip.modular_machinery_reborn.fluidhatch.tank": "%s mB / %s mB",
+  "tooltip.modular_machinery_reborn.gashatch.tank": "气体：%s",
 
   "tooltip.modular_machinery_reborn.machine.duration.seconds": "加工时间：%.1f 秒",
   "tooltip.modular_machinery_reborn.machine.duration.tick": "（%s Tick）",

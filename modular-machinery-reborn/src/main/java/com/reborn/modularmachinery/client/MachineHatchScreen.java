@@ -154,14 +154,28 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
                     display.labelComponent()));
         }
         FluidStack fluid = menu.hatch().fluidTank().getFluid();
+        List<Component> lines = new java.util.ArrayList<>(3);
         if (fluid.isEmpty() || menu.fluidAmount() <= 0) {
-            return List.of(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"),
-                    Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank", 0,
-                            menu.fluidCapacity()));
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"));
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank", 0,
+                    menu.fluidCapacity()));
+        } else {
+            lines.add(fluid.getDisplayName());
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank",
+                    menu.fluidAmount(), menu.fluidCapacity()));
         }
-        return List.of(fluid.getDisplayName(),
-                Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank", menu.fluidAmount(),
-                        menu.fluidCapacity()));
+        // 波 5.3：**气体那一行**。流体仓的界面只画流体，所以气体进了仓在游戏里没有任何显示——
+        // 所有者实测反馈正是「气体的情况正好相反」（玉模组显示、游戏内界面不显示）。
+        // 一个看不见的状态必须能被看见或问出来（规矩 6），界面是最直接的落点。
+        //
+        // 取值走 MekanismModule.describeGasPort：它**不新建**气体罐（显示不该有副作用），
+        // 没装 Mekanism 时返回 null，那一行就不出现——这一段在没装 Mekanism 的实例上与从前完全一样。
+        String gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule
+                .describeGasPort(menu.hatch());
+        if (gas != null) {
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.gashatch.tank", gas));
+        }
+        return lines;
     }
 
     @Override
