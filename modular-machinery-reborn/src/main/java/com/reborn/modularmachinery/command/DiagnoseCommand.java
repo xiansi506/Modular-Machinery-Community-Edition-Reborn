@@ -223,15 +223,22 @@ public final class DiagnoseCommand {
                             instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)) {
                         continue;
                     }
-                    String contents = com.reborn.modularmachinery.compat.mekanism.MekanismModule
+                    String gasContents = com.reborn.modularmachinery.compat.mekanism.MekanismModule
                             .describeGasPort(hatch);
-                    if (contents == null) {
+                    if (gasContents == null) {
                         continue;
                     }
                     gasTanks++;
                     final String line = "    " + at.toShortString() + " 种类=" + hatch.kind()
-                            + " 气体=" + contents;
+                            + " 气体=" + gasContents;
                     source.sendSuccess(() -> Component.literal(line), false);
+                    // 插入尝试单独一行：这是「管道到底灌过没有」的唯一直接证据，
+                    // 藏在一行长文本的末尾会被读漏。
+                    final String tally = com.reborn.modularmachinery.compat.mekanism.MekanismModule
+                            .describeGasInserts(hatch);
+                    if (tally != null) {
+                        source.sendSuccess(() -> Component.literal("        插入尝试: " + tally), false);
+                    }
                 }
             }
         }

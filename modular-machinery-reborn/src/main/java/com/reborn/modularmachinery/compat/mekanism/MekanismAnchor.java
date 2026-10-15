@@ -242,6 +242,19 @@ final class MekanismAnchor {
         return tank.describeContents();
     }
 
+    /** 这个仓上的气体插入尝试统计；没有气体那一半时返回 {@code null}。见 {@code InsertTally}。 */
+    @Nullable
+    static String describeTankInserts(Object entity) {
+        if (!(entity instanceof MachineHatchBlockEntity hatch)) {
+            return null;
+        }
+        HybridGasTank tank;
+        synchronized (TANKS) {
+            tank = TANKS.get(hatch);
+        }
+        return tank == null ? null : tank.describeInserts();
+    }
+
     /**
      * Mekanism 的能力对象，**隔离在这一个方法里**，原因见 {@link Mapper} 的注释。
      *

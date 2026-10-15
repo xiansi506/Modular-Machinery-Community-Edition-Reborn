@@ -143,6 +143,18 @@ public final class MekanismModule implements CompatModule {
         return MekanismAnchor.describeExistingTank(entity);
     }
 
+    /**
+     * 这个仓上的气体**插入尝试**统计，给 {@code /mm-diagnose} 用；没有气体那一半时返回 {@code null}。
+     *
+     * <p>为什么要单独一个方法：`气体=空` 只说明「没进去」，而它有两种完全相反的原因——
+     * 管道**根本没灌过**（不是我这边的事）与管道**灌了但被拒**（是我这边的事）。
+     * 这一行把它们分开。
+     */
+    @javax.annotation.Nullable
+    public static String describeGasInserts(Object entity) {
+        return MekanismAnchor.describeTankInserts(entity);
+    }
+
     /** {@code gas} 与 {@code gas_pertick} 共用的一份读写器，只差 {@code perTick} 一位。 */
     private static final class GasHandler implements RequirementType.Handler {
 

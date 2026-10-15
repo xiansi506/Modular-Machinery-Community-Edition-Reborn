@@ -193,7 +193,12 @@ final class HybridGasTank implements IGasHandler {
         String content = this.amount <= 0L || this.stored.isEmpty()
                 ? "空"
                 : describe(this.stored) + " x" + this.amount + " mB";
-        return content + " / 容量 " + getTankCapacity(0) + " mB；插入尝试：" + MEKANISM_PROBE.describe();
+        return content + " / 容量 " + getTankCapacity(0) + " mB";
+    }
+
+    /** 这个罐上的插入尝试统计，给 {@code /mm-diagnose} 用。 */
+    String describeInserts() {
+        return MEKANISM_PROBE.describe();
     }
 
     @Override
