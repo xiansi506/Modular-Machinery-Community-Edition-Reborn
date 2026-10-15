@@ -150,11 +150,75 @@ final class MekanismAnchor {
                 loadGasFrom(hatch, tag);
             }
         }
+
+        /**
+         * 诊断用：把「哪个能力对象是气体」这件事说清楚。
+         *
+         * <p>键是能力对象的字符串形式（与 {@code ModCompat.recordCapability} 记下的键**同源**，
+         * 都是 {@code String.valueOf(capability)}），值是它的可读名字。于是那份「其它模组问过的能力」
+         * 清单里每一行都能读出它到底是不是气体能力。
+         */
+        @Override
+        public java.util.Map<String, String> capabilityNames() {
+            try {
+                Capability<IGasHandler> chemical = MekanismCapabilities.gasHandler();
+                if (chemical == null) {
+                    return java.util.Map.of();
+                }
+                return java.util.Map.of(String.valueOf(chemical),
+                        "GAS_HANDLER / mekanism:" + mekanism.api.chemical.ChemicalType.GAS.getSerializedName()
+                                + "（这就是气体端口认领的能力）");
+            } catch (Throwable unavailable) {
+                return java.util.Map.of();
+            }
+        }
     }
 
     /** 气体能力这一半是否可用（给诊断用）。 */
     static boolean gasHandlerAvailable() {
         return MekanismCapabilities.gasHandler() != null;
+    }
+
+    /**
+     * 给诊断用：一个 Forge 能力对象**属于哪一种化学**，或 {@code null} 表示不是 Mekanism 的。
+     *
+     * <p>为什么需要它：{@code Capability#toString()} 只给出对象身份（`Capability@25f549c`），
+     * 于是「管道问的到底是不是气体能力」在诊断里读不出来——而那是这条路上最关键的一个分岔。
+     * 判据直接用 Mekanism 自己的四个能力字段做**身份比较**（Forge 的能力是按类型的身份对象），
+     * 所以这里不会猜错。名字用 API 自己给的（{@code ChemicalType.getSerializedName()}、
+     * 注册表键），不自己编。
+     */
+    @Nullable
+    static String capabilityName(Object capability) {
+        if (!(capability instanceof Capability<?> cap)) {
+            return null;
+        }
+        try {
+            if (cap == MekanismCapabilities.gasHandler()) {
+                return "GAS_HANDLER（" + chemicalTypeName("GAS") + "）";
+            }
+            if (cap == mekanism.common.capabilities.Capabilities.INFUSION_HANDLER) {
+                return "INFUSION_HANDLER（" + chemicalTypeName("INFUSION") + "）";
+            }
+            if (cap == mekanism.common.capabilities.Capabilities.PIGMENT_HANDLER) {
+                return "PIGMENT_HANDLER（" + chemicalTypeName("PIGMENT") + "）";
+            }
+            if (cap == mekanism.common.capabilities.Capabilities.SLURRY_HANDLER) {
+                return "SLURRY_HANDLER（" + chemicalTypeName("SLURRY") + "）";
+            }
+        } catch (Throwable unavailable) {
+            return null;
+        }
+        return null;
+    }
+
+    /** {@code GAS} 之类在 Mekanism 注册表里的实际名字（例如 {@code mekanism:gas}）。 */
+    private static String chemicalTypeName(String constant) {
+        try {
+            return mekanism.api.chemical.ChemicalType.valueOf(constant).getSerializedName();
+        } catch (Throwable unavailable) {
+            return constant;
+        }
     }
 
     /**

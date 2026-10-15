@@ -202,7 +202,7 @@ public final class DiagnoseCommand {
         source.sendSuccess(() -> Component.literal("  这台机器收集到的气体端口: 输入 "
                 + hatches.gasInputs().size() + " 个 / 输出 " + hatches.gasOutputs().size() + " 个"), false);
         source.sendSuccess(() -> Component.literal("  其它模组问过的能力（最多记 40 个）:"), false);
-        var queried = com.reborn.modularmachinery.compat.ModCompat.queriedCapabilities();
+        var queried = com.reborn.modularmachinery.compat.ModCompat.queriedCapabilitiesNamed();
         if (queried.isEmpty()) {
             source.sendSuccess(() -> Component.literal(
                     "    （还没有任何能力查询经过本模组的仓口——如果你的管道接在上面，这一条就是问题所在）"),

@@ -52,6 +52,30 @@ public interface BlockEntityPortMapper {
      *
      * <p>默认空列表：只加能力、不参与配方结算的模块不需要它。
      */
+    /**
+     * 这个映射器认领的是哪些能力，给**诊断**用（可读的名字，而不是 {@code Capability@25f549c}）。
+     *
+     * <p>为什么值得有这个方法：{@code Capability#toString()} 只给对象身份，于是
+     * 「管道问的到底是不是气体能力」这件事在诊断输出里读不出来——而那是这类缺陷最关键的一个分岔。
+     * 默认返回空列表：不实现它的映射器在诊断里只会显示成「非本模块的能力」。
+     */
+    default java.util.Map<String, String> capabilityNames() {
+        return java.util.Map.of();
+    }
+
+    /**
+     * 这个实体上**属于本模块**的端口处理器，供**端口收集**使用（与 {@link #map} 的 Forge 能力查询不同）。
+     *
+     * <p>为什么需要单独一个方法：端口收集一次要拿到「这个实体上你所有的端口」，而不是回答
+     * 「某个能力是不是你的」。那时没有 {@code Capability} 对象可比——主模组根本不知道那种能力是什么，
+     * 所以只能由模块自己认出自己的实体。
+     *
+     * <p>返回的处理器是**长期持有**的引用（存进 {@code HatchCollection}，配方生命周期反复读它），
+     * 所以不要返回一个每次调用都新建的包装对象：那会让「配方看到的那一份」与「能力查询拿到的那一份」
+     * 变成两个对象、两份状态。
+     *
+     * <p>默认空列表：只加能力、不参与配方结算的模块不需要它。
+     */
     default java.util.List<?> handlers(Object entity) {
         return java.util.List.of();
     }

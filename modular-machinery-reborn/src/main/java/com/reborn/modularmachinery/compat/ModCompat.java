@@ -226,6 +226,24 @@ public final class ModCompat {
         }
     }
 
+    /**
+     * 把 {@link #queriedCapabilities()} 的每一行配上**可读的名字**（映射器自己报的）。
+     *
+     * <p>没有名字的那些会原样保留——那本身就是信息：「这个能力不属于任何兼容模块」。
+     */
+    public static List<String> queriedCapabilitiesNamed() {
+        java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
+        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
+            names.putAll(mapper.capabilityNames());
+        }
+        List<String> out = new ArrayList<>();
+        for (String queried : queriedCapabilities()) {
+            String name = names.get(queried);
+            out.add(queried + (name == null ? "   ← 不属于任何兼容模块" : "   ← " + name));
+        }
+        return out;
+    }
+
     /** 已登记的端口映射器数量——**0 表示没有任何兼容模块挂上端口**。 */
     public static int portMapperCount() {
         return PORT_MAPPERS.size();
