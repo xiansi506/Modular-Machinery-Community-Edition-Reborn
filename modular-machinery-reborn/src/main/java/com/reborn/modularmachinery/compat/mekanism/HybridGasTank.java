@@ -237,6 +237,23 @@ final class HybridGasTank implements IGasHandler {
         return this.capacity;
     }
 
+    /** 这个罐里气体的颜色（由 Mekanism 的 ChemicalStack 给出），查不到时中性灰。 */
+    int tint() {
+        if (this.amount <= 0L || this.stored.isEmpty()) {
+            return 0x9E9E9E;
+        }
+        try {
+            return this.stored.getChemicalTint();
+        } catch (Throwable unavailable) {
+            return 0x9E9E9E;
+        }
+    }
+
+    /** 这个罐里气体的量，给菜单的数据槽用。 */
+    long amountForMenu() {
+        return this.amount;
+    }
+
     /** 这个罐上的插入尝试统计，给 {@code /mm-diagnose} 用。 */
     String describeInserts() {
         return MEKANISM_PROBE.describe();

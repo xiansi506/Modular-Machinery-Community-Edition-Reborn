@@ -402,6 +402,36 @@ final class MekanismCompatCheck {
             report("reading the hatch block entity failed: " + exception, false);
         }
 
+        // 两条**界面契约**的断言（都不依赖 Mekanism 在场）：
+        // 1) 菜单的数据槽数目必须容得下气体那两个（否则服务端算了也送不到客户端，容量条永远不动）；
+        // 2) 兼容层报数用的名字必须是界面读的那两个（否则又是一处「两边各说各的」）。
+        //    它们靠源代码断言，因为离线环境里方块实体与菜单都拿不到真实的气体数据。
+        Path menu = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "menu/MachineHatchMenu.java");
+        Path screen = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "client/MachineHatchScreen.java");
+        try {
+            String menuText = withoutComments(Files.readString(menu));
+            report("the hatch menu exposes six container-data slots (energy 2 + fluid 2 + gas 2); with only "
+                    + "four the bar could never see a gas amount on the client",
+                    menuText.contains("public int getCount() { return 6; }"));
+            report("...and it offers gasAmount()/gasCapacity() accessors for the screen",
+                    menuText.contains("public int gasAmount()") && menuText.contains("public int gasCapacity()"));
+
+            String screenText = withoutComments(Files.readString(screen));
+            report("the bar draws a gas section as well as the fluid one",
+                    screenText.contains("drawGas(") && screenText.contains("menu.gasAmount()"));
+            report("...and it reads the generic compat accessors rather than any module type "
+                    + "(the screen must not need to know which module supplies the gas)",
+                    screenText.contains("ModCompat.namedValues(") || screenText.contains(".gasTooltip("));
+
+            String anchor = withoutComments(Files.readString(source));
+            report("...and the gas module reports the two names the bar reads (gas.amount / gas.capacity)",
+                    anchor.contains("\"gas.amount\"") && anchor.contains("\"gas.capacity\""));
+        } catch (Exception exception) {
+            report("reading the screen/menu sources failed: " + exception, false);
+        }
+
         check("a gas requirement still reports its per-tick kind after the port work", "gas_pertick",
                 gasPerTick.id().getPath());
     }

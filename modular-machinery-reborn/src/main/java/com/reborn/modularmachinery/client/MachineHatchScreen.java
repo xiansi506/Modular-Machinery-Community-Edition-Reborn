@@ -90,23 +90,66 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
     }
 
     private void drawFluid(GuiGraphics graphics) {
-        FluidStack fluid = menu.hatch().fluidTank().getFluid();
-        if (fluid.isEmpty() || menu.fluidAmount() <= 0) {
-            return;
+        // 流体与气体**共用同一个罐的空间**（旧版 HybridGasTank 的语义：一个罐要么装流体要么装气体，
+        // 但这个仓的**容量**是两者共用的）。所以两者各自按比例画，**气体在上、流体在下**，
+        // 合计不超过满格——总占用恰好等于 (流体量 + 气体量) / 容量，与仓的真实状态一致。
+        int fluidFilled = filledPixels((float) menu.fluidAmount() / menu.fluidCapacity());
+        int gasFilled = menu.gasCapacity() > 0
+                ? filledPixels((float) menu.gasAmount() / menu.gasCapacity())
+                : 0;
+        int gasTop = BAR_HEIGHT - fluidFilled - gasFilled;
+        if (gasFilled > 0) {
+            drawGas(graphics, gasFilled, gasTop);
         }
-        int filled = filledPixels((float) menu.fluidAmount() / menu.fluidCapacity());
-        if (filled > 0) {
+        FluidStack fluid = menu.hatch().fluidTank().getFluid();
+        if (!fluid.isEmpty() && fluidFilled > 0) {
             IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluid.getFluid());
             TextureAtlasSprite sprite = Minecraft.getInstance()
                     .getTextureAtlas(InventoryMenu.BLOCK_ATLAS)
                     .apply(extensions.getStillTexture(fluid));
             int tint = extensions.getTintColor(fluid);
             graphics.setColor(((tint >> 16) & 0xFF) / 255F, ((tint >> 8) & 0xFF) / 255F, (tint & 0xFF) / 255F, 1F);
-            graphics.blit(leftPos + BAR_X, topPos + BAR_Y + BAR_HEIGHT - filled, 0, BAR_WIDTH, filled, sprite);
+            graphics.blit(leftPos + BAR_X, topPos + BAR_Y + BAR_HEIGHT - fluidFilled, 0, BAR_WIDTH, fluidFilled, sprite);
             graphics.setColor(1F, 1F, 1F, 1F);
         }
-        // The frame is drawn over the fluid, as in the original.
-        graphics.blit(BAR_TEXTURE, leftPos + BAR_X, topPos + BAR_Y, FRAME_U, 0, BAR_WIDTH, BAR_HEIGHT);
+        // The frame is drawn over the contents, as in the original.
+        // 只要这个仓可能有气体那一半（装了 Mekanism），就画框——否则「空」与「没有气体那一半」
+        // 在界面上完全一样，而这两种状态的含义不同。
+        if (fluidFilled > 0 || gasFilled > 0 || menu.gasCapacity() > 0) {
+            graphics.blit(BAR_TEXTURE, leftPos + BAR_X, topPos + BAR_Y, FRAME_U, 0, BAR_WIDTH, BAR_HEIGHT);
+        }
+    }
+
+    /**
+     * 画气体那一截。
+     *
+     * <p><b>为什么用颜色块而不是气体自己的贴图。</b>Mekanism 的气体**没有方块图集贴图**
+     * （流体的 {@code getStillTexture} 那种东西它没有），所以画不出一张「气体纹理」。
+     * 用气体自己的颜色（{@code ChemicalStack#getChemicalTint()}）铺一层纯色，是能做且不假的做法：
+     * 颜色由 Mekanism 自己给出，不是这里编的；而 tooltip 里写着气体的注册名，
+     * 所以「这是什么气体」有权威答案。
+     *
+     * <p>颜色查不到时（客户端没有那个气体的注册项——理论上不会，但显示路径不该抛异常）
+     * 退回中性灰，并**不假装**那是某种气体。
+     */
+    private void drawGas(GuiGraphics graphics, int filled, int top) {
+        int tint = gasTint();
+        float alpha = 0.85F;
+        graphics.fill(leftPos + BAR_X + 1, topPos + BAR_Y + top,
+                leftPos + BAR_X + BAR_WIDTH - 1, topPos + BAR_Y + BAR_HEIGHT,
+                ((int) (alpha * 255) << 24) | (tint & 0xFFFFFF));
+    }
+
+    /** 这个仓里气体的颜色，由 Mekanism 的注册表给出；查不到时中性灰。 */
+    private int gasTint() {
+        String[] gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule
+                .gasTooltip(menu.hatch());
+        if (gas == null || gas.length == 0) {
+            return 0x9E9E9E;
+        }
+        int space = gas[0].indexOf(' ');
+        String id = space > 0 ? gas[0].substring(0, space) : gas[0];
+        return com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasTint(id);
     }
 
     private static int filledPixels(float percent) {

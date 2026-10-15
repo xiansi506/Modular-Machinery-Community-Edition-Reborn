@@ -249,6 +249,21 @@ public final class ModCompat {
         return PORT_MAPPERS.size();
     }
 
+    /**
+     * 这个实体上所有模块报出的**具名数字**，合并成一个 map（键如 {@code "gas.amount"}）。
+     *
+     * <p>主模组的方块实体用它填界面上的容量条：它只认识名字，不认识任何模块的类型。
+     * 这就是「主模组一个 Mekanism 类都不出现」在**界面这一侧**的落点——
+     * 与 {@link #mapPort}、{@link #portHandlers} 同一条思路。
+     */
+    public static Map<String, String> namedValues(Object entity) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
+            values.putAll(mapper.namedValues(entity));
+        }
+        return values;
+    }
+
     /** 存档写：把每个模块的内容交给它自己序列化。由 {@code MachineHatchBlockEntity#saveAdditional} 调用。 */
     public static void savePorts(net.minecraft.nbt.CompoundTag tag, Object entity) {        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
             mapper.save(tag, entity);

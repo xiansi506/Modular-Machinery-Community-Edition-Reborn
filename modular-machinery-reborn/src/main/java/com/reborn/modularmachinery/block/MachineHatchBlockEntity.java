@@ -146,6 +146,14 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     private int clientEnergyCapacity;
     private int clientFluidAmount;
     private int clientFluidCapacity;
+    /**
+     * 波 5.3：气体那一半的量与容量，同样走菜单的数据槽。
+     *
+     * <p>为什么要另开两个槽而不是复用流体那对：流体与气体共用同一个罐的**空间**，但它们是
+     * **两笔不同的内容**（一个罐要么装流体要么装气体）。界面要把两者都画出来，就必须分别拿到数字。
+     */
+    private int clientGasAmount;
+    private int clientGasCapacity;
 
     /**
      * One of the four values the hatch screen displays, in the order the menu's container data uses them.
@@ -161,6 +169,8 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
                 case 1 -> this.clientEnergyCapacity;
                 case 2 -> this.clientFluidAmount;
                 case 3 -> this.clientFluidCapacity;
+                case 4 -> this.clientGasAmount;
+                case 5 -> this.clientGasCapacity;
                 default -> 0;
             };
         }
@@ -169,8 +179,27 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             case 1 -> this.energy == null ? 0 : this.energy.getMaxEnergyStored();
             case 2 -> this.tank == null ? 0 : this.tank.getFluidAmount();
             case 3 -> this.tank == null ? 0 : this.tank.getCapacity();
+            // 气体的两个数字从**兼容层**取，而且走的是通用入口 {@code ModCompat.namedValues}——
+            // 本类**不认识任何模块**（它每个世界都会被加载，包括没装那个模组的进程）。
+            // 没装 Mekanism 时这个 map 是空的，这两个槽就是 0，界面上那一截不画。
+            case 4 -> gasMenuValue(true);
+            case 5 -> gasMenuValue(false);
             default -> 0;
         };
+    }
+
+    /** 气体那一半的量或容量，交给兼容层回答；没有气体那一半时是 0。 */
+    private int gasMenuValue(boolean amount) {
+        String raw = com.reborn.modularmachinery.compat.ModCompat.namedValues(this)
+                .get(amount ? "gas.amount" : "gas.capacity");
+        if (raw == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException notANumber) {
+            return 0;
+        }
     }
 
     public void setMenuValue(int index, int value) {
@@ -179,6 +208,8 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             case 1 -> this.clientEnergyCapacity = value;
             case 2 -> this.clientFluidAmount = value;
             case 3 -> this.clientFluidCapacity = value;
+            case 4 -> this.clientGasAmount = value;
+            case 5 -> this.clientGasCapacity = value;
             default -> { }
         }
     }

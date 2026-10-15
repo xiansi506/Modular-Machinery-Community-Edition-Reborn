@@ -47,6 +47,15 @@ public final class MachineHatchMenu extends AbstractContainerMenu {
     public static final int DATA_ENERGY_CAPACITY = 1;
     public static final int DATA_FLUID_AMOUNT = 2;
     public static final int DATA_FLUID_CAPACITY = 3;
+    /**
+     * 波 5.3：气体那一半的量与容量。
+     *
+     * <p>为什么另开两个槽而不是复用流体那对：流体与气体共用同一个罐的**空间**，但它们是**两笔不同的内容**
+     * （一个罐要么装流体要么装气体）。容量条要把两者都画出来，就必须分别拿到数字。
+     * 没装 Mekanism 时这两个槽恒为 0，界面那一截不画。
+     */
+    public static final int DATA_GAS_AMOUNT = 4;
+    public static final int DATA_GAS_CAPACITY = 5;
 
     /** Menu button id for "the player clicked the tank with a fluid container in hand". */
     public static final int BUTTON_INTERACT_TANK = 0;
@@ -56,7 +65,7 @@ public final class MachineHatchMenu extends AbstractContainerMenu {
     private final ContainerData data = new ContainerData() {
         @Override public int get(int index) { return hatch.menuValue(index); }
         @Override public void set(int index, int value) { hatch.setMenuValue(index, value); }
-        @Override public int getCount() { return 4; }
+        @Override public int getCount() { return 6; }
     };
 
     public MachineHatchMenu(int id, Inventory inv, MachineHatchBlockEntity hatch) {
@@ -88,6 +97,10 @@ public final class MachineHatchMenu extends AbstractContainerMenu {
     public int energyCapacity() { return Math.max(1, data.get(DATA_ENERGY_CAPACITY)); }
     public int fluidAmount() { return data.get(DATA_FLUID_AMOUNT); }
     public int fluidCapacity() { return Math.max(1, data.get(DATA_FLUID_CAPACITY)); }
+    /** 气体那一半的量（mB）；没装 Mekanism 或仓里没有气体那一半时是 0。 */
+    public int gasAmount() { return data.get(DATA_GAS_AMOUNT); }
+    /** 气体那一半的容量（mB）；0 表示这个仓没有气体那一半。 */
+    public int gasCapacity() { return data.get(DATA_GAS_CAPACITY); }
 
     /**
      * The original's {@code ContainerItemBus.addInventorySlots}, coordinate for coordinate. Each tier's texture

@@ -2,6 +2,9 @@ package com.reborn.modularmachinery.compat.mekanism;
 
 import com.reborn.modularmachinery.block.MachineHatchBlockEntity;
 import com.reborn.modularmachinery.compat.BlockEntityPortMapper;
+import mekanism.api.MekanismAPI;
+import mekanism.api.chemical.gas.Gas;
+import mekanism.api.chemical.gas.GasStack;
 import mekanism.api.chemical.gas.IGasHandler;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.util.LazyOptional;
@@ -151,6 +154,13 @@ final class MekanismAnchor {
             }
         }
 
+        /** 见 {@link MekanismAnchor#namedValues}：主模组按名字取数，不认识气体是什么。 */
+        @Override
+        public java.util.Map<String, String> namedValues(Object entity) {
+            java.util.Map<String, String> values = MekanismAnchor.namedValues(entity);
+            return values == null ? java.util.Map.of() : values;
+        }
+
         /**
          * 诊断用：把「哪个能力对象是气体」这件事说清楚。
          *
@@ -256,6 +266,21 @@ final class MekanismAnchor {
     }
 
     /**
+     * 主模组的界面要的两个数字，用**名字**报出去：{@code gas.amount} 与 {@code gas.capacity}。
+     *
+     * <p>名字里不含模块名，因为它们描述的是「气体」这件东西，而不是 Mekanism——换一个提供气体的模组，
+     * 主模组那两个数据槽与那条容量条**一个字都不用改**。
+     */
+    @Nullable
+    static java.util.Map<String, String> namedValues(Object entity) {
+        String[] gas = menuGas(entity);
+        if (gas == null) {
+            return null;
+        }
+        return java.util.Map.of("gas.amount", gas[0], "gas.capacity", gas[1]);
+    }
+
+    /**
      * 界面 tooltip 要的两个字段：气体的内容与容量。
      *
      * <p><b>它读的是方块实体里同步过来的 NBT（{@code gas} 标签），不是内存里的气体罐。</b>
@@ -289,6 +314,57 @@ final class MekanismAnchor {
             capacity = Math.max(1L, fluid.getCapacity());
         }
         return new String[] {id + " x" + amount + " mB", Long.toString(capacity)};
+    }
+
+    /**
+     * 菜单数据槽要的两个数字：{@code {气体量, 容量}}；没有气体那一半时返回 {@code null}。
+     *
+     * <p>与 {@link #gasTooltip} 分开：那个给 tooltip 的是**给人看的文字**，这个给容量条的是**数字**
+     * （菜单的数据槽只传 int）。两者都从内存里的罐算——数据槽的值由服务端每 tick 推给客户端，
+     * 所以这里读服务端那一份是准的，也不需要碰 NBT。
+     */
+    @Nullable
+    static String[] menuGas(Object entity) {
+        if (!(entity instanceof MachineHatchBlockEntity hatch)) {
+            return null;
+        }
+        HybridGasTank tank;
+        synchronized (TANKS) {
+            tank = TANKS.get(hatch);
+        }
+        if (tank == null) {
+            return null;
+        }
+        return new String[] {Long.toString(tank.amountForMenu()), Long.toString(tank.capacity())};
+    }
+
+    /** 某种气体的颜色（按注册名查），给容量条上色用；查不到时中性灰。 */
+    static int gasTint(String registryName) {
+        try {
+            net.minecraft.resources.ResourceLocation id = net.minecraft.resources.ResourceLocation
+                    .tryParse(registryName);
+            if (id == null) {
+                return 0x9E9E9E;
+            }
+            Gas gas = lookupByRegistryName(id);
+            return gas == null ? 0x9E9E9E : new mekanism.api.chemical.gas.GasStack(gas, 1L).getChemicalTint();
+        } catch (Throwable unavailable) {
+            return 0x9E9E9E;
+        }
+    }
+
+    @Nullable
+    private static Gas lookupByRegistryName(net.minecraft.resources.ResourceLocation id) {
+        try {
+            var registry = MekanismAPI.gasRegistry();
+            if (registry == null) {
+                return null;
+            }
+            Gas gas = registry.getValue(id);
+            return gas == MekanismAPI.EMPTY_GAS ? null : gas;
+        } catch (Throwable unavailable) {
+            return null;
+        }
     }
 
     /**

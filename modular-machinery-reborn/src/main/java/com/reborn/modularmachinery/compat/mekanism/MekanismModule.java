@@ -165,6 +165,27 @@ public final class MekanismModule implements CompatModule {
         return MekanismAnchor.gasTooltip(entity);
     }
 
+    /**
+     * 菜单数据槽要的两个数字：{@code {气体量 mB, 容量 mB}}；没有气体那一半时返回 {@code null}。
+     *
+     * <p>给界面的**容量条**用：主模组不认识气体，但它需要两个 int 才能把那一条按比例画出来，
+     * 所以这两个数字由模块报（与波 5.3 起 `HatchCollection` 里那对气体端口同一条思路：
+     * 主模组只知道「有个模块愿意报数」）。
+     */
+    @javax.annotation.Nullable
+    public static String[] menuGas(Object entity) {
+        return MekanismAnchor.menuGas(entity);
+    }
+
+    /**
+     * 某种气体的颜色（按注册名查），给界面的容量条上色用；查不到时中性灰。
+     *
+     * <p>颜色由 Mekanism 自己给出（{@code ChemicalStack#getChemicalTint()}），不是界面里编的。
+     */
+    public static int gasTint(String registryName) {
+        return MekanismAnchor.gasTint(registryName);
+    }
+
     /** {@code gas} 与 {@code gas_pertick} 共用的一份读写器，只差 {@code perTick} 一位。 */
     private static final class GasHandler implements RequirementType.Handler {
 
