@@ -311,13 +311,26 @@ final class MachineRecipeLayout {
         return out;
     }
 
+    /**
+     * 哪条需求占哪种格子。
+     *
+     * <p><b>这是「打开 JEI 页就崩」那个缺陷的修复点。</b>原来的写法是「能源 → 流体 → 其余都算物品」，
+     * 于是气体需求（它住在兼容层，只在装了 Mekanism 的进程里存在）掉进物品桶，
+     * 绘制侧随后把它 cast 成 {@code ItemRequirement}，整页崩掉。
+     *
+     * <p>现在改成**由需求自报**（{@link MachineRequirement#tankKind()}）：兼容层的类型可以声明
+     * 「我占罐格」，而这一侧不必认识那个类型——这正是主模组「没装 Mekanism 也能加载」的保证。
+     * 「物品」也因此从默认桶变成一个**明确**的答案。
+     */
     private static Kind kindOf(MachineRequirement requirement) {
         if (requirement instanceof EnergyRequirement) {
             return Kind.ENERGY;
         }
-        if (requirement instanceof FluidRequirement) {
-            return Kind.FLUID;
-        }
-        return Kind.ITEM;
+        return switch (requirement.tankKind()) {
+            // 气体与流体占**同一种格子**：它们本来就住在同一个罐里（一个仓要么装流体要么装气体），
+            // 而绘制侧按 tankKind 分开画（流体给贴图、气体给文字）。见 MachineRecipeCategory。
+            case FLUID, GAS -> Kind.FLUID;
+            case NONE -> Kind.ITEM;
+        };
     }
 }

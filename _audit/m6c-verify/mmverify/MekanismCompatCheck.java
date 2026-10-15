@@ -771,6 +771,105 @@ final class MekanismCompatCheck {
         }
     }
 
+    /**
+     * JEI 页面上的需求分派（0.58.0）。
+     *
+     * <p>修的是一个**真崩溃**：{@code MachineRecipeLayout.kindOf()} 原来是「能源 → 流体 → 其余都算物品」，
+     * 于是气体需求掉进物品桶，绘制侧把它 cast 成 {@code ItemRequirement}，整页崩掉。
+     *
+     * <p>这里的断言钉两件事，都是离线能证的：
+     * ① 「物品」不再是默认桶——三种内置需求各自自报格子种类（物品/能源 → NONE，流体 → FLUID），
+     *    而 JEI 侧那份分派**必须**读这个自报值（不能又回去 instanceof 猜）；
+     * ② 主模组的 JEI 代码**不得出现气体那个类型**（它住在兼容层，没装 Mekanism 时缺类）。
+     */
+    /** 子串出现次数；断言里用来分辨「只有一处」与「到处都是」。 */
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        int at = text.indexOf(needle);
+        while (at >= 0) {
+            count++;
+            at = text.indexOf(needle, at + needle.length());
+        }
+        return count;
+    }
+    /**
+     * 取一个方法的方法体（从它那一行到下一个「列 4 的右花括号」为止）。
+     *
+     * <p>为什么需要它：有些断言必须看**一个方法的整体形状**（例如「这个方法里只允许有一个 if」），
+     * 而对整个文件做文本检查会被别处的内容干扰。
+     */
+    private static String methodBody(String source, String signature) {
+        int start = source.indexOf(signature);
+        if (start < 0) {
+            return "";
+        }
+        int depth = 0;
+        boolean opened = false;
+        for (int i = start; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '{') {
+                depth++;
+                opened = true;
+            } else if (c == '}') {
+                depth--;
+                if (opened && depth == 0) {
+                    return source.substring(start, i + 1);
+                }
+            }
+        }
+        return source.substring(start);
+    }
+    static void jeiRequirementDispatch() {
+        section("JEI 需求分派（0.58.0）");
+        Path layout = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "client/jei/MachineRecipeLayout.java");
+        Path category = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "client/jei/MachineRecipeCategory.java");
+        Path base = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "recipe/MachineRequirement.java");
+        try {
+            String layoutText = withoutComments(Files.readString(layout));
+            String categoryText = withoutComments(Files.readString(category));
+            String baseText = withoutComments(Files.readString(base));
+
+            report("a requirement now declares which JEI cell it occupies, and ITEM is an explicit answer "
+                    + "rather than the default bucket",
+                    baseText.contains("enum TankKind") && baseText.contains("TankKind tankKind()"));
+            // 这条断言必须**咬得住「物品不再是默认桶」**。
+            //
+            // 前两版都太松、都被同一个注入骗过去了（试了两次）：
+            //   ① 只检查 "switch (requirement.tankKind())" 文本存在 → 注入「在 switch 之前无条件
+            //      return Kind.ITEM」照样全绿；
+            //   ② 改成数 "return Kind.ITEM" 出现次数 → 仍然全绿，因为 `case NONE -> Kind.ITEM;`
+            //      是 switch 表达式、**没有 return 关键字**（计数目标写错了），而那个注入是**合法代码**，
+            //      任何「数出现次数」的判据都天然看不见它。
+            // 所以现在按**方法体**判断：kindOf 里只允许有一个 if（能源那一支），ITEM 只能由 switch 给出。
+            String kindOfBody = methodBody(layoutText, "private static Kind kindOf");
+            int itemReturns = countOccurrences(kindOfBody, "Kind.ITEM");
+            int kindOfIfs = countOccurrences(kindOfBody, "if (");
+            report("the JEI layout reads the requirement's own declaration instead of instanceof-guessing, "
+                    + "and ITEM can only come out of the switch (no early exit before it) "
+                    + "[Kind.ITEM x" + itemReturns + ", ifs x" + kindOfIfs + "]",
+                    layoutText.contains("requirement.tankKind()")
+                            && kindOfBody.contains("case FLUID, GAS -> Kind.FLUID")
+                            && kindOfBody.contains("case NONE -> Kind.ITEM")
+                            && itemReturns == 1
+                            && kindOfIfs == 1);
+            report("the item-slot path refuses anything that is not an item requirement "
+                    + "(this is the guard that keeps a gas requirement from being cast to ItemRequirement)",
+                    categoryText.contains("tankKind() != MachineRequirement.TankKind.NONE"));
+            report("gas gets a text-only tank cell, and the fluid path refuses non-fluid tank kinds",
+                    categoryText.contains("addGasSlot(")
+                            && categoryText.contains("tankKind() != MachineRequirement.TankKind.FLUID")
+                            && categoryText.contains("requirement.describe()"));
+            report("the main mod's JEI code never names the gas requirement type "
+                    + "(that type lives in the compat layer and must not be needed without Mekanism)",
+                    !layoutText.contains("GasRequirement") && !categoryText.contains("GasRequirement"));
+        } catch (Exception exception) {
+            report("reading the JEI sources failed: " + exception, false);
+        }
+    }
+
     private static void check(String what, String expected, String actual) {
         ParallelCraftCheck.check(what, expected, actual);
     }

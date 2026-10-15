@@ -223,4 +223,35 @@ public abstract class MachineRequirement {
 
     /** Short human-readable summary, used by JEI. */
     public abstract String describe();
+
+    /**
+     * 这条需求在 **JEI 页面上**该占哪种格子。
+     *
+     * <p><b>为什么由需求自己报，而不是让 JEI 去 instanceof。</b>JEI 的绘制代码在主模组里，而气体需求
+     * （{@code GasRequirement}）住在兼容层、**只在装了 Mekanism 的进程里存在**。让 JEI 写
+     * {@code instanceof GasRequirement} 就等于让主模组引用那个类型——没装 Mekanism 时会缺类。
+     * 所以反过来：需求自己声明它要哪种格子，绘制侧只认这个枚举（一个纯主模组的类型）。
+     *
+     * <p>这也顺手修掉一个**真缺陷**：原来的分派是「能源 → 流体 → 其余都当物品」，于是气体需求
+     * 掉进物品那条路、随后被 cast 成 {@code ItemRequirement}——打开那个机器的 JEI 页就崩。
+     * 现在「其余」不再是默认桶，物品必须是**明确**的物品。
+     */
+    public enum TankKind {
+        /** 不是罐：占物品格。 */
+        NONE,
+        /** 真正的流体：JEI 用自己的流体渲染器画。 */
+        FLUID,
+        /**
+         * 气体之类的化学物质：**只给文字**。
+         *
+         * <p>为什么文字而不是贴图：旧版在 JEI 里对气体也只有 tooltip（没有贴图），本版照做——
+         * 不假装能画出气体的样子，而是把「多少、什么、多少概率」写清楚（见 {@code describe()}）。
+         */
+        GAS
+    }
+
+    /** 这条需求在 JEI 里占哪种格子；默认物品格。 */
+    public TankKind tankKind() {
+        return TankKind.NONE;
+    }
 }

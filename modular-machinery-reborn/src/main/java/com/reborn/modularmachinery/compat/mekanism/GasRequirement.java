@@ -91,6 +91,21 @@ public final class GasRequirement extends MachineRequirement {
         return RecipeModifier.Target.ALL;
     }
 
+    /**
+     * JEI 里占**罐格但只给文字**。
+     *
+     * <p>为什么不是 {@code FLUID}：那条路会让 JEI 去 cast {@code FluidRequirement} 并调它的
+     * {@code fluidType()}——气体不是流体，那条路走不通。而旧版在 JEI 里对气体**本来也只有 tooltip**
+     * （没有贴图），所以「占罐格 + 文字」既是本版能做到的，也是与原版一致的。
+     *
+     * <p>在此之前这里没有覆写，于是走默认的物品格，而物品格的绘制会把需求 cast 成
+     * {@code ItemRequirement} —— **打开那个机器的 JEI 页就崩**。这一条同时是那个缺陷的修复。
+     */
+    @Override
+    public TankKind tankKind() {
+        return TankKind.GAS;
+    }
+
     @Override
     public RequirementType type() {
         // 每 tick 的那一种在注册表里是另一个 id（旧版的 gas_pertick），所以这里必须按 perTick 分辨，

@@ -223,6 +223,14 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
         int count = Math.min(requirements.size(), cells.size());
         for (int i = 0; i < count; i++) {
             MachineRequirement requirement = requirements.get(i);
+            // 「物品格」现在是一个**明确**的桶，不再是「其余都算物品」的默认桶。
+            //
+            // 这条守卫是一个真缺陷的修复：原来气体需求（GasRequirement）在 MachineRecipeLayout.kindOf
+            // 里掉进物品桶，随后在下面被 cast 成 ItemRequirement —— 打开那个机器的 JEI 页就崩。
+            // 现在它自己声明 tankKind() = GAS，于是根本不会走到这里；这条守卫是第二道保险。
+            if (requirement.tankKind() != MachineRequirement.TankKind.NONE) {
+                continue;
+            }
             // An ingredient array is a group of alternatives and occupies one cell, showing each alternative.
             // It is not an ItemRequirement, which is why this dispatch exists: casting it would crash the page.
             List<ItemStack> stacks;
@@ -279,8 +287,22 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
                 MachineRecipeLayout.components(recipe, ioTypeOf(role), MachineRecipeLayout.Kind.FLUID);
         int count = Math.min(requirements.size(), cells.size());
         for (int i = 0; i < count; i++) {
-            FluidRequirement fluid = (FluidRequirement) requirements.get(i);
+            MachineRequirement requirement = requirements.get(i);
             MachineRecipeLayout.Cell cell = cells.get(i);
+            // 气体（以及以后的其它化学物质）：占同一个**罐格**，但只给文字。
+            //
+            // 为什么不能走下面那条流体渲染器：那条路要 cast FluidRequirement 并调 fluidType()，
+            // 而气体不是流体。旧版在 JEI 里对气体本来也只有 tooltip（没有贴图），所以这里照做：
+            // 格子里放一句 requirement.describe()，玩家读到「多少 mB、什么、多少概率、是否每 tick」。
+            // 分类由需求自己声明（MachineRequirement.tankKind()），主模组不认识气体那个类型。
+            if (requirement.tankKind() == MachineRequirement.TankKind.GAS) {
+                addGasSlot(builder, role, cell, requirement);
+                continue;
+            }
+            if (requirement.tankKind() != MachineRequirement.TankKind.FLUID) {
+                continue;
+            }
+            FluidRequirement fluid = (FluidRequirement) requirement;
             int amount = fluid.amount();
             IRecipeSlotBuilder slot = builder.addSlot(role, cell.x(), cell.y())
                     .setBackground(MachineRecipeAtlas.CELL, 0, 0)
@@ -292,6 +314,50 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
             slot.addRichTooltipCallback((view, tooltip) -> MachineRecipeText.addChanceTooltip(
                     role != RecipeIngredientRole.OUTPUT, tooltip, fluid.chance()));
         }
+    }
+
+    /**
+     * A gas (chemical) cell: the same tank frame as a fluid, holding **text** instead of a fluid stack.
+     *
+     * <p>为什么是文字而不是贴图：Mekanism 的气体**没有方块图集贴图**，画不出「气体的样子」；而旧版在 JEI 里
+     * 对气体本来也只有 tooltip。所以这里放 {@code requirement.describe()}——它由需求自己给出
+     * （例如 {@code 1000 mB 氧气}，含概率与每 tick 标记），主模组不必认识「气体」是什么类型。
+     *
+     * <p>格子用与流体相同的坐标与背景：气体与液体在**同一个罐**里（一个仓要么装流体要么装气体），
+     * 所以它们占同一种格子在语义上也是对的。
+     */
+    private static void addGasSlot(IRecipeLayoutBuilder builder, RecipeIngredientRole role,
+                                   MachineRecipeLayout.Cell cell, MachineRequirement requirement) {
+        String text = requirement.describe();
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        IRecipeSlotBuilder slot = builder.addSlot(role, cell.x(), cell.y())
+                .setBackground(MachineRecipeAtlas.CELL, 0, 0);
+        // **不往这一格放 ingredient**，只放文字。
+        //
+        // 试过用空 FluidStack 当承载值（`addIngredient(ForgeTypes.FLUID_STACK, FluidStack.EMPTY)`），
+        // 但那依赖 JEI 对「空值 ingredient」的容忍度，而这一点**离线证不了**（没有 JEI 运行环境）。
+        // 既然这一格要说的本来就是一句话，就不去猜它的容错边界：背景与罐框照画，文字放 richTooltip，
+        // 悬停即可读到「多少 mB、什么、多少概率、是否每 tick」（由 requirement.describe() 给出）。
+        slot.addRichTooltipCallback((view, tooltip) -> {
+            tooltip.add(net.minecraft.network.chat.Component.literal(text));
+            MachineRecipeText.addChanceTooltip(role != RecipeIngredientRole.OUTPUT, tooltip, chanceOf(requirement));
+        });
+        slot.setOverlay(MachineRecipeAtlas.TANK_SHELL, 0, 0);
+    }
+
+    /** 需求自报的概率；没有这个概念时返回 1（不影响 tooltip 的既有行为）。 */
+    private static float chanceOf(MachineRequirement requirement) {
+        if (requirement instanceof FluidRequirement fluid) {
+            return fluid.chance();
+        }
+        if (requirement instanceof ItemRequirement item) {
+            return item.chance();
+        }
+        // 兼容层的需求（含气体）不住在主模组里，所以这里不去 instanceof 它们：
+        // 概率已经包含在 describe() 的文字里（GasRequirement.describe 会写出百分比）。
+        return 1.0F;
     }
 
     /**

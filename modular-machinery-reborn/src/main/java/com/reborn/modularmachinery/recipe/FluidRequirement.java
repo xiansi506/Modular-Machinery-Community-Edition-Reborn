@@ -48,6 +48,12 @@ public final class FluidRequirement extends MachineRequirement {
         return Holder.TYPE;
     }
 
+    /** JEI 用**真正的流体渲染器**画这一格（液体有贴图，与气体不同）。 */
+    @Override
+    public TankKind tankKind() {
+        return TankKind.FLUID;
+    }
+
     /** 见 {@code ItemRequirement.Holder}：这个嵌套类存在的唯一理由是避开类初始化顺序。 */
     private static final class Holder {
         private static final RequirementType TYPE = RequirementTypes.FLUID;
