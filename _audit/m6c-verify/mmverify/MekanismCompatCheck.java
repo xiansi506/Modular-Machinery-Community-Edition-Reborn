@@ -428,6 +428,25 @@ final class MekanismCompatCheck {
             String anchor = withoutComments(Files.readString(source));
             report("...and the gas module reports the two names the bar reads (gas.amount / gas.capacity)",
                     anchor.contains("\"gas.amount\"") && anchor.contains("\"gas.capacity\""));
+
+            // 互斥：一个流体仓里只能有一种东西。
+            // 「灌气体时清流体」不够——流体管道照样能往同一个罐里灌液体，于是两者同时存在。
+            // 所以流体那一侧必须在有气体时装成空的；而「清」必须是真的清，否则气体抽空后旧液体又冒出来。
+            String hatch = withoutComments(Files.readString(hatchEntity));
+            report("the fluid tank pretends to be empty while gas occupies the hatch (otherwise a fluid pipe "
+                    + "could put liquid into a hatch that already holds gas)",
+                    hatch.contains("class FluidTankWithGasPriority")
+                            && hatch.contains("gasBlocksFluid() ? net.minecraftforge.fluids.FluidStack.EMPTY")
+                            && hatch.contains("return gasBlocksFluid() ? 0 : super.fill("));
+            report("...and clearing the fluid for gas is a REAL clear, reachable without the blocking logic "
+                    + "(otherwise the old liquid reappears once the gas is drained)",
+                    hatch.contains("void clearForGas()") && hatch.contains("int realFluidAmount()"));
+            report("...and the gas side asks realFluidAmount() rather than getFluidAmount() when deciding "
+                    + "whether to clear (the latter is answered 0 while gas is present, so it would always "
+                    + "decide 'nothing to clear')",
+                    withoutComments(Files.readString(Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/"
+                            + "com/reborn/modularmachinery/compat/mekanism/HybridGasTank.java")))
+                            .contains("hatch.realFluidAmount()"));
         } catch (Exception exception) {
             report("reading the screen/menu sources failed: " + exception, false);
         }

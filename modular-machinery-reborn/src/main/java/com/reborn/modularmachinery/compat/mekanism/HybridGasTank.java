@@ -125,17 +125,17 @@ final class HybridGasTank implements IGasHandler {
             MEKANISM_PROBE.note("参数不对（tank=" + tank + " 或空栈）");
             return stack == null ? GasStack.EMPTY : stack;
         }
-        // 罐里已经有流体：**先把它清掉再收气体**。旧版就是这么做的——一个罐只装一样。
-        // 这一条不是「顺手清一下」：流体仓里通常真有流体，若只挡不清，气体永远进不来，
-        // 而症状只是「什么都没发生」（251 次被拒的那一类）。
-        if (this.fluid.getFluidAmount() > 0L) {
+        // 罐里已经有流体：**先把它清掉再收气体**。旧版就是这么做的——一个罐只装一样
+        // （`setFluid` 与 `setGas` 互相覆盖同一个罐）。
+        //
+        // 问的是 `realFluidAmount()` 而不是 `getFluidAmount()`：后者在有气体时被挡成 0
+        // （见 MachineHatchBlockEntity#FluidTankWithGasPriority），用它判断会永远认为「罐里没流体」，
+        // 于是旧液体留着不清——气体被抽空之后它又冒出来。
+        if (this.hatch.realFluidAmount() > 0) {
             if (action.execute()) {
-                this.fluid.setFluid(FluidStack.EMPTY);
+                this.hatch.clearFluidForGas();
                 this.onChanged.run();
             }
-            // 清掉之后这一份气体可以整份收下（容量是同一个罐的容量）。
-            // 注意：这里**继续往下走**，不提前返回——否则第一次灌气只会清流体、不回气体，
-            // 管道会以为一点都没进去而反复重试。
         }
         if (!sameType(stack)) {
             // 罐里是**别种气体**：不受理。回整份，表示一点都没进去。

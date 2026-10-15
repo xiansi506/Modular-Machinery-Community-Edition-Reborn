@@ -64,10 +64,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
                 };
             }
             case FLUID -> {
-                fluidStorage = new FluidTank(Math.max(1, this.tier.fluidCapacity())) {
-                    // The screen renders the fluid's own texture, so the client needs to know which fluid it is.
-                    @Override protected void onContentsChanged() { onStorageChanged(true); }
-                };
+                fluidStorage = new FluidTankWithGasPriority(Math.max(1, this.tier.fluidCapacity()));
             }
             case ENERGY -> {
                 int capacity = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, this.tier.energyCapacity()));
@@ -186,6 +183,101 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             case 5 -> gasMenuValue(false);
             default -> 0;
         };
+    }
+
+    /**
+     * 流体仓的罐：**一个仓里只能有一种东西**（波 5.3）。
+     *
+     * <p>旧版 {@code HybridGasTank extends HybridTank} 的语义是「{@code setFluid} 与 {@code setGas} 互相覆盖
+     * 同一个罐」，所以管道本来就**拿不到**一个「既有液体又有气体」的罐——它只有一个罐。
+     * 本版把气体那一半放在兼容层里，于是必须**显式**做到这件事，否则流体管道会往同一个罐里灌液体，
+     * 两者同时存在。
+     *
+     * <p>做法：罐里已经有气体时，流体那一侧**看起来是空的**——容量照报（管道据此知道这里能装流体），
+     * 但已有的流体读成 0、灌入一律收 0。等气体被抽空，流体那一半自动恢复可用。
+     * 挡住的只是**读与灌**，不是那道墙：没有任何状态被丢掉，也就没有「看不见的液体」。
+     */
+    private final class FluidTankWithGasPriority extends FluidTank {
+
+        FluidTankWithGasPriority(int capacity) {
+            super(capacity);
+        }
+
+        @Override protected void onContentsChanged() {
+            // The screen renders the fluid's own texture, so the client needs to know which fluid it is.
+            onStorageChanged(true);
+        }
+
+        @Override public net.minecraftforge.fluids.FluidStack getFluid() {
+            return gasBlocksFluid() ? net.minecraftforge.fluids.FluidStack.EMPTY : super.getFluid();
+        }
+
+        @Override public int getFluidAmount() {
+            return gasBlocksFluid() ? 0 : super.getFluidAmount();
+        }
+
+        @Override public int fill(net.minecraftforge.fluids.FluidStack resource,
+                                  net.minecraftforge.fluids.capability.IFluidHandler.FluidAction action) {
+            // 灌不进去：气体占着这个罐。收 0 是「一点都没收」，管道据此就知道这里装不下。
+            return gasBlocksFluid() ? 0 : super.fill(resource, action);
+        }
+
+        /**
+         * 这个罐里**真的**有没有流体，绕过上面那层挡住逻辑。
+         *
+         * <p>气体罐要问这个问题来决定「灌气体前要不要先清掉流体」——而被挡住时
+         * {@code getFluidAmount()} 恒答 0，从外面问不出来。
+         */
+        int realFluidAmount() {
+            return super.getFluidAmount();
+        }
+
+        /**
+         * **真的**把这个罐清空，绕过挡住逻辑。
+         *
+         * <p>为什么必须是真的清空而不是「读起来是空的」：后者会在气体被抽空之后把旧液体露出来，
+         * 而那正是「一个仓只能有一种东西」的反面。
+         */
+        void clearForGas() {
+            if (super.getFluidAmount() > 0) {
+                super.setFluid(net.minecraftforge.fluids.FluidStack.EMPTY);
+            }
+        }
+    }
+
+    /**
+     * 这个仓里现在是否有气体（于是流体那一侧要看起来是空的）。
+     *
+     * <p>走**通用入口** {@code ModCompat.namedValues}——本类不认识任何模块，也不该认识：
+     * 它每个世界都会被加载，包括没装那个模组的进程。没装 Mekanism 时这个 map 是空的，本方法恒为 false。
+     */
+    private boolean gasBlocksFluid() {
+        String amount = com.reborn.modularmachinery.compat.ModCompat.namedValues(this).get("gas.amount");
+        if (amount == null) {
+            return false;
+        }
+        try {
+            return Long.parseLong(amount) > 0L;
+        } catch (NumberFormatException notANumber) {
+            return false;
+        }
+    }
+
+    /**
+     * **真的**把这个仓的流体那一半清空（绕过「有气体时看起来是空的」那层挡住逻辑）。
+     *
+     * <p>给兼容层用：要往这个罐里灌气体，就得先把里面的流体清掉——「一个仓只能有一种东西」。
+     * 它必须是**真的**清空，而不是让它读起来是空的：后者会在气体被抽空之后把旧液体露出来。
+     */
+    public void clearFluidForGas() {
+        if (this.tank instanceof FluidTankWithGasPriority hybrid) {
+            hybrid.clearForGas();
+        }
+    }
+
+    /** 这个仓里**真的**有多少流体（绕过「有气体时看起来是空的」）。给兼容层判断要不要先清罐。 */
+    public int realFluidAmount() {
+        return this.tank instanceof FluidTankWithGasPriority hybrid ? hybrid.realFluidAmount() : 0;
     }
 
     /** 气体那一半的量或容量，交给兼容层回答；没有气体那一半时是 0。 */
