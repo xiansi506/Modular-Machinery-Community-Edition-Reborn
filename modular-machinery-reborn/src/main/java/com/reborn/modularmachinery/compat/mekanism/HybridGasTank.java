@@ -214,9 +214,9 @@ final class HybridGasTank implements IGasHandler {
         return stack.getTypeRegistryName() + " x" + stack.getAmount();
     }
 
-    /** 这个罐的当前内容，给 {@code /mm-diagnose} 用（一行，含容量）。 */
+    /** 这个罐的当前内容，给 {@code /mm-diagnose} 用（一行，含容量）。标签由调用方加，这里不重复写。 */
     String describeContents() {
-        return "气体 " + describeShort() + " / 容量 " + this.capacity + " mB";
+        return describeShort() + " / 容量 " + this.capacity + " mB";
     }
 
     /**
