@@ -106,14 +106,21 @@ final class MekanismAnchor {
         @Nullable
         public LazyOptional<?> map(Capability<?> capability, Object entity) {
             Capability<IGasHandler> chemical = MekanismCapabilities.gasHandler();
-            if (chemical == null || capability != chemical) {
+            if (chemical == null) {
+                MekanismProbe.map("no Mekanism capability object (Capabilities.GAS_HANDLER is null)", entity);
+                return null;
+            }
+            if (capability != chemical) {
+                MekanismProbe.map("not mine", entity);
                 return null;
             }
             HybridGasTank tank = tankOf(entity);
             if (tank == null) {
+                MekanismProbe.map("mine, but this entity has no gas side", entity);
                 // 「是我的能力，但这个实体没有」——与 Forge 的语义一致，也让后面的映射器不必再被问一遍。
                 return LazyOptional.empty();
             }
+            MekanismProbe.map("mine -> gas handler", entity);
             return LazyOptional.of(tank::handler);
         }
 
@@ -126,6 +133,7 @@ final class MekanismAnchor {
         @Override
         public java.util.List<?> handlers(Object entity) {
             HybridGasTank tank = tankOf(entity);
+            MekanismProbe.handlers(entity, tank == null ? 0 : 1);
             return tank == null ? java.util.List.of() : java.util.List.of(tank.handler());
         }
 
@@ -147,6 +155,27 @@ final class MekanismAnchor {
     /** 气体能力这一半是否可用（给诊断用）。 */
     static boolean gasHandlerAvailable() {
         return MekanismCapabilities.gasHandler() != null;
+    }
+
+    /**
+     * 一个仓**已经存在的**气体罐的内容描述；没有罐（或不是流体仓）时返回 {@code null}。
+     *
+     * <p>刻意**不新建**罐：诊断不该有副作用，而且「有没有罐」本身就是证据——
+     * 一个流体仓从来没有过气体罐，说明这条路上从来没被走到（管道没问、端口收集也没发生）。
+     */
+    @Nullable
+    static String describeExistingTank(Object entity) {
+        if (!(entity instanceof MachineHatchBlockEntity hatch)) {
+            return null;
+        }
+        HybridGasTank tank;
+        synchronized (TANKS) {
+            tank = TANKS.get(hatch);
+        }
+        if (tank == null) {
+            return null;
+        }
+        return tank.describeContents();
     }
 
     /**

@@ -102,6 +102,11 @@ public final class MekanismModule implements CompatModule {
         registry.port(MekanismAnchor.portMapper());
         ModularMachineryReborn.LOGGER.info("[{}] Mekanism gas ports attached to the fluid hatches.",
                 ModularMachineryReborn.MOD_ID);
+        // 探针：能力对象到底拿到没有。这是「管道问不到」这一类缺陷的第一个分岔点——
+        // 拿到 null 就说明 Mekanism 的能力还没注册（或者本模组比它先跑），后面什么都不必查了。
+        MekanismProbe.startup("ports(): gas capability available = " + MekanismAnchor.gasHandlerAvailable()
+                + ", probe enabled = " + MekanismProbe.enabled()
+                + " (turn on with -Dmodular_machinery_reborn.compat.debug=true)");
     }
 
     /**
@@ -124,6 +129,18 @@ public final class MekanismModule implements CompatModule {
     /** 气体端口那一半是否可用（给诊断用）。 */
     public static boolean gasPortReady() {
         return MekanismAnchor.gasHandlerAvailable();
+    }
+
+    /**
+     * 一个仓的气体内容，给 {@code /mm-diagnose} 用；不是流体仓、或还没被建过气体那一半时返回 {@code null}。
+     *
+     * <p>**不新建**气体罐：诊断一个仓不该改变它的状态（那会让「看一眼」产生副作用）。
+     * 只有已经因为管道询问或端口收集建过的罐才会被报出来——而那恰好就是
+     * 「这条路上到底有没有被走到」的证据，正是这个缺陷最需要的信息。
+     */
+    @javax.annotation.Nullable
+    public static String describeGasPort(Object entity) {
+        return MekanismAnchor.describeExistingTank(entity);
     }
 
     /** {@code gas} 与 {@code gas_pertick} 共用的一份读写器，只差 {@code perTick} 一位。 */

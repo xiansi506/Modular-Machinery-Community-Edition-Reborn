@@ -188,6 +188,61 @@ public final class DiagnoseCommand {
                     "  ⚠ 世界里有仓口但一个都没被收集——这是本模组的缺陷，请把上面几行发回来"), false);
         }
 
+        // ---- 兼容端口（波 5.3：Mekanism 的气体）-------------------------------------------------
+        // 为什么单列一节：气体端口是**看不见**的——流体仓的界面只画流体，所以「气体进没进去」
+        // 在游戏里没有任何显示。而这条路上有四个分岔（模块没注册 / 能力对象没拿到 / 管道没问 /
+        // 问了但被拒），它们在日志里长得一模一样。这一节把四个都变成可读的一行。
+        source.sendSuccess(() -> Component.literal("--- 兼容端口（气体）---"), false);
+        source.sendSuccess(() -> Component.literal("  已登记的端口映射器数量 = "
+                + com.reborn.modularmachinery.compat.ModCompat.portMapperCount()
+                + "（0 表示没有任何兼容模块挂上端口）"), false);
+        source.sendSuccess(() -> Component.literal("  气体能力可用 = "
+                + com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasPortReady()
+                + "（false 表示 Mekanism 不在场，或它的能力对象还没建立）"), false);
+        source.sendSuccess(() -> Component.literal("  这台机器收集到的气体端口: 输入 "
+                + hatches.gasInputs().size() + " 个 / 输出 " + hatches.gasOutputs().size() + " 个"), false);
+        source.sendSuccess(() -> Component.literal("  其它模组问过的能力（最多记 40 个）:"), false);
+        var queried = com.reborn.modularmachinery.compat.ModCompat.queriedCapabilities();
+        if (queried.isEmpty()) {
+            source.sendSuccess(() -> Component.literal(
+                    "    （还没有任何能力查询经过本模组的仓口——如果你的管道接在上面，这一条就是问题所在）"),
+                    false);
+        } else {
+            for (String capability : queried) {
+                source.sendSuccess(() -> Component.literal("    " + capability), false);
+            }
+        }
+        source.sendSuccess(() -> Component.literal(
+                "  附近流体仓的气体那一半（没有条目 = 从来没被管道或端口收集走到过）:"), false);
+        int gasTanks = 0;
+        for (int dx = -16; dx <= 16; dx++) {
+            for (int dy = -16; dy <= 16; dy++) {
+                for (int dz = -16; dz <= 16; dz++) {
+                    BlockPos at = pos.offset(dx, dy, dz);
+                    if (!(level.getBlockEntity(at)
+                            instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)) {
+                        continue;
+                    }
+                    String contents = com.reborn.modularmachinery.compat.mekanism.MekanismModule
+                            .describeGasPort(hatch);
+                    if (contents == null) {
+                        continue;
+                    }
+                    gasTanks++;
+                    final String line = "    " + at.toShortString() + " 种类=" + hatch.kind()
+                            + " 气体=" + contents;
+                    source.sendSuccess(() -> Component.literal(line), false);
+                }
+            }
+        }
+        final int gasTankTotal = gasTanks;
+        if (gasTanks == 0) {
+            source.sendSuccess(() -> Component.literal(
+                    "    一个都没有"), false);
+        } else {
+            source.sendSuccess(() -> Component.literal("    共 " + gasTankTotal + " 个"), false);
+        }
+
         // ---- 这台机器的配方，逐条说清能不能开工 ------------------------------------------------
         source.sendSuccess(() -> Component.literal("--- 这台机器的配方 ---"), false);
         int total = 0;

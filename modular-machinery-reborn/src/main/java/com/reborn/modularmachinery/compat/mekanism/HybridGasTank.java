@@ -97,6 +97,17 @@ final class HybridGasTank implements IGasHandler {
      */
     @Override
     public GasStack insertChemical(int tank, GasStack stack, Action action) {
+        GasStack result = insertChemicalInternal(tank, stack, action);
+        // 探针：只在打开调试开关时打印，而且**插入路径每次都打**（限次见 MekanismProbe）。
+        // 为什么必须打在「返回什么」上：`进不去` 有三个完全不同的原因——能力没被问到、
+        // 被 sameType 拒了、容量算成 0——它们在日志里都表现为「什么都没发生」。
+        MekanismProbe.insert("tank=" + tank + " stack=" + describe(stack) + " action=" + action
+                + " stored=" + describe(this.stored) + " amount=" + this.amount
+                + " capacity=" + getTankCapacity(0) + " -> " + describe(result));
+        return result;
+    }
+
+    private GasStack insertChemicalInternal(int tank, GasStack stack, Action action) {
         if (tank != 0 || stack == null || stack.isEmpty()) {
             return stack == null ? GasStack.EMPTY : stack;
         }
@@ -120,6 +131,22 @@ final class HybridGasTank implements IGasHandler {
         }
         long leftover = stack.getAmount() - accepted;
         return leftover <= 0L ? GasStack.EMPTY : new GasStack(stack, leftover);
+    }
+
+    /** 给探针用的一行描述；不碰注册表之外的东西。 */
+    private static String describe(@Nullable GasStack stack) {
+        if (stack == null) {
+            return "null";
+        }
+        if (stack.isEmpty()) {
+            return "EMPTY";
+        }
+        return stack.getTypeRegistryName() + " x" + stack.getAmount();
+    }
+
+    /** 这个罐的当前内容，给 {@code /mm-diagnose} 用。 */
+    String describeContents() {
+        return describe(current()) + " (容量 " + getTankCapacity(0) + " mB, 存 " + this.amount + " mB)";
     }
 
     @Override

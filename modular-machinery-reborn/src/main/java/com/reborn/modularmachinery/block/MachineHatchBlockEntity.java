@@ -223,6 +223,10 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
      */
     @Override
     public <T> LazyOptional<T> getCapability(Capability<T> capability, @Nullable Direction side) {
+        // 记下每一次查询的能力名：这是「管道到底问了没有、问的是不是那个能力」的唯一低成分证据。
+        // 记在静态集合里而不打印，因为这条路径每 tick 每个方块都会走，打印会把日志淹掉；
+        // 要看的时候用 /mm-diagnose。
+        com.reborn.modularmachinery.compat.ModCompat.recordCapability(capability);
         if (capability == ForgeCapabilities.ITEM_HANDLER) {
             return this.itemCapability.cast();
         }

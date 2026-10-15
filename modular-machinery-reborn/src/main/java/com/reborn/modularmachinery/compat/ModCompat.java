@@ -195,9 +195,44 @@ public final class ModCompat {
         return handlers;
     }
 
+    /**
+     * 能力查询这条路上**被问到过哪些能力**，按首次出现顺序，最多记 40 个。
+     *
+     * <p>为什么需要它：这正是「化学品进不去」那类缺陷唯一低成本的分岔点。管道如果**根本没问到**
+     * 本模组的方块实体，或者问的是**另一个能力对象**，那么从需求那一侧看都只是「端口是空的」，
+     * 而日志里**一个字都不会有**——本项目规矩 5 说的就是这一类。
+     *
+     * <p>只记前 40 个：能力查询是每方块每次管道询问都会走的路，全记会把日志淹掉。
+     * 记的是能力的字符串形式（Forge 的 {@code Capability#toString} 会给出它的名字），
+     * 于是「管道问的到底是不是 Mekanism 的气体能力」一眼可判。
+     */
+    private static final java.util.Set<String> QUERIED_CAPABILITIES =
+            java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<>());
+
+    private static final int CAPABILITY_LOG_LIMIT = 40;
+
+    /** 让 {@code MachineHatchBlockEntity#getCapability} 把每一次查询记下来，供 {@code /mm-diagnose} 读。 */
+    public static void recordCapability(Capability<?> capability) {
+        if (QUERIED_CAPABILITIES.size() >= CAPABILITY_LOG_LIMIT) {
+            return;
+        }
+        QUERIED_CAPABILITIES.add(String.valueOf(capability));
+    }
+
+    /** 到此刻为止被问到过的能力，按首次出现顺序。 */
+    public static List<String> queriedCapabilities() {
+        synchronized (QUERIED_CAPABILITIES) {
+            return List.copyOf(QUERIED_CAPABILITIES);
+        }
+    }
+
+    /** 已登记的端口映射器数量——**0 表示没有任何兼容模块挂上端口**。 */
+    public static int portMapperCount() {
+        return PORT_MAPPERS.size();
+    }
+
     /** 存档写：把每个模块的内容交给它自己序列化。由 {@code MachineHatchBlockEntity#saveAdditional} 调用。 */
-    public static void savePorts(net.minecraft.nbt.CompoundTag tag, Object entity) {
-        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
+    public static void savePorts(net.minecraft.nbt.CompoundTag tag, Object entity) {        for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
             mapper.save(tag, entity);
         }
     }
