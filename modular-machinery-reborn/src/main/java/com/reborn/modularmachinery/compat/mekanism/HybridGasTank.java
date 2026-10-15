@@ -98,9 +98,9 @@ final class HybridGasTank implements IGasHandler {
     @Override
     public GasStack insertChemical(int tank, GasStack stack, Action action) {
         GasStack result = insertChemicalInternal(tank, stack, action);
-        // 探针：只在打开调试开关时打印，而且**插入路径每次都打**（限次见 MekanismProbe）。
-        // 为什么必须打在「返回什么」上：`进不去` 有三个完全不同的原因——能力没被问到、
-        // 被 sameType 拒了、容量算成 0——它们在日志里都表现为「什么都没发生」。
+        // 每次插入尝试都记进本罐的计数器（**与日志开关无关**，见 InsertTally），
+        // 并在打开调试开关时同时打印一行。两者都要：计数器是 /mm-diagnose 读的持久事实，
+        // 而日志能给出顺序与上下文。
         MekanismProbe.insert("tank=" + tank + " stack=" + describe(stack) + " action=" + action
                 + " stored=" + describe(this.stored) + " amount=" + this.amount
                 + " capacity=" + getTankCapacity(0) + " -> " + describe(result));
@@ -109,28 +109,72 @@ final class HybridGasTank implements IGasHandler {
 
     private GasStack insertChemicalInternal(int tank, GasStack stack, Action action) {
         if (tank != 0 || stack == null || stack.isEmpty()) {
+            MEKANISM_PROBE.note("参数不对（tank=" + tank + " 或空栈）");
             return stack == null ? GasStack.EMPTY : stack;
         }
         if (!sameType(stack)) {
             // 罐里是流体（或有别种气体）：不受理。回整份，表示一点都没进去。
+            MEKANISM_PROBE.note("被拒：罐里装着别的东西（present=" + describe(this.stored) + "）");
             return stack;
         }
         long free = getTankCapacity(0) - this.amount;
         if (free <= 0L) {
+            MEKANISM_PROBE.note("被拒：容量已满（free=" + free + "）");
             return stack;
         }
         long accepted = Math.min(free, stack.getAmount());
         if (accepted <= 0L) {
+            MEKANISM_PROBE.note("被拒：可接受量为 0");
             return stack;
         }
         if (action.execute()) {
+            MEKANISM_PROBE.noteExecute();
             this.amount += accepted;
             // 装了气体就把流体清掉：一个罐只装一样（旧版 setFluid/setGas 互相覆盖）。
             this.fluid.setFluid(FluidStack.EMPTY);
             changed();
         }
+        MEKANISM_PROBE.note("受理 " + describe(stack) + " 的 " + accepted + " mB（" + action + "）");
         long leftover = stack.getAmount() - accepted;
         return leftover <= 0L ? GasStack.EMPTY : new GasStack(stack, leftover);
+    }
+
+    /**
+     * 插入尝试的计数器，挂在每个罐上（不是全局）。
+     *
+     * <p>为什么不放进 {@link MekanismProbe} 的全局计数：诊断要回答的是「**这个**仓被灌过没有」，
+     * 而全局计数会被别的仓、别的维度的流量污染。
+     */
+    private final InsertTally MEKANISM_PROBE = new InsertTally();
+
+    /** 一个罐上的插入尝试统计；给 {@code /mm-diagnose} 读，**不依赖日志开关**。 */
+    static final class InsertTally {
+        private int calls;
+        private int successful;
+        private int withExecute;
+        private final java.util.Map<String, Integer> rejections = new java.util.LinkedHashMap<>();
+
+        synchronized void note(String note) {
+            this.calls++;
+            if (note.startsWith("受理")) {
+                this.successful++;
+            } else {
+                this.rejections.merge(note, 1, Integer::sum);
+            }
+        }
+
+        synchronized void noteExecute() {
+            this.withExecute++;
+        }
+
+        synchronized String describe() {
+            if (this.calls == 0) {
+                return "从未被调用（管道没有往里灌过）";
+            }
+            return "调用 " + this.calls + " 次，受理 " + this.successful + " 次"
+                    + (this.withExecute > 0 ? "（其中 EXECUTE " + this.withExecute + " 次）" : "")
+                    + (this.rejections.isEmpty() ? "" : "，拒绝明细 " + this.rejections);
+        }
     }
 
     /** 给探针用的一行描述；不碰注册表之外的东西。 */
@@ -149,7 +193,7 @@ final class HybridGasTank implements IGasHandler {
         String content = this.amount <= 0L || this.stored.isEmpty()
                 ? "空"
                 : describe(this.stored) + " x" + this.amount + " mB";
-        return content + " / 容量 " + getTankCapacity(0) + " mB";
+        return content + " / 容量 " + getTankCapacity(0) + " mB；插入尝试：" + MEKANISM_PROBE.describe();
     }
 
     @Override
