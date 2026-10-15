@@ -150,6 +150,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** Registry name of the machine currently formed here, or {@code null} when nothing matches. */
     @Nullable
     private ResourceLocation machineId;
+    /**
+     * 这台机器外衣的染色；{@code null} = 没设过（不染色）。来源是定义的 {@code color}。
+     *
+     * <p>与部件一样存进存档并随方块实体同步到客户端——渲染时的 tint 由
+     * {@code client.MachinePartColors} 读它。
+     */
+    @javax.annotation.Nullable private Integer machineColor;
 
     /** The machine this controller is tied to, or {@code null} for the generic controller. */
     @Nullable
@@ -398,6 +405,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.busModifiers = collectBusModifiers(be.upgradeBuses, be.machineId);
             be.modifiers = structural.andThen(be.busModifiers);
             be.updateFactoryMode(match == null ? null : match.machine());
+            // 波 6：把定义的 `color` 推给这台机器的所有部件（旧版 distributeCasingColor 的对应物）。
+            // 放在这里是因为它是「刚算完 match」之后、且与 `updateFactoryMode` 同一批的一次性状态更新。
+            be.distributeMachineColor(match == null ? null : machineColorOf(match.machine()),
+                    match == null ? null : effectivePattern);
             // M6d-b: reconcile the smart-interface values with the machine that just formed. Idempotent, so it
             // runs on every successful check exactly as the original's checkAndAddSmartInterface did.
             if (match != null) {
@@ -1485,6 +1496,50 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     public void setClientProgress(int value) { progress = value; }
     public void setClientMaxProgress(int value) { maxProgress = Math.max(1, value); }
     public void setClientFormed(boolean value) { formed = value; }
+    /** 这台机器的染色，或 {@code null} 表示没设过。 */
+    @javax.annotation.Nullable
+    public Integer machineColor() {
+        return this.machineColor;
+    }
+
+    /**
+     * 把颜色推给这台机器**所有部件**（旧版 {@code TileMultiblockMachineController#distributeCasingColor}）。
+     *
+     * <p>为什么由控制器做这件事：部件本身**不知道自己属于哪台机器**（本版如此，旧版也如此——
+     * 旧版是靠控制器遍历 pattern 里的方块位置去 `tryColorize` 的）。所以「哪个部件属于哪台机器」
+     * 只有控制器知道，下发也就只能是它的活。
+     *
+     * <p>只推给**有方块实体**的位置：纯装饰外壳（{@code BlockCasing}）没有方块实体，收不了颜色——
+     * 这一点与旧版一致（旧版的 `tryColorize` 只对 `ColorableMachineTile` 生效，
+     * 而外壳的模型也没有 tint 层，所以它本来就不参与染色）。
+     */
+    /** 定义的染色值；没有定义时 {@code null}（= 不染色）。 */
+    @javax.annotation.Nullable
+    private static Integer machineColorOf(@javax.annotation.Nullable MachineDefinition machine) {
+        return machine == null ? null : machine.color();
+    }
+    private void distributeMachineColor(@javax.annotation.Nullable Integer color,
+                                        @javax.annotation.Nullable MachinePattern pattern) {
+        this.machineColor = color;
+        setChanged();
+        if (this.level != null && !this.level.isClientSide) {
+            this.level.sendBlockUpdated(this.worldPosition, getBlockState(), getBlockState(),
+                    net.minecraft.world.level.block.Block.UPDATE_ALL);
+        }
+        if (this.level == null || pattern == null) {
+            return;
+        }
+        // 位置来源是**结构的 pattern**，与 collectHatches 走同一份位置集。
+        // 不发明「搜索半径」：那会把相邻的、属于别的机器的部件也算进来（本项目对「看起来合理」的容忍度很低），
+        // 而 pattern 恰好就是「这台机器占哪些格子」的权威答案。
+        for (BlockPos relative : pattern.positions().keySet()) {
+            if (this.level.getBlockEntity(this.worldPosition.offset(relative))
+                    instanceof MachineHatchBlockEntity hatch) {
+                hatch.setMachineColor(color);
+            }
+        }
+    }
+
     public void setClientStatus(int ordinal) { status = ControllerStatus.byOrdinal(ordinal); }
     public void setClientRedstoneStopped(boolean value) { redstoneStopped = value; }
     public void setClientParallelism(int current, int ceiling) {
@@ -1545,6 +1600,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (machineId != null) {
             tag.putString("machine", machineId.toString());
         }
+        // 波 6：染色。与 machineId 同路同步到客户端——渲染时的 tint 读的就是它。
+        if (machineColor != null) {
+            tag.putInt("machineColor", machineColor);
+        }
         if (activeRecipeId != null) {
             tag.putString("activeRecipe", activeRecipeId.toString());
         }
@@ -1577,6 +1636,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         activeParallelism = Math.max(1, tag.getInt("activeParallelism"));
         activeDuration = Math.max(1, tag.getInt("activeDuration"));
         machineId = tag.contains("machine") ? ResourceLocation.tryParse(tag.getString("machine")) : null;
+        machineColor = tag.contains("machineColor") ? tag.getInt("machineColor") : null;
         activeRecipeId = tag.contains("activeRecipe") ? ResourceLocation.tryParse(tag.getString("activeRecipe")) : null;
         // M6e. A factory controller is a factory by virtue of its block plus the formed machine, and the
         // definition is available here, so the mode can be restored before the first tick. That matters: the

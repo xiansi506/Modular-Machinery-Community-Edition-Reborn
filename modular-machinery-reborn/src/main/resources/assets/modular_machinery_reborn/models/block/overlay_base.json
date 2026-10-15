@@ -1,7 +1,31 @@
 {
+  "__comment": [
+    "The two-layer machine-part model: a casing background (#bg_*) and the machine's own overlay (#ov_*).",
+    "",
+    "Only the BACKGROUND carries tintindex 1 — that is what lets a machine definition's `color` tint the",
+    "casing while the overlay (the machine's face art) keeps its own colours. This mirrors the original's",
+    "`blockmodel_overlay.json`, whose bg_* faces carried `\"tintindex\": 1` and whose ov_* faces did not",
+    "(see _mmce-src's assets/modularmachinery/models/block/blockmodel_overlay.json:8-13).",
+    "",
+    "The colour itself comes from the block colour handler, which reads the machine colour off the block",
+    "entity — the original pushed that value onto every colour-able part when the structure formed",
+    "(`TileMultiblockMachineController#distributeCasingColor`)."
+  ],
   "parent":"block/block",
   "elements":[
-    {"from":[0,0,0],"to":[16,16,16],"faces":{"down":{"texture":"#bg_down","cullface":"down"},"up":{"texture":"#bg_up","cullface":"up"},"north":{"texture":"#bg_north","cullface":"north"},"south":{"texture":"#bg_south","cullface":"south"},"west":{"texture":"#bg_west","cullface":"west"},"east":{"texture":"#bg_east","cullface":"east"}}},
-    {"from":[0,0,0],"to":[16,16,16],"faces":{"down":{"texture":"#ov_down"},"up":{"texture":"#ov_up"},"north":{"texture":"#ov_north"},"south":{"texture":"#ov_south"},"west":{"texture":"#ov_west"},"east":{"texture":"#ov_east"}}}
+    {"from":[0,0,0],"to":[16,16,16],"faces":{
+      "down":{"texture":"#bg_down","cullface":"down","tintindex":1},
+      "up":{"texture":"#bg_up","cullface":"up","tintindex":1},
+      "north":{"texture":"#bg_north","cullface":"north","tintindex":1},
+      "south":{"texture":"#bg_south","cullface":"south","tintindex":1},
+      "west":{"texture":"#bg_west","cullface":"west","tintindex":1},
+      "east":{"texture":"#bg_east","cullface":"east","tintindex":1}}},
+    {"from":[0,0,0],"to":[16,16,16],"faces":{
+      "down":{"texture":"#ov_down"},
+      "up":{"texture":"#ov_up"},
+      "north":{"texture":"#ov_north"},
+      "south":{"texture":"#ov_south"},
+      "west":{"texture":"#ov_west"},
+      "east":{"texture":"#ov_east"}}}
   ]
 }

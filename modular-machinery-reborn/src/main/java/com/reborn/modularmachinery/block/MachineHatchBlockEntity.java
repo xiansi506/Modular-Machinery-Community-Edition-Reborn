@@ -33,9 +33,26 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     private static final String TAG_ITEMS = "items";
     private static final String TAG_TANK = "tank";
     private static final String TAG_ENERGY = "energy";
+    /**
+     * 机器外衣的染色（波 6 · {@code color}）。
+     *
+     * <p>语义照旧版：{@code TileColorableMachineComponent} 把颜色存在自己的状态里，
+     * 由控制器在成型时推下来（{@code TileMultiblockMachineController#distributeCasingColor}）。
+     * 本版把它放进方块实体的存档、**随既有的方块实体同步走到客户端**——因为客户端要靠它决定渲染时的
+     * tint 颜色，而颜色是「这台机器实例的状态」，不是每 tick 变化的量（所以不走菜单数据槽）。
+     */
+    private static final String TAG_COLOR = "machineColor";
 
     private final HatchKind kind;
     private final HatchTier tier;
+
+    /**
+     * 机器外衣的染色；{@code null} 表示**从来没被设过**（= 不染色）。
+     *
+     * <p>为什么不直接用「白色 = 不染色」：白（{@code FFFFFF}）是一个**合法**的颜色值，
+     * 包作者可能就想要白色。用 null 区分「没设过」与「设成了白」，才不会有歧义。
+     */
+    @Nullable private Integer machineColor;
 
     @Nullable private final ItemStackHandler items;
     @Nullable private final FluidTank tank;
@@ -425,6 +442,32 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
      * <p>{@code public} 而不是包内可见：它由 {@code compat} 包里的气体罐作为回调调用，
      * 而那个包不是本包。
      */
+    /**
+     * 这台机器部件的染色，或 {@code null} 表示没被设过。颜色处理器在客户端读它。
+     */
+    @Nullable
+    public Integer machineColor() {
+        return this.machineColor;
+    }
+
+    /**
+     * 由控制器在成型/换机时推下来（旧版 {@code tryColorize} 的对应物）。
+     *
+     * <p>变了才写、才同步：这个值在一次成型里可能被推给几十个部件，而 {@code sendBlockUpdated}
+     * 会把方块实体重新发给所有能看到它的客户端——无条件发就是在成型那一瞬间制造一阵无谓的流量。
+     */
+    public void setMachineColor(@Nullable Integer color) {
+        if (java.util.Objects.equals(this.machineColor, color)) {
+            return;
+        }
+        this.machineColor = color;
+        setChanged();
+        if (this.level != null && !this.level.isClientSide) {
+            this.level.sendBlockUpdated(this.worldPosition, getBlockState(), getBlockState(),
+                    net.minecraft.world.level.block.Block.UPDATE_ALL);
+        }
+    }
+
     public void markStorageChanged() {
         // 气体让客户端的方块实体数据过期（与流体同一条理由：界面要画出装的是什么），所以 syncToClient = true。
         onStorageChanged(true);
@@ -450,6 +493,9 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         if (this.energy != null) {
             tag.putInt(TAG_ENERGY, this.energy.getEnergyStored());
         }
+        if (this.machineColor != null) {
+            tag.putInt(TAG_COLOR, this.machineColor);
+        }
         // 兼容层的内容（例如流体仓上的气体）由各模块自己序列化，本类不知道里面是什么。
         com.reborn.modularmachinery.compat.ModCompat.savePorts(tag, this);
     }
@@ -467,6 +513,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             // EnergyStorage has no direct setter; fill it back up to the stored amount.
             this.energy.receiveEnergy(tag.getInt(TAG_ENERGY), false);
         }
+        this.machineColor = tag.contains(TAG_COLOR) ? tag.getInt(TAG_COLOR) : null;
         com.reborn.modularmachinery.compat.ModCompat.loadPorts(tag, this);
     }
 }

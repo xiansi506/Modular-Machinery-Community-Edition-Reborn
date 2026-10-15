@@ -103,6 +103,68 @@ final class ColorCheck {
 
         // ---- 染色资产：外壳模型的 tint 层 ------------------------------------------------------------
         checkTintAssets();
+
+        // ---- 染色链路（0.62.0）-----------------------------------------------------------------------
+        checkColorChain();
+    }
+
+    /**
+     * 染色链路的**接线**：模型有 tint 层、处理器存在并注册给本模组的方块、颜色存在方块实体上并随存档同步、
+     * 控制器在成型时按 pattern 下发。
+     *
+     * <p>这些断言只能证明**接线**，证明不了「看起来是什么颜色」——外观必须用眼睛看，这一步的说明里写明了。
+     * 之所以仍然值得钉：接线错掉时游戏里的表现是「什么都不发生」，与「颜色配得不好」几乎无法区分。
+     */
+    private static void checkColorChain() {
+        try {
+            // 1) 模型：只有背景层参与染色。
+            Path overlay = MODELS.resolve("overlay_base.json");
+            String overlayText = Files.readString(overlay);
+            int bgTinted = countOf(overlayText, "\"texture\":\"#bg_");
+            int tintedFaces = countOf(overlayText, "\"tintindex\":1");
+            ParallelCraftCheck.report("overlay_base 的背景层六面都带 tint（实际 " + tintedFaces
+                            + " 面 / bg_* 引用 " + bgTinted + " 个）——与旧版 blockmodel_overlay 一致",
+                    tintedFaces == 6 && bgTinted == 6);
+            ParallelCraftCheck.report("...而覆盖层（ov_*）**不**带 tint，机器自己的图案保持原色",
+                    countOf(overlayText, "\"texture\":\"#ov_") == 6
+                            && !overlayText.contains("\"texture\":\"#ov_down\",\"tintindex\""));
+
+            // 2/3/4) 源码接线。用 methodBody/contains 检查，因为它们跨文件。
+            Path colors = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                    + "modularmachinery/client/MachinePartColors.java");
+            String colorsText = Files.readString(colors).replace(" ", "");
+            ParallelCraftCheck.report("客户端注册了方块颜色处理器（RegisterColorHandlersEvent.Block）",
+                    colorsText.contains("RegisterColorHandlersEvent.Block")
+                            && colorsText.contains("event.register("));
+            ParallelCraftCheck.report("...并且注册给本模组的控制器与全部仓族（不是 Block.class："
+                            + "全量注册会把别的模组方块卷进来，Jade 那次已经吃过一回）",
+                    colorsText.contains("MACHINE_CONTROLLER.get()")
+                            && colorsText.contains("ModBlocks.hatchBlock(kind).get()")
+                            // 判据是「注册**参数**里没有 Block.class」，不是「文件里没出现这几个字」——
+                            // 类注释里正好在解释「为什么不用 Block.class」，按字面判会误伤注释。
+                            // （与那两次「断言太宽/太窄」是同一类问题：判据要对着**行为**写。）
+                            && !colorsText.contains(",Block.class)"));
+
+            Path hatch = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                    + "modularmachinery/block/MachineHatchBlockEntity.java");
+            String hatchText = Files.readString(hatch);
+            ParallelCraftCheck.report("部件把颜色存进存档（随既有的方块实体同步到客户端）",
+                    hatchText.contains("TAG_COLOR = \"machineColor\"")
+                            && hatchText.contains("tag.putInt(TAG_COLOR, this.machineColor)")
+                            && hatchText.contains("tag.contains(TAG_COLOR)"));
+
+            Path controller = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                    + "modularmachinery/block/MachineControllerBlockEntity.java");
+            String controllerText = Files.readString(controller);
+            ParallelCraftCheck.report("控制器在成型时按**结构的 pattern**把颜色推给部件（不发明搜索半径）",
+                    controllerText.contains("be.distributeMachineColor(")
+                            && controllerText.contains("pattern.positions().keySet()")
+                            && controllerText.contains("hatch.setMachineColor(color)"));
+            ParallelCraftCheck.report("...而且控制器自己的颜色也进存档（否则它自己不会被染色）",
+                    controllerText.contains("tag.putInt(\"machineColor\", machineColor)"));
+        } catch (IOException unreadable) {
+            ParallelCraftCheck.report("读取染色链路的源码失败: " + unreadable, false);
+        }
     }
 
     /**
