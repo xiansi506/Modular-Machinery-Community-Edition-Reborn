@@ -196,27 +196,33 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
                             display.display(menu.energyCapacity())),
                     display.labelComponent()));
         }
-        FluidStack fluid = menu.hatch().fluidTank().getFluid();
-        List<Component> lines = new java.util.ArrayList<>(3);
-        if (fluid.isEmpty() || menu.fluidAmount() <= 0) {
-            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"));
-            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank", 0,
-                    menu.fluidCapacity()));
-        } else {
-            lines.add(fluid.getDisplayName());
-            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank",
-                    menu.fluidAmount(), menu.fluidCapacity()));
-        }
-        // 波 5.3：**气体那一行**。流体仓的界面只画流体，所以气体进了仓在游戏里除了 Jade 没有显示——
-        // 所有者实测反馈正是「玉模组显示、游戏内界面不显示」（规矩 6：看不见的状态必须能被看见或问出来）。
+        // 气体那一行先算，因为它的有无会决定要不要显示流体那两行（见下）。
         //
-        // 取值走 MekanismModule.gasTooltip：它读的是**方块实体里同步过来的存档 NBT**（`gas` 标签），
+        // 波 5.3：流体仓的界面只画流体，所以气体进了仓在游戏里除了 Jade 没有显示——
+        // 所有者实测反馈正是「玉模组显示、游戏内界面不显示」（规矩 6：看不见的状态必须能被看见或问出来）。
+        // 取值走 MekanismModule.gasTooltip：读的是**方块实体里同步过来的存档 NBT**（gas 标签），
         // 不是内存里的气体罐——后者只在「这条路上被走到过」时才存在，而客户端可能从没发生过能力查询
-        // （查询来自管道与机器，在服务端）。没装 Mekanism 时它返回 null，这一行就不出现，
-        // 于是没装 Mekanism 的实例与从前完全一样。
+        // （查询来自管道与机器，在服务端）。没装 Mekanism 时它返回 null，这一行不出现。
         String[] gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule
                 .gasTooltip(menu.hatch());
-        if (gas != null) {
+
+        FluidStack fluid = menu.hatch().fluidTank().getFluid();
+        List<Component> lines = new java.util.ArrayList<>(3);
+        // **一个仓里只能有一种东西**（互斥，见 MachineHatchBlockEntity#FluidTankWithGasPriority）。
+        // 所以有气体时就不报「液体：空 / 0 mB」——那两行虽然是真的，却只是噪音，
+        // 而且与旧版不一致：旧版一个罐只显示它装的那样东西。
+        // 反过来，以后若加上「液体挡住气体」，这里同样只会显示液体那两行（那时 gas 是 null）。
+        if (gas == null) {
+            if (fluid.isEmpty() || menu.fluidAmount() <= 0) {
+                lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"));
+                lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank", 0,
+                        menu.fluidCapacity()));
+            } else {
+                lines.add(fluid.getDisplayName());
+                lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank",
+                        menu.fluidAmount(), menu.fluidCapacity()));
+            }
+        } else {
             lines.add(Component.translatable("tooltip.modular_machinery_reborn.gashatch.tank",
                     gas[0], gas[1]));
         }
