@@ -695,6 +695,46 @@ final class MekanismCompatCheck {
         ParallelCraftCheck.check(what, expected, actual);
     }
 
+    /**
+     * 本模组自己的 Jade 插件（0.50.0）。
+     *
+     * <p>为什么必须钉住结构而不是只钉住「有没有」：Jade 用 `@WailaPlugin` 扫描**并在两侧都加载插件类**
+     * （Mekanism 的 MekanismJadePlugin 就是那样，而它的 register 只引用服务端类）。如果插件类直接
+     * import 客户端专属类型，专用服务端就会缺类。所有者实例上那四家 AE/机械动力系的插件全都是
+     * 「类不 import 客户端、客户端那一段放在 registerClient 里被引用」，本模组照抄这条结构。
+     */
+    static void jadePlugin() {
+        section("Jade 插件（0.50.0）");
+        Path plugin = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "integration/jade/ModularMachineryJadePlugin.java");
+        Path component = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                + "integration/jade/HatchFluidComponent.java");
+        try {
+            String pluginText = withoutComments(Files.readString(plugin));
+            String componentText = withoutComments(Files.readString(component));
+            report("the plugin is annotated @WailaPlugin and implements IWailaPlugin (that annotation is"
+                    + " RUNTIME/TYPE retained, which is how Jade finds it)",
+                    pluginText.contains("@WailaPlugin")
+                            && pluginText.contains("implements IWailaPlugin"));
+            report("...and the plugin class itself carries NO client-only import, so a dedicated server can"
+                    + " load it (the client half is referenced only from registerClient)",
+                    !pluginText.contains("net.minecraft.client")
+                            && !pluginText.contains("com.mojang.blaze3d"));
+            report("...and it registers the component for this mod's hatch block class only "
+                    + "(not Block.class: precise registration avoids fighting other mods' global providers)",
+                    pluginText.contains("registerBlockComponent(HatchFluidComponent.INSTANCE")
+                            && pluginText.contains("MachineHatchBlock.class"));
+            report("the component reads the fluid from the synced save NBT (tank/Fluid/Amount) rather than"
+                    + " depending on Jade's universal fluid provider",
+                    componentText.contains("\"tank\"")
+                            && componentText.contains("\"Fluid\"")
+                            && componentText.contains("\"Amount\"")
+                            && componentText.contains("saveWithoutMetadata()"));
+        } catch (Exception exception) {
+            report("reading the Jade plugin sources failed: " + exception, false);
+        }
+    }
+
     private static void check(String what, String expected, String actual) {
         ParallelCraftCheck.check(what, expected, actual);
     }

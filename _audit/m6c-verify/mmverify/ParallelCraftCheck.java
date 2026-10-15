@@ -298,6 +298,9 @@ public final class ParallelCraftCheck {
         // cannot prove about a Mekanism API) was measured with a throwaway probe before this section was
         // written, and the section pins that boundary with an assertion so the next person need not re-measure it.
         MekanismCompatCheck.mekanismChemical();
+        // 0.50.0: 本模组自己的 Jade 插件。钉的是**结构**（插件类不 import 客户端类型、客户端那一段
+        // 只在 registerClient 里被引用），因为 Jade 会在两侧都加载插件类，而这条约束离线可证。
+        MekanismCompatCheck.jadePlugin();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");

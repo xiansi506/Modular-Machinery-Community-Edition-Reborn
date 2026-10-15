@@ -49,6 +49,19 @@ description='''A Forge 1.20.1 reimplementation foundation for Modular Machinery:
     versionRange="[1,)"
     ordering="NONE"
     side="BOTH"
+# 0.50.0：Jade。本模组现在自带一个 Jade 插件（`integration/jade`），把流体仓的内容直接交给 Jade 显示。
+#
+# 为什么从「不声明」变成「声明」：那个插件要 `@WailaPlugin` 被 Jade 扫描到才生效，而扫描是 Jade 做的
+# ——声明它只是让「有这个可选集成」这件事在元数据里可见，`mandatory=false` 表示没装 Jade 的实例
+# 照常启动（那时插件类不会被任何人引用，也就不会被加载）。
+#
+# `ordering="AFTER"`：插件要引用 Jade 的 API 类型，让 FML 保证 Jade 先构造。
+[[dependencies.${mod_id}]]
+    modId="jade"
+    mandatory=false
+    versionRange="[1,)"
+    ordering="AFTER"
+    side="BOTH"
 # 波 5.3：Mekanism 的化学（旧版的「气体」）是本模组第一个真兼容模块。
 #
 # 这条声明**是有实质作用的，不是登记**，与上面两条不同：气体端口要把本模组的流体仓暴露成 Mekanism 的

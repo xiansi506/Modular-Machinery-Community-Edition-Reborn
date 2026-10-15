@@ -35,6 +35,10 @@ dependencies {
         // the maven path below gets Rhino transitively and this one did not.
         compileOnly fg.deobf('libs:rhino:1.20.1')
         compileOnly fg.deobf('libs:jei:15.49')
+        // 0.50.0: Jade. It was NOT a build dependency before — the mod only inferred Jade's behaviour by
+        // decompiling its bytecode. It becomes one because the mod now ships its own Jade plugin
+        // (integration/jade), and that plugin has to be compiled against the real API.
+        compileOnly fg.deobf('libs:jade:11.13.3')
         // 波 5.3: the compat layer's first real module. Declared against the jars this machine actually runs:
         //   libs/mekanism-1.20.1-10.4.16.80.jar   the chemical API we compile against
         //   libs/appliedenergistics2-forge-15.4.10.jar / libs/guideme-20.1.15.jar   the later AE2 module
