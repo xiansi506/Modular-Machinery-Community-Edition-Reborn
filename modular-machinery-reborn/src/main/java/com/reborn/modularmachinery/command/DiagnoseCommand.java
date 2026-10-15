@@ -199,6 +199,38 @@ public final class DiagnoseCommand {
         source.sendSuccess(() -> Component.literal("  气体能力可用 = "
                 + com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasPortReady()
                 + "（false 表示 Mekanism 不在场，或它的能力对象还没建立）"), false);
+
+        // ---- 流体能力与 Jade ---------------------------------------------------------------
+        // Jade 显示流体走的是「向方块实体要 ForgeCapabilities.FLUID_HANDLER，然后逐罐读
+        // getTankCapacity/getFluidInTank」这一条**标准**路（由 Jade 的 CommonProxy#wrapFluidStorage →
+        // JadeForgeUtils#fromFluidHandler 实现，本模组不参与）。所以「Jade 不显示液体」只有两种可能：
+        // 方块实体没交出那个能力，或者交出来了但罐是空的。这一节把两者分开。
+        source.sendSuccess(() -> Component.literal("--- 流体能力（Jade 读的就是这里）---"), false);
+        for (int dx = -16; dx <= 16; dx++) {
+            for (int dy = -16; dy <= 16; dy++) {
+                for (int dz = -16; dz <= 16; dz++) {
+                    BlockPos at = pos.offset(dx, dy, dz);
+                    if (!(level.getBlockEntity(at)
+                            instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity hatch)) {
+                        continue;
+                    }
+                    if (hatch.kind().family() != com.reborn.modularmachinery.block.HatchKind.Family.FLUID) {
+                        continue;
+                    }
+                    // 用**空方向**查询，与 Jade 的做法一致（JadeForgeUtils 走 CapabilityProvider 的无方向查询）。
+                    var handler = hatch.getCapability(
+                            net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER, null);
+                    final String line = "    " + at.toShortString() + " 种类=" + hatch.kind()
+                            + " 交出 FLUID_HANDLER=" + handler.isPresent()
+                            + " 罐数=" + (handler.isPresent() ? handler.orElse(null).getTanks() : -1)
+                            + (handler.isPresent()
+                                    ? " 容量=" + handler.orElse(null).getTankCapacity(0)
+                                            + " 内容=" + handler.orElse(null).getFluidInTank(0)
+                                    : "");
+                    source.sendSuccess(() -> Component.literal(line), false);
+                }
+            }
+        }
         source.sendSuccess(() -> Component.literal("  这台机器收集到的气体端口: 输入 "
                 + hatches.gasInputs().size() + " 个 / 输出 " + hatches.gasOutputs().size() + " 个"), false);
         source.sendSuccess(() -> Component.literal("  其它模组问过的能力（最多记 40 个）:"), false);
