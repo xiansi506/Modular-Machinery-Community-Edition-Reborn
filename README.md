@@ -22,7 +22,7 @@
 | **想知道移植了什么** | [docs/简介.md](modular-machinery-reborn/docs/简介.md)（中文）/ [docs/Introduction.md](modular-machinery-reborn/docs/Introduction.md)（English） |
 | **要写 KubeJS 配方** | [docs/KJS-配方指南.md](modular-machinery-reborn/docs/KJS-配方指南.md) |
 | **遇到问题 / 想知道刻意不做什么** | [docs/已知限制.md](modular-machinery-reborn/docs/已知限制.md) |
-| **想改代码** | [modular-machinery-reborn/交接文档.md](modular-machinery-reborn/交接文档.md)（架构与发布必查项） |
+| **想改代码** | [modular-machinery-reborn/docs/历史/交接文档.md](modular-machinery-reborn/docs/历史/交接文档.md)（架构与发布必查项） |
 
 ## 三条定义路径
 
