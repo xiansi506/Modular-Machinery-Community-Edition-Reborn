@@ -138,9 +138,40 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** Structure checks are retried on this interval instead of every tick. */
     private static final int STRUCTURE_CHECK_INTERVAL = 10;
 
-    private final ItemStackHandler items = new ItemStackHandler(1) {
-        @Override protected void onContentsChanged(int slot) { setChanged(); }
-    };
+    private final ItemStackHandler items = newBlueprintHandler(this::setChanged);
+
+    /**
+     * 蓝图槽的物品处理器：**一格只放一张蓝图**。
+     *
+     * <p>旧版在控制器构造器里显式写了 `inventory.setStackLimit(1, BLUEPRINT_SLOT)`
+     * （`TileMultiblockMachineController.java:168`；从存档重建之后 `:1385` 再设一次）。
+     * 本项目搬这个槽位时漏了那一条，于是 {@link ItemStackHandler} 的默认上限 64 生效，
+     * 而蓝图物品本身允许叠到 16（`ModItems.BLUEPRINT`），一个槽里就能塞下一叠（勘测 X9）。
+     *
+     * <p>上限写在这里、而不是写在菜单里：{@code SlotItemHandler} 的堆叠上限取自
+     * {@code getSlotLimit}（`MachineControllerMenu.BlueprintSlot` 另外只管「只收蓝图」），
+     * 所以 GUI 拖入、漏斗与任何 {@code IItemHandler} 插入都走同一个数。
+     *
+     * <p>抽成静态工厂是为了让离线复现器能直接驱动它：构造方块实体需要注册过的方块状态，
+     * 那在离线环境里不存在，而「这个槽位的上限是 1」不需要世界。
+     *
+     * <p>没有做的事：存档里如果已经被 0.62.9 及以前写进过一叠，读档时不会被切开
+     * （{@code deserializeNBT} 直接放回原位）。切开等于丢掉玩家背包里的物品，
+     * 所以这一点留作已知限制，而不是在加载时静默修剪。
+     */
+    public static ItemStackHandler newBlueprintHandler(Runnable onChanged) {
+        return new ItemStackHandler(1) {
+            @Override
+            public int getSlotLimit(int slot) {
+                return 1;
+            }
+
+            @Override
+            protected void onContentsChanged(int slot) {
+                onChanged.run();
+            }
+        };
+    }
 
     private int progress;
     private int maxProgress = 1;

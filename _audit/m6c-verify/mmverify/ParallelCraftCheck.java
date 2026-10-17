@@ -304,6 +304,11 @@ public final class ParallelCraftCheck {
         MekanismCompatCheck.jeiRequirementDispatch();
         // 波 6 第 2 项（color）的第一小步：解析与保存。
         ColorCheck.colorParsing();
+        // 0.63.0：勘测 X1 / X9——不是「还没做」，而是「已经写错」。
+        // X1 的两份根字段名单必须是一个契约（否则合法定义会被 strict 路径拒收）；
+        // X9 的蓝图槽必须一格只放一张（旧版显式设过上限 1，搬家时漏了）。
+        RootFieldListCheck.rootFieldLists();
+        BlueprintSlotCheck.blueprintSlotLimit();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");

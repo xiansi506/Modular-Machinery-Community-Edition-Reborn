@@ -81,7 +81,20 @@ public final class MachineSchema {
             // 这个坑是复现器输出里的 WARN 抓到的，不是看代码看出来的：断言全绿、日志里却在抱怨。
             // 与「过宽的断言」同类——**测试通过不等于没有警告**。
             
-            "color");
+            "color",
+            // 0.63.0（勘测 X1）：`prefix` / `hide-components-when-formed` / `controller-bounding-box`。
+            // 这三个字段一直在 UNIMPLEMENTED_ROOT_FIELDS 里（「认得但不求值」），却**从来没有出现在这份名单里**，
+            // 于是**数据包里**同一份合法定义会同时收到两句互相打脸的话：「accepted but not evaluated」（真话）与
+            // 「this loader does not know」（假话）；而 strict 路径（`MachineBuilderJS.register()` →
+            // `read(..., true)`）会把整份定义拒掉。**今天脚本 API 还没有写这三个字段的方法**，所以那条拒收
+            // 路径眼下够不着——但「认得」这件事只能有一个答案；写成「够不着所以不用管」，下一次谁给脚本面
+            // 加一个能写这些字段的入口（或谁照旧版 JSON 抄一份进脚本），就会当场被拒。
+            //
+            // **这两份名单是同一个契约**：UNIMPLEMENTED_ROOT_FIELDS 点名的每个字段都必须在这里。
+            // 理由不是对称好看，而是「认识」这件事只能有一个答案——作者读到的警告要么是「我懂但不做」，
+            // 要么是「我不认识，你大概拼错了」，两者不能同时成立。
+            // 复现器的 RootFieldListCheck 用反射钉住这条恒等式（不为断言放宽 private：内部结构不该变成接口）。
+            "prefix", "hide-components-when-formed", "controller-bounding-box");
     /**
      * Root fields the loader evaluates but the script API cannot yet write — <b>empty as of 0.31.0</b>, and kept
      * as an empty list on purpose.
@@ -641,8 +654,13 @@ public final class MachineSchema {
      * {@code has-factory} / {@code factory-only} 在 0.22.0（M6e）连同两个新线程字段一起离开。
      * {@code failure-action} 在 0.25.0（D17）离开。{@code dynamic-patterns} 在 0.32.0（波 3b）离开：
      * 动态结构的长度现在是<strong>真的会被量出来</strong>的。
-     * 剩下这些<strong>完全还没有消费者</strong>：{@code color} 只是视觉的，而 {@code prefix} /
+     * 剩下这些<strong>完全还没有消费者</strong>：{@code prefix} /
      * {@code hide-components-when-formed} / {@code controller-bounding-box} 属于尚未排期的批次。
+     *
+     * <p><b>这份名单点名的每个字段，同时必须出现在 {@link #KNOWN_ROOT_FIELDS} 里。</b>这不是排版上的对称，
+     * 而是一条会被作者读到的语义：不在那份名单里，加载器会在「认得但不求值」的警告之后紧接着再报一句
+     * 「this loader does not know」——后者是假话——而 strict 路径（{@code MachineBuilderJS.register()}）
+     * 会据此拒收整份合法定义。0.63.0 修的就是这件事（勘测 X1）：上面三个字段当时只在这份名单里。
      */
     private static final String[] UNIMPLEMENTED_ROOT_FIELDS = {
             "prefix", "hide-components-when-formed", "controller-bounding-box"
