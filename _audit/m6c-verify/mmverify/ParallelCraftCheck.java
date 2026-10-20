@@ -329,6 +329,9 @@ public final class ParallelCraftCheck {
         // 0.64.0：A2——输入仓的组号是玩家填的、却决定配方能不能开工。旧版让同组端口独立检查，
         // 本版此前每个端口都对整条配方可见（勘测 A2）。
         HatchGroupCheck.hatchGroups();
+        // 0.64.1：A3——比较器。旧版四个方块都有 hasComparatorInputOverride，本版此前一处都没有，
+        // 所以红石比较器读到的永远是 0（勘测 A3）。
+        ComparatorCheck.comparators();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");

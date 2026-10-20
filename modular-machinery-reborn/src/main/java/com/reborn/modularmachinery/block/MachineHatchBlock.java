@@ -127,6 +127,29 @@ public abstract class MachineHatchBlock extends Block implements EntityBlock {
         super.onRemove(state, level, pos, newState, moving);
     }
 
+    /**
+     * A3（0.64.1）：比较器读数。旧版三个仓口方块都覆写了 {@code hasComparatorInputOverride}
+     * （{@code BlockBus.java:136-143}、{@code BlockFluidHatch.java:137-145}、
+     * {@code BlockEnergyHatch.java:104-112}），读数交给 {@code RedstoneHelper.getRedstoneLevel}。
+     * 这里保留“永远有读数”的契约，具体数值按家族分派。
+     */
+    @Override
+    public boolean hasAnalogOutputSignal(BlockState state) {
+        return true;
+    }
+
+    @Override
+    public int getAnalogOutputSignal(BlockState state, Level level, BlockPos pos) {
+        if (!(level.getBlockEntity(pos) instanceof MachineHatchBlockEntity hatch)) {
+            return 0;
+        }
+        return switch (hatch.kind().family()) {
+            case ITEM -> ComparatorLevels.items(hatch.itemHandler());
+            case FLUID -> ComparatorLevels.tank(hatch.fluidTank());
+            case ENERGY -> ComparatorLevels.energy(hatch.energyStorage());
+        };
+    }
+
     /** The capacity a tier grants for a family, e.g. {@code 32 slots} or {@code 32000 mB}. */
     public static Component capacityComponent(HatchKind kind, HatchTier tier) {
         return switch (kind.family()) {

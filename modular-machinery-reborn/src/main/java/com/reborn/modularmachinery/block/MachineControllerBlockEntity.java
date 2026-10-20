@@ -1482,6 +1482,23 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         return this.progress > 0 || this.activeRecipeId != null;
     }
 
+    /**
+     * A3（0.64.1）：比较器看到的“正在工作”。
+     *
+     * <p>旧版有两个覆写：普通控制器 {@code TileMachineController.java:354-356} 是
+     * {@code lastStrongPower <= 0 && getControllerStatus().isCrafting()}，工厂控制器
+     * {@code TileFactoryController.java:720-730} 是「红石没停且任一线程有配方在跑」。
+     * 本版一个方块实体同时承担两种模式，所以这里把两条并起来：
+     * {@code redstoneStopped} 对应 {@code lastStrongPower}，{@code hasActiveCraft()} 对应单配方状态，
+     * {@code factoryEngine.isWorking()} 对应工厂线程。
+     */
+    public boolean isWorking() {
+        if (this.redstoneStopped) {
+            return false;
+        }
+        return this.hasActiveCraft() || this.factoryEngine.isWorking();
+    }
+
     /** The most copies this machine could settle — the original's {@code getMaxParallelism} as the screen read it. */
     public int maxParallelism() {
         return Math.max(1, Math.max(this.parallelCeiling, this.machineCeiling()));

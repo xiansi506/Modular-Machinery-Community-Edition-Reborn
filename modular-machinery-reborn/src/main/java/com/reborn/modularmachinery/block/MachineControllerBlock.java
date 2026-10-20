@@ -138,6 +138,23 @@ public final class MachineControllerBlock extends Block implements EntityBlock {
         super.onRemove(state, level, pos, newState, moving);
     }
 
+    /**
+     * A3（0.64.1）：旧版 {@code BlockController.java:259-271} 给控制器接比较器；工厂控制器
+     * （{@code BlockFactoryController extends BlockController}）继承同一读数，区分只发生在
+     * 方块实体的 {@code isWorking()} 上。所以这里不按 {@link #factory} 分叉。
+     */
+    @Override
+    public boolean hasAnalogOutputSignal(BlockState state) {
+        return true;
+    }
+
+    @Override
+    public int getAnalogOutputSignal(BlockState state, Level level, BlockPos pos) {
+        return level.getBlockEntity(pos) instanceof MachineControllerBlockEntity controller
+                ? ComparatorLevels.controller(controller.isWorking(), controller.isFormed())
+                : 0;
+    }
+
     @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
         return type == ModBlocks.MACHINE_CONTROLLER_ENTITY.get() ? (l, p, s, be) -> MachineControllerBlockEntity.tick(l, p, s, (MachineControllerBlockEntity) be) : null;
     }
