@@ -175,7 +175,8 @@ public final class DiagnoseCommand {
                     final String describe = "  相对" + relative.toShortString() + " 世界" + at.toShortString()
                             + " 种类=" + hatch.kind()
                             + " 标签=" + (tag == null ? "-" : tag)
-                            + (inStructure ? "" : "   ← 不在结构的任何位置上！");
+                            + (inStructure ? "" : "   ← 不在结构的任何位置上！")
+                            + "  " + hatch.autoIoDescription();
                     source.sendSuccess(() -> Component.literal(describe), false);
                 }
             }

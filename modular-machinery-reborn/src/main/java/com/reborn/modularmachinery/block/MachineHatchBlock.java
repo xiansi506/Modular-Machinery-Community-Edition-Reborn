@@ -9,11 +9,14 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.phys.BlockHitResult;
 
+import javax.annotation.Nullable;
 import java.util.List;
 
 /**
@@ -46,6 +49,26 @@ public abstract class MachineHatchBlock extends Block implements EntityBlock {
     @Override
     public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
         return new MachineHatchBlockEntity(pos, state);
+    }
+
+    /**
+     * 仓口自己的服务端 tick：物品输入抽、物品输出推、能量输出推 FE（A1，0.63.9）。
+     *
+     * <p>旧版这三个方块各自在 {@code update()} 里做事；1.20.1 的等价物是这里返回的 ticker。
+     * 客户端不需要它：仓口的库存变化已经随菜单/方块实体同步，自动交换只该在服务端发生。
+     */
+    @Nullable
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state,
+                                                                  BlockEntityType<T> type) {
+        if (level.isClientSide) {
+            return null;
+        }
+        return (tickLevel, tickPos, tickState, blockEntity) -> {
+            if (blockEntity instanceof MachineHatchBlockEntity hatch) {
+                hatch.serverTick();
+            }
+        };
     }
 
     /** The tier this block currently carries. */

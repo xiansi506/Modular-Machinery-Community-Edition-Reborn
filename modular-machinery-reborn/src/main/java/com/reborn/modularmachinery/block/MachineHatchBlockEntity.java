@@ -12,7 +12,9 @@ import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.energy.EnergyStorage;
+import net.minecraftforge.energy.IEnergyStorage;
 import net.minecraftforge.fluids.capability.templates.FluidTank;
+import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
 
 import javax.annotation.Nullable;
@@ -64,6 +66,13 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     private final LazyOptional<FluidTank> fluidCapability;
     private final LazyOptional<EnergyStorage> energyCapability;
 
+    /** A1（0.63.9）：自动交换的节流状态，语义照旧版 {@code TileItemBus}。 */
+    private int ticksExisted;
+    private int successCounter;
+    private boolean inventoryChanged;
+    /** 同一游戏 tick 只跑一次：Forge 的 ticker 正常情况下就是一 tick 一次。 */
+    private long lastTick = -1L;
+
     public MachineHatchBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlocks.HATCH_ENTITY.get(), pos, state);
         this.kind = state.getBlock() instanceof MachineHatchBlock hatch ? hatch.kind() : HatchKind.ITEM_INPUT;
@@ -79,7 +88,14 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         switch (this.kind.family()) {
             case ITEM -> {
                 itemStorage = new ItemStackHandler(Math.max(1, this.tier.itemSlots())) {
-                    @Override protected void onContentsChanged(int slot) { onStorageChanged(false); }
+                    @Override protected void onContentsChanged(int slot) {
+                        // 旧版只有输出总线在 {@code markNoUpdate()} 里置这个标记，输入总线没有。
+                        // 输出总线自己推动了物品，下一 tick 应立刻再试，而不是等 5–60 tick。
+                        if (MachineHatchBlockEntity.this.kind == HatchKind.ITEM_OUTPUT) {
+                            MachineHatchBlockEntity.this.inventoryChanged = true;
+                        }
+                        onStorageChanged(false);
+                    }
                 };
             }
             case FLUID -> {
@@ -137,6 +153,28 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         return this.energy;
     }
 
+    /**
+     * 自动 IO 的节流状态，给 {@code /mm-diagnose} 用。
+     *
+     * <p>为什么值得单独问：节流计数决定「下一次什么时候尝试」，而它在游戏里没有任何显示；
+     * 总线明明贴着箱子却不动时，先看这里能区分「ticker 没跑」和「跑了但一直失败」。
+     */
+    public String autoIoDescription() {
+        String mode = switch (this.kind) {
+            case ITEM_INPUT -> "抽入";
+            case ITEM_OUTPUT -> "推出";
+            case ENERGY_OUTPUT -> "推 FE";
+            default -> null;
+        };
+        if (mode == null) {
+            return "自动 IO=无（旧版也没有）";
+        }
+        return "自动 IO=" + mode + " 节流计数=" + this.successCounter
+                + " tick=" + this.ticksExisted
+                + (this.lastTick < 0 ? " 尚未跑过" : " 上次世界tick=" + this.lastTick)
+                + (this.inventoryChanged ? " 库存变化=待重试" : "");
+    }
+
     /** Human-readable capacity of this hatch, used by the tooltip and by hand-over notes. */
     public String capacityDescription() {
         return switch (this.kind.family()) {
@@ -153,6 +191,113 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             // with the menu and the energy numbers travel in the menu's container data, so both would be waste.
             this.level.sendBlockUpdated(this.worldPosition, getBlockState(), getBlockState(), Block.UPDATE_ALL);
         }
+    }
+
+    // ------------------------------------------------------- automatic IO (A1, 0.63.9)
+
+    /**
+     * 仓口的服务端 tick。
+     *
+     * <p>旧版三个方块各自在 {@code update()} 里做事：输入总线抽、输出总线推、能量输出仓推 FE。
+     * 流体仓在旧版没有自动交换，这里也不加。
+     */
+    public void serverTick() {
+        if (this.level == null || this.level.isClientSide) {
+            return;
+        }
+        long gameTime = this.level.getGameTime();
+        if (gameTime == this.lastTick) {
+            return;
+        }
+        this.lastTick = gameTime;
+        switch (this.kind) {
+            case ITEM_INPUT -> tickItemInput();
+            case ITEM_OUTPUT -> tickItemOutput();
+            case ENERGY_OUTPUT -> tickEnergyOutput();
+            default -> { }
+        }
+        this.ticksExisted++;
+    }
+
+    private void tickItemInput() {
+        if (!HatchAutoIo.shouldWork(this.ticksExisted, this.successCounter, this.inventoryChanged)) {
+            return;
+        }
+        this.inventoryChanged = false;
+        boolean moved = false;
+        for (Direction face : Direction.values()) {
+            BlockEntity neighbor = this.level.getBlockEntity(this.worldPosition.relative(face));
+            if (neighbor == null || isFamily(neighbor, HatchKind.Family.ITEM)) {
+                continue;
+            }
+            LazyOptional<IItemHandler> capability =
+                    neighbor.getCapability(ForgeCapabilities.ITEM_HANDLER, face.getOpposite());
+            IItemHandler handler = capability.orElse(null);
+            if (handler != null) {
+                moved |= HatchAutoIo.pull(handler, this.items);
+            }
+        }
+        this.successCounter = moved
+                ? HatchAutoIo.onSuccess(this.successCounter)
+                : HatchAutoIo.onFailure(this.successCounter);
+    }
+
+    private void tickItemOutput() {
+        if (!HatchAutoIo.shouldWork(this.ticksExisted, this.successCounter, this.inventoryChanged)) {
+            return;
+        }
+        this.inventoryChanged = false;
+        boolean moved = false;
+        for (Direction face : Direction.values()) {
+            BlockEntity neighbor = this.level.getBlockEntity(this.worldPosition.relative(face));
+            if (neighbor == null || isFamily(neighbor, HatchKind.Family.ITEM)) {
+                continue;
+            }
+            LazyOptional<IItemHandler> capability =
+                    neighbor.getCapability(ForgeCapabilities.ITEM_HANDLER, face.getOpposite());
+            IItemHandler handler = capability.orElse(null);
+            if (handler != null) {
+                moved |= HatchAutoIo.push(this.items, handler);
+            }
+        }
+        if (moved) {
+            this.successCounter = HatchAutoIo.onSuccess(this.successCounter);
+            // 旧版 TileItemOutputBus.markNoUpdate() 的语义：下一 tick 立刻再试。
+            this.inventoryChanged = true;
+        } else {
+            this.successCounter = HatchAutoIo.onFailure(this.successCounter);
+        }
+    }
+
+    private void tickEnergyOutput() {
+        if (this.energy == null) {
+            return;
+        }
+        int limit = (int) Math.min(Integer.MAX_VALUE, this.tier.energyTransfer());
+        int remaining = Math.min(limit, this.energy.getEnergyStored());
+        if (remaining <= 0) {
+            return;
+        }
+        for (Direction face : Direction.values()) {
+            BlockEntity neighbor = this.level.getBlockEntity(this.worldPosition.relative(face));
+            if (neighbor == null || isFamily(neighbor, HatchKind.Family.ENERGY)) {
+                continue;
+            }
+            LazyOptional<IEnergyStorage> capability =
+                    neighbor.getCapability(ForgeCapabilities.ENERGY, face.getOpposite());
+            IEnergyStorage target = capability.orElse(null);
+            if (target == null) {
+                continue;
+            }
+            remaining -= HatchAutoIo.pushEnergy(this.energy, target, remaining);
+            if (remaining <= 0) {
+                break;
+            }
+        }
+    }
+
+    private static boolean isFamily(BlockEntity entity, HatchKind.Family family) {
+        return entity instanceof MachineHatchBlockEntity hatch && hatch.kind.family() == family;
     }
 
     // ------------------------------------------------------- menu data

@@ -323,6 +323,9 @@ public final class ParallelCraftCheck {
         // 0.63.8：A9——方块没了，槽里的物品不能跟着消失。旧版三个方块都在 breakBlock 里吐库存，
         // 本版只有升级总线记得；物品仓与控制器连蓝图都会一起没。
         BlockDropCheck.blockDrops();
+        // 0.63.9：A1——仓口只存不动。旧版输入总线会从相邻容器抽、输出总线会往外推、
+        // 能量输出仓每 tick 推 FE；本版方块连 getTicker 都没有（勘测 A1）。
+        AutoIoCheck.autoIo();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
