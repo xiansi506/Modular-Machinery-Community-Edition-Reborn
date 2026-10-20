@@ -56,7 +56,10 @@ allprojects {
                         // KubeJS / Rhino / JEI must stay OFF: the harness loads KubeJS in its own ChildLoader
                         // from the deobf jar on disk, and KubeJSMachineCheck.java:126 asserts the runtime is
                         // absent (section Z9 depends on the same isolation).
-                        'mekanism'
+                        'mekanism',
+                        // 0.63.5：Jade 的 Tooltip/Element 是这条断言的**被测对象**（真 Tooltip + 一个只有 tag
+                        // 的假元素），不是顺手拖进来的第二个模组。这只 jar 就是本模组编译时用的那份 Jade。
+                        'jade'
                 ]
 
                 dependsOn project.tasks.named('jar')

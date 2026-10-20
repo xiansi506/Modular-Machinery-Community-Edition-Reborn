@@ -303,6 +303,9 @@ public final class ParallelCraftCheck {
         // 0.50.0: 本模组自己的 Jade 插件。钉的是**结构**（插件类不 import 客户端类型、客户端那一段
         // 只在 registerClient 里被引用），因为 Jade 会在两侧都加载插件类，而这条约束离线可证。
         MekanismCompatCheck.jadePlugin();
+        // 0.63.5：Jade 提示里的气体条。空流体时提示里没有流体行，第 1 行是 Mekanism 的气体元素；
+        // 旧代码按固定下标清第 1 行，把它删了。
+        MekanismCompatCheck.jadeGasRow();
         MekanismCompatCheck.jeiRequirementDispatch();
         // 波 6 第 2 项（color）的第一小步：解析与保存。
         ColorCheck.colorParsing();

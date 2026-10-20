@@ -38,9 +38,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <h2>这一版的定位方式</h2>
  *
  * <p>不再靠名字，而是**按已知的固定下标**：Jade 提示的前段是
- * {@code 第 0 行 = 方块名+图标}、{@code 第 1 行 = 通用流体的空框}。这两个位置对所有方块都一样，
- * 而本回调**只对本模组的 {@link MachineHatchBlock} 注册**，所以它看到的提示必然就是本模组方块那一张，
- * 不存在误伤别的方块的可能。
+ * {@code 第 0 行 = 方块名+图标}。本回调**只对本模组的 {@link MachineHatchBlock} 注册**，
+ * 所以它看到的提示必然就是本模组方块那一张，不存在误伤别的方块的可能。
+ *
+ * <p><b>第 1 行不一定是流体行（0.63.5 更正）。</b>流体仓为空时本模组的 storage provider 返回空列表，
+ * Jade 因此**不写** {@code JadeFluidStorage}，提示里没有流体行；装气体的混合仓第 1 行是 Mekanism 的
+ * {@code mekanism:gas} 元素。所以「清第 1 行」只对**有流体**的仓成立，空流体时一律不碰任何行。
  *
  * <h2>为什么还要一个「已经处理过」的标记</h2>
  *
@@ -104,9 +107,9 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
         }
         ACTED.incrementAndGet();
         boolean removedName = removeRow(tooltip, ROW_NAME);
-        // Keep Jade's fluid bar: our custom storage provider supplies the real fluid and capacity.
-        lastReport = "删除名字行=" + removedName + " 保留流体容量条"
-                + " 处理后剩 " + tooltip.size() + " 行";
+        // 名字行删掉后，后面各行会前移；replaceFluidRow 只处理**有流体**时的第 1 行，
+        // 空流体时保留化学兼容层的气体条（见该方法的注释）。
+        lastReport = "删除名字行=" + removedName + " 处理后剩 " + tooltip.size() + " 行";
         // 方块名由本模组补回（它原来那一行连同图标被删掉了）。
         List<Component> mine = new ArrayList<>();
         mine.add(hatch.getDisplayName().copy().withStyle(ChatFormatting.WHITE));
@@ -114,6 +117,7 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
             tooltip.add(i, mine.get(i), OWN_MARKER);
         }
         replaceFluidRow(tooltip, hatch);
+        lastReport = lastReport + " ｜ 提示=" + describeTooltip(tooltip);
     }
 
     /**
@@ -122,17 +126,31 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
      * <p>实机诊断证明服务端 extension 已交出 32000/32000 mB，但画面仍显示 empty/0，说明错误发生在
      * Jade 的 extension 客户端映射之后。这里读取同一个客户端罐（仓界面也使用它），并用 Jade 官方
      * {@link FluidView} 与进度条 helper 绘制，避免再经过 capability/provider 选择。
+     *
+     * <p><b>为什么空流体必须最先返回（0.63.5）。</b>本模组的 storage provider 在流体为空时返回
+     * 空列表，而 Jade 11.13.3 的 {@code ViewGroup.saveList(empty)} 返回 {@code true} 且不写
+     * {@code JadeFluidStorage}；{@code FluidStorageProvider.putData} 取第一个非 null 的 groups
+     * 就 return。于是**空流体仓的提示里根本没有流体行**，第 1 行是排在它后面的别的东西——
+     * 装气体的混合仓这里是 Mekanism 的 {@code mekanism:gas} 元素。旧代码无条件清空第 1 行，
+     * 正好把气体条删掉（0.62.9 的验收只要求「化学品不被画成空液体」，没要求气体可见，
+     * 所以那时看不出来）。0.63.5 起：空流体时不碰任何行，只认准 {@code mekanism:gas}；
+     * 兼容层没有交出气体条时，本模组自己补一条（无图标，见已知限制）。
      */
     private static void replaceFluidRow(ITooltip tooltip, MachineHatchBlockEntity hatch) {
         if (hatch.kind().family() != HatchKind.Family.FLUID || hatch.fluidTank() == null) {
             return;
         }
         net.minecraftforge.fluids.FluidStack fluid = hatch.fluidTank().getFluid();
-        boolean hasGas = com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasTooltip(hatch) != null;
-        // Preserve Jade's normal empty-tank row for an actually empty fluid hatch. A hybrid hatch containing
-        // chemical gas must not show that misleading empty fluid row.
-        if (fluid.isEmpty() && !hasGas) {
-            lastReport = "客户端仓为空且无气体，保留 Jade 原行";
+        String[] gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasTooltip(hatch);
+        if (fluid.isEmpty()) {
+            if (gas == null) {
+                lastReport = "流体为空、无气体：不画内容行";
+            } else if (hasGasElement(tooltip)) {
+                lastReport = "流体为空、气体存在：保留化学兼容层的气体条";
+            } else {
+                addGasBar(tooltip, gas);
+                lastReport = "流体为空、气体存在：兼容层没有交出气体条，补一条本模组的";
+            }
             return;
         }
         if (tooltip.size() <= ROW_FLUID) {
@@ -148,12 +166,6 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
         // remove(uid) cannot remove elements that were added without a tag.
         left.clear();
         right.clear();
-
-        if (fluid.isEmpty()) {
-            // A hybrid chemical hatch is supposed to show the chemical bar only, not an empty fluid bar.
-            lastReport = "客户端流体为空，气体存在；已隐藏 Jade 空流体行";
-            return;
-        }
 
         int capacity = Math.max(1, hatch.fluidTank().getCapacity());
         FluidView view = FluidView.readDefault(FluidView.writeDefault(
@@ -171,6 +183,96 @@ public final class FluidStorageSuppressor implements JadeTooltipCollectedCallbac
         left.add(bar);
         lastReport = "客户端自有流体条 " + fluid.getFluid().builtInRegistryHolder().key().location()
                 + " " + fluid.getAmount() + "/" + capacity + " mB";
+    }
+
+    /**
+     * 兼容层没交出气体条时，由本模组补一条。
+     *
+     * <p>与流体条同一形态（名称 + 当前量/容量），但没有气体图标——图标在 Mekanism 的
+     * {@code ChemicalElement} 里，主模组不引用那个类型（勘测 X4 的隔离契约）。这一条只会在
+     * 「提示里确实没有 {@code mekanism:gas} 元素」时执行，所以不会与兼容层重复。
+     */
+    private static void addGasBar(ITooltip tooltip, String[] gas) {
+        Component name = com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasDisplayName(gas[0]);
+        long amount = parseLong(gas[1]);
+        long capacity = Math.max(1L, parseLong(gas[2]));
+        Component label = Component.translatable("jade.fluid2",
+                (name == null ? Component.literal(gas[0]) : name).copy().withStyle(ChatFormatting.WHITE),
+                Component.literal(amount + " mB").withStyle(ChatFormatting.WHITE),
+                Component.literal(capacity + " mB")).withStyle(ChatFormatting.GRAY);
+        float ratio = Math.min(1.0F, amount / (float) capacity);
+        IElement bar = tooltip.getElementHelper().progress(ratio, label,
+                tooltip.getElementHelper().progressStyle(), BoxStyle.DEFAULT, true);
+        bar.align(IElement.Align.LEFT).tag(OWN_MARKER);
+        tooltip.add(bar);
+    }
+
+    private static long parseLong(String text) {
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException malformed) {
+            return 0L;
+        }
+    }
+
+    /** 化学兼容层的气体元素 tag。Mekanism 的 {@code LookingAtUtils.GAS} 就是 {@code mekanism:gas}。 */
+    private static final ResourceLocation MEKANISM_GAS_TAG = new ResourceLocation("mekanism", "gas");
+
+    /** 这个提示里有没有化学兼容层交出的气体条（可能在任何一行）。 */
+    private static boolean hasGasElement(ITooltip tooltip) {
+        for (int row = 0; row < tooltip.size(); row++) {
+            if (rowHasGasElement(tooltip, row, IElement.Align.LEFT)
+                    || rowHasGasElement(tooltip, row, IElement.Align.RIGHT)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean rowHasGasElement(ITooltip tooltip, int row, IElement.Align align) {
+        List<IElement> elements = tooltip.get(row, align);
+        if (elements == null) {
+            return false;
+        }
+        for (IElement element : elements) {
+            if (isGasTag(element.getTag())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 只认精确的 {@code mekanism:gas}：同命名空间的能量/其他化学元素不算。 */
+    private static boolean isGasTag(ResourceLocation tag) {
+        return MEKANISM_GAS_TAG.equals(tag);
+    }
+
+    /**
+     * 提示的逐行摘要（下标、左右两侧元素的 tag）。
+     *
+     * <p>给 {@code /mm-diagnose} 用：气体条到底在不在、在第几行，下次不必再靠猜。
+     * 只记 tag 不记文本：文本可能含玩家内容，且这里要回答的是「哪一行是谁的」。
+     */
+    private static String describeTooltip(ITooltip tooltip) {
+        StringBuilder out = new StringBuilder();
+        for (int row = 0; row < tooltip.size() && out.length() < 240; row++) {
+            out.append(row).append('[');
+            appendTags(out, tooltip.get(row, IElement.Align.LEFT));
+            out.append('|');
+            appendTags(out, tooltip.get(row, IElement.Align.RIGHT));
+            out.append(']');
+        }
+        return out.toString();
+    }
+
+    private static void appendTags(StringBuilder out, List<IElement> elements) {
+        if (elements == null) {
+            return;
+        }
+        for (IElement element : elements) {
+            ResourceLocation tag = element.getTag();
+            out.append(tag == null ? "?" : tag).append(';');
+        }
     }
 
     /**

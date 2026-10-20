@@ -781,6 +781,79 @@ final class MekanismCompatCheck {
     }
 
     /**
+     * Jade 提示里的气体条（0.63.5）。
+     *
+     * <p>缺陷：本模组的 fluid storage provider 在流体为空时返回空列表，Jade 的
+     * {@code saveList(empty)} 返回 true 且不写 {@code JadeFluidStorage}，于是**没有流体行**；
+     * 装气体的混合仓里，第 1 行是 Mekanism 的 {@code mekanism:gas} 元素。旧代码无条件清空
+     * 第 1 行，正好把气体条删掉。
+     *
+     * <p>这里能离线证的是：① 空流体这一支在清行之前返回；② 它先找 {@code mekanism:gas}；
+     * ③ 找不到才补一条本模组的（{@code jade.fluid2}）；④ tag 的匹配是**精确**的
+     * {@code mekanism:gas}，不会把 Jade 自己的流体元素误认成气体。真实提示的逐行布局
+     * 只有游戏里能看，所以 {@code /mm-diagnose} 会把每行的 tag 打出来。
+     */
+    static void jadeGasRow() {
+        section("Jade 气体条（0.63.5）");
+        Path suppressor = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
+                + "modularmachinery/integration/jade/FluidStorageSuppressor.java");
+        try {
+            String text = withoutComments(Files.readString(suppressor));
+            int emptyBranch = text.indexOf("if (fluid.isEmpty())");
+            int clear = text.indexOf("left.clear()");
+            report("the empty-fluid branch returns before any row is cleared, so a chemical row below the "
+                            + "name survives",
+                    emptyBranch >= 0 && (clear < 0 || emptyBranch < clear));
+            report("...and it first asks whether the compatibility layer already supplied a gas bar",
+                    text.contains("hasGasElement(tooltip)"));
+            report("...and only then adds this mod's own bar with Jade's standard label (jade.fluid2)",
+                    text.contains("addGasBar(") && text.contains("jade.fluid2"));
+            report("...identifying the chemical element by the exact tag mekanism:gas, not by class or text",
+                    text.contains("new ResourceLocation(\"mekanism\", \"gas\")"));
+        } catch (Exception unreadable) {
+            report("reading the suppressor source failed: " + unreadable, false);
+        }
+        try {
+            Class<?> suppressorClass = Class.forName(
+                    "com.reborn.modularmachinery.integration.jade.FluidStorageSuppressor");
+            java.lang.reflect.Method isGasTag = suppressorClass.getDeclaredMethod(
+                    "isGasTag", ResourceLocation.class);
+            isGasTag.setAccessible(true);
+            report("isGasTag(mekanism:gas) is true",
+                    Boolean.TRUE.equals(isGasTag.invoke(null, new ResourceLocation("mekanism", "gas"))));
+            report("isGasTag(jade:fluid_storage) is false",
+                    Boolean.FALSE.equals(isGasTag.invoke(null, new ResourceLocation("jade", "fluid_storage"))));
+
+            java.lang.reflect.Method hasGas = suppressorClass.getDeclaredMethod(
+                    "hasGasElement", snownee.jade.api.ITooltip.class);
+            hasGas.setAccessible(true);
+            snownee.jade.impl.Tooltip withGas = new snownee.jade.impl.Tooltip();
+            withGas.add(new TaggedElement().tag(new ResourceLocation("mekanism", "gas")));
+            report("a real Jade tooltip carrying the mekanism:gas element is detected",
+                    Boolean.TRUE.equals(hasGas.invoke(null, withGas)));
+            snownee.jade.impl.Tooltip fluidOnly = new snownee.jade.impl.Tooltip();
+            fluidOnly.add(new TaggedElement().tag(new ResourceLocation("jade", "fluid_storage")));
+            report("...and a tooltip carrying only Jade's fluid element is not mistaken for gas",
+                    Boolean.FALSE.equals(hasGas.invoke(null, fluidOnly)));
+        } catch (Throwable missingOrBroken) {
+            report("the suppressor's gas-row helpers cannot be exercised: " + missingOrBroken, false);
+        }
+    }
+
+    /** 只有 tag 的元素：给上面那个「真 Jade 提示」测试用，不渲染、不带文本。 */
+    private static final class TaggedElement extends snownee.jade.api.ui.Element {
+        @Override
+        public net.minecraft.world.phys.Vec2 getSize() {
+            return new net.minecraft.world.phys.Vec2(1.0F, 1.0F);
+        }
+
+        @Override
+        public void render(net.minecraft.client.gui.GuiGraphics graphics,
+                float x, float y, float width, float height) {
+        }
+    }
+
+    /**
      * JEI 页面上的需求分派（0.58.0）。
      *
      * <p>修的是一个**真崩溃**：{@code MachineRecipeLayout.kindOf()} 原来是「能源 → 流体 → 其余都算物品」，
