@@ -84,23 +84,17 @@ public final class UpgradeBusBlock extends Block implements EntityBlock {
      * The original spilled the bus's contents when it was broken ({@code BlockUpgradeBus#breakBlock},
      * {@code :57-70}).
      *
-     * <p>1.20.1 moved that job to {@code playerDestroy}, and this mod ships no loot tables — the jar keeps zero
-     * files under {@code data/}, which is a standing project rule — so the drop is declared here. The block item
-     * has already been spawned by {@code super.playerDestroy} at this point, carrying the tier the blockstate
-     * holds, so only the slots are added.
+     * <p>1.20.1 moved the block item drop to the loot table ({@code data/modular_machinery_reborn/
+     * loot_tables/blocks/upgrade_bus.json}); the inventory is not in that table, so it is spilled here. The
+     * block item has already been spawned by {@code super.playerDestroy} at this point, carrying the tier the
+     * blockstate holds, so only the slots are added.
      */
     @Override
     public void playerDestroy(Level level, Player player, BlockPos pos, BlockState state,
                               @Nullable BlockEntity blockEntity, ItemStack tool) {
         super.playerDestroy(level, player, pos, state, blockEntity, tool);
         if (blockEntity instanceof UpgradeBusBlockEntity bus) {
-            for (int slot = 0; slot < bus.items().getSlots(); slot++) {
-                ItemStack stack = bus.items().getStackInSlot(slot);
-                if (!stack.isEmpty()) {
-                    popResource(level, pos, stack.copy());
-                    bus.items().setStackInSlot(slot, ItemStack.EMPTY);
-                }
-            }
+            ItemStackDrops.pop(level, pos, bus.items());
         }
     }
 }

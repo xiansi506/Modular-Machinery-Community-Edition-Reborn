@@ -131,6 +131,9 @@ public final class MachineControllerBlock extends Block implements EntityBlock {
         if (!state.is(newState.getBlock())
                 && level.getBlockEntity(pos) instanceof MachineControllerBlockEntity controller) {
             controller.clearDistributedMachineColor(state.getValue(FACING));
+            // The original did this in BlockController#breakBlock (:178-191); the only inventory the
+            // controller has is the blueprint slot.
+            ItemStackDrops.pop(level, pos, controller.items());
         }
         super.onRemove(state, level, pos, newState, moving);
     }

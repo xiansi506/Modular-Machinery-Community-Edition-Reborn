@@ -70,6 +70,22 @@ public abstract class MachineHatchBlock extends Block implements EntityBlock {
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
+    /**
+     * Spills the item slots when the hatch block really goes away.
+     *
+     * <p>The original did this on any removal ({@code BlockBus.java:50-63}); {@code onRemove} keeps that
+     * meaning instead of covering only a player's pickaxe. Fluid and energy hatches have no item handler, so
+     * they drop the block and nothing else, exactly like the original.
+     */
+    @Override
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean moving) {
+        if (!state.is(newState.getBlock())
+                && level.getBlockEntity(pos) instanceof MachineHatchBlockEntity hatch) {
+            ItemStackDrops.pop(level, pos, hatch.itemHandler());
+        }
+        super.onRemove(state, level, pos, newState, moving);
+    }
+
     /** The capacity a tier grants for a family, e.g. {@code 32 slots} or {@code 32000 mB}. */
     public static Component capacityComponent(HatchKind kind, HatchTier tier) {
         return switch (kind.family()) {

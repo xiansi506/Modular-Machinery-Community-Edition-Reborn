@@ -320,6 +320,9 @@ public final class ParallelCraftCheck {
         // X9 的蓝图槽必须一格只放一张（旧版显式设过上限 1，搬家时漏了）。
         RootFieldListCheck.rootFieldLists();
         BlueprintSlotCheck.blueprintSlotLimit();
+        // 0.63.8：A9——方块没了，槽里的物品不能跟着消失。旧版三个方块都在 breakBlock 里吐库存，
+        // 本版只有升级总线记得；物品仓与控制器连蓝图都会一起没。
+        BlockDropCheck.blockDrops();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
