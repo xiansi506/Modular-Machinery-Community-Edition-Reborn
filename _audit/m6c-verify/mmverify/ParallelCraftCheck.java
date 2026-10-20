@@ -246,6 +246,7 @@ public final class ParallelCraftCheck {
         parallelControllerLimit();
         selectorTags();
         dynamicPatterns();
+        x2SegmentRotation();
         dynamicPatternPreviews();
         shippedContentMatches();
         packetRoundTrip();
@@ -2157,6 +2158,104 @@ public final class ParallelCraftCheck {
         // 两处必须是同一个，否则结构会成型而它的动态部分错位。
         check("偏移也按朝向一起旋转：(0,0,1) 转一步是 (1,0,0)",
                 "1, 0, 0", DynamicPattern.rotate(new BlockPos(0, 0, 1), 1).toShortString());
+    }
+
+    /**
+     * X2：动态段的**段内布局**在「量长度」与「展开」两边是不是同一套旋转。
+     *
+     * <p>世界由生产代码 {@link DynamicPattern#expand(int, int)} 建出来——那就是玩家照着建造预览搭出来的结构；
+     * 量长度一侧用「段内每个键在 anchor 偏移后都落在世界里」复刻 {@link MachinePattern#matches} 的判定
+     * （离线没有 Level，而 matches 的其余部分只是 isLoaded + 认方块）。
+     *
+     * <p>**用反射调匹配侧那个入口是有意为之**：它在 0.62.9 上不存在，直接写编译期调用的话，「旧版是错的」
+     * 这件事只会表现为整份复现器编译不过；反射把它变成一条红色断言，红绿两边才跑的是同一份代码。
+     */
+    private static void x2SegmentRotation() {
+        section("L3b. [X2] 动态段的段内布局：量长度与展开用的是不是同一套旋转");
+        java.lang.reflect.Method rotated = x2RotatedSection();
+        report("DynamicPattern 有『按朝向旋转段内布局』的匹配侧入口（0.62.9 上没有，见 -x2-red 证据）",
+                rotated != null);
+        if (rotated == null) {
+            return;
+        }
+
+        // 非对称段：一格骨架 + 一格侧翼。4 重对称的段会让旋转看不出来，所以缺陷要用不对称的段才现形。
+        MachinePattern asym = MachinePattern.builder()
+                .add(new BlockPos(0, 0, 0), List.of(BlockMatcher.parse("minecraft:stone")))
+                .add(new BlockPos(1, 0, 0), List.of(BlockMatcher.parse("minecraft:iron_block")))
+                .build();
+        // 对照：以锚点为中心的十字，绕 Y 轴转任意步都不变。
+        MachinePattern sym = MachinePattern.builder()
+                .add(new BlockPos(0, 0, 0), List.of(BlockMatcher.parse("minecraft:stone")))
+                .add(new BlockPos(1, 0, 0), List.of(BlockMatcher.parse("minecraft:stone")))
+                .add(new BlockPos(-1, 0, 0), List.of(BlockMatcher.parse("minecraft:stone")))
+                .add(new BlockPos(0, 0, 1), List.of(BlockMatcher.parse("minecraft:stone")))
+                .add(new BlockPos(0, 0, -1), List.of(BlockMatcher.parse("minecraft:stone")))
+                .build();
+
+        // 未旋转的段内布局在同一片世界里量出来的节数，0..3 朝向。它就是缺陷的形状：
+        // 朝向 1 少数一节、朝向 2/3 一节都量不到；而 4 重对称的十字在四个朝向下都是 4。
+        long[] asymUnrotated = {4, 3, -1, -1};
+        for (int steps = 0; steps < 4; steps++) {
+            x2SegmentRow("asym", asym, rotated, steps, asymUnrotated[steps]);
+            x2SegmentRow("sym", sym, rotated, steps, 4);
+        }
+    }
+
+    private static void x2SegmentRow(String label, MachinePattern shape, java.lang.reflect.Method rotated,
+                                     int steps, long unrotatedMeasured) {
+        DynamicPattern dp = new DynamicPattern("x2_" + label, Set.of(net.minecraft.core.Direction.NORTH),
+                0, 15, shape, null, BlockPos.ZERO, new BlockPos(0, 0, 1));
+        Set<BlockPos> world = new java.util.HashSet<>(dp.expand(4, steps).positions().keySet());
+        Set<BlockPos> oneSection = dp.expand(1, steps).positions().keySet();
+        BlockPos start = DynamicPattern.rotate(dp.startOffset(), steps);
+        BlockPos step = DynamicPattern.rotate(dp.stepOffset(), steps);
+
+        MachinePattern spun;
+        try {
+            spun = (MachinePattern) rotated.invoke(null, shape, steps);
+        } catch (ReflectiveOperationException failure) {
+            report("..." + label + " steps=" + steps + " 调匹配侧的段内旋转时抛出了 " + failure, false);
+            return;
+        }
+        Set<BlockPos> spunKeys = spun.positions().keySet();
+
+        check("..." + label + " steps=" + steps + "：匹配侧转出来的段内布局 == expand 展开出来的第 0 节",
+                x2Keys(oneSection), x2Keys(spunKeys));
+        check("..." + label + " steps=" + steps + "：用这份布局在世界里量到全部 4 节",
+                4, dp.matchesSize(anchor -> x2Covers(world, anchor, spunKeys), pos -> false,
+                        BlockPos.ZERO, start, step));
+        check("..." + label + " steps=" + steps + "：未旋转的段内布局量出的节数（缺陷的形状）",
+                unrotatedMeasured,
+                dp.matchesSize(anchor -> x2Covers(world, anchor, shape.positions().keySet()),
+                        pos -> false, BlockPos.ZERO, start, step));
+    }
+
+    private static java.lang.reflect.Method x2RotatedSection() {
+        try {
+            return DynamicPattern.class.getMethod("rotatedSection", MachinePattern.class, int.class);
+        } catch (NoSuchMethodException absent) {
+            return null;
+        }
+    }
+
+    private static boolean x2Covers(Set<BlockPos> world, BlockPos anchor, Set<BlockPos> keys) {
+        for (BlockPos key : keys) {
+            if (!world.contains(anchor.offset(key))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 位置集合的稳定文本形式（按坐标排序），把两边的差异直接打进证据里。 */
+    private static String x2Keys(java.util.Collection<BlockPos> positions) {
+        List<String> out = new java.util.ArrayList<>();
+        for (BlockPos pos : positions) {
+            out.add(pos.getX() + ", " + pos.getY() + ", " + pos.getZ());
+        }
+        java.util.Collections.sort(out);
+        return out.toString();
     }
 
     /**

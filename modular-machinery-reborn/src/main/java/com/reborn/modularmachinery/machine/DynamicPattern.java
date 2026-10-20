@@ -63,6 +63,19 @@ public final class DynamicPattern {
     /** 每一节之间的步进偏移。 */
     private final BlockPos stepOffset;
 
+    /**
+     * 重复段按四个朝向预先转好的布局，下标就是 {@code rotationSteps & 3}。
+     *
+     * <p>{@code match} 与 {@link #expand(int, int)} 必须用<strong>同一份</strong>旋转后的段内位置，
+     * 否则机器能不能成型会取决于它的段内布局是否旋转对称（见 {@link #rotatedSection}）。
+     * 预先算好而不是每次匹配现转，是因为量长度发生在结构检查里，而 {@code rotateYCCW} 每次都要重建整张位置表。
+     */
+    private final MachinePattern[] partRotations;
+
+    /** 收尾段的四个朝向；没有收尾段时整个数组为 {@code null}。 */
+    @Nullable
+    private final MachinePattern[] endPartRotations;
+
     public DynamicPattern(String name, Set<Direction> faces, int minSize, int maxSize,
                           MachinePattern part, @Nullable MachinePattern endPart,
                           BlockPos startOffset, BlockPos stepOffset) {
@@ -74,6 +87,17 @@ public final class DynamicPattern {
         this.endPart = endPart;
         this.startOffset = startOffset;
         this.stepOffset = stepOffset;
+        this.partRotations = rotateAll(part);
+        this.endPartRotations = endPart == null ? null : rotateAll(endPart);
+    }
+
+    private static MachinePattern[] rotateAll(MachinePattern section) {
+        MachinePattern[] out = new MachinePattern[4];
+        out[0] = section;
+        for (int steps = 1; steps < 4; steps++) {
+            out[steps] = rotatedSection(section, steps);
+        }
+        return out;
     }
 
     public String name() {
@@ -134,13 +158,19 @@ public final class DynamicPattern {
         BlockPos start = rotate(this.startOffset, rotationSteps);
         BlockPos step = rotate(this.stepOffset, rotationSteps);
 
+        // 段内布局必须与 expand 用同一套旋转：玩家照着预览（或建造投影）搭出来的结构，段里的方块已经
+        // 跟着朝向转过了，这里再拿未旋转的段内偏移去比，量出来的节数就会偏小甚至一节都量不到。
+        int index = rotationSteps & 3;
+        MachinePattern part = this.partRotations[index];
+        MachinePattern endPart = this.endPartRotations == null ? null : this.endPartRotations[index];
+
         // 多个方向都能匹配时取**最长**的那个，这是旧版的行为
         // （`DynamicPattern.matches` 末尾的 max(comparingInt(value))）。取最长而不是取第一个，
         // 是因为一台机器的长度是它自己的事实，不该取决于我们遍历方向的顺序。
         MatchResult best = MatchResult.NO_MATCH;
         for (Direction face : actual) {
-            int size = matchesSize(pos -> this.part.matches(level, pos),
-                    pos -> this.endPart != null && this.endPart.matches(level, pos),
+            int size = matchesSize(pos -> part.matches(level, pos),
+                    pos -> endPart != null && endPart.matches(level, pos),
                     controller, start, step);
             if (size >= this.minSize && size > best.size()) {
                 best = new MatchResult(size, face);
@@ -290,6 +320,30 @@ public final class DynamicPattern {
                 rotated = rotated.getCounterClockWise();
             }
             out.add(rotated);
+        }
+        return out;
+    }
+
+    /**
+     * 把一段结构绕 Y 轴逆时针旋转 {@code rotationSteps} 步，位置与标签一起转（走
+     * {@link MachinePattern#rotateYCounterClockwise()}）。
+     *
+     * <p><strong>为什么匹配与展开必须共用它：</strong>{@link #expand(int, int)} 用
+     * {@link #rotate(BlockPos, int)} 把段内每个位置转到世界方向——玩家照着建造预览搭出来的就是这个布局，
+     * 机器成型之后 {@code selector-tag} 认的也是这些位置。如果量长度时拿<strong>未旋转</strong>的段内位置去比，
+     * 那么朝向不是北的机器会量出偏小的节数（更常见的是第一节就不过、直接不成型），
+     * 而段内布局恰好旋转对称时又完全正常——这个缺陷因此只在不对称的段上显形。
+     *
+     * <p>旧版把动态模式预先生成四个朝向放进 {@code BlockArrayCache}（
+     * {@code BlockArrayCache#buildDynamicPatternCache} 对每个水平朝向各调一次 {@code BlockArray#rotateYCCW}），
+     * {@code DynamicPattern#matches} 再按控制器朝向取用；此处是同一个语义。
+     *
+     * @param rotationSteps 逆时针四分之一圈数；按 4 取模（转四步等于没转）
+     */
+    public static MachinePattern rotatedSection(MachinePattern section, int rotationSteps) {
+        MachinePattern out = section;
+        for (int i = 0; i < (rotationSteps & 3); i++) {
+            out = out.rotateYCounterClockwise();
         }
         return out;
     }

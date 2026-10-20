@@ -47,7 +47,16 @@ allprojects {
                         // recipe classes through Forge's item/energy machinery, which reaches org.objectweb.asm
                         // (Type, ClassVisitor). Without ASM the harness dies with a NoClassDefFoundError the
                         // moment it touches those classes.
-                        'org.ow2.asm'
+                        'org.ow2.asm',
+                        // Mekanism is the one mod API the check sources name as a real type at run time
+                        // (MekanismCompatCheck.java:255 ChemicalType.values(), :267 MekanismAPI.gasRegistry()).
+                        // Under -Puse_local_deps=true it resolves to a deobf jar under
+                        // caches/forge_gradle/deobf_dependencies/libs/mekanism/..., which this filter has to
+                        // keep or javac rejects those two lines.
+                        // KubeJS / Rhino / JEI must stay OFF: the harness loads KubeJS in its own ChildLoader
+                        // from the deobf jar on disk, and KubeJSMachineCheck.java:126 asserts the runtime is
+                        // absent (section Z9 depends on the same isolation).
+                        'mekanism'
                 ]
 
                 dependsOn project.tasks.named('jar')
@@ -97,8 +106,12 @@ allprojects {
                     // it deterministic for this launch path, through the ASCII junction because the workspace
                     // path is not ASCII; an explicit -D wins over the harness's own search of user.dir.
                     // Groovy needs the + to end the line, or it reads the next line as a unary plus.
+                    // Optional `-PevidenceSuffix=-x2-measure` keeps a scratch run from overwriting the
+                    // evidence file that a version's green run already owns.
+                    def evidenceSuffix = project.hasProperty('evidenceSuffix')
+                            ? project.property('evidenceSuffix').toString() : ''
                     def evidence = 'C:/mmwork/_audit/m6c-verify/harness-run-' +
-                            project.version.toString() + '.txt'
+                            project.version.toString() + evidenceSuffix + '.txt'
                     javaArgs.setText('-Dlog4j2.contextSelector=org.apache.logging.log4j.core.selector.'
                             + 'BasicContextSelector\n-Dmmverify.evidence="' + evidence + '"\n-classpath "'
                             + classpath + '" mmverify.ParallelCraftCheck\n',
