@@ -298,7 +298,10 @@ final class MekanismAnchor {
      * 存档 NBT 则是**方块实体同步时一定会带过来的**（{@code getUpdateTag} → {@code saveWithoutMetadata}
      * → 本模块的 {@code save} 写了 {@code gas}），所以读它才是稳的。
      *
-     * <p>返回 {@code {内容, 容量}}；读不到气体标签时返回 {@code null}（那一行就不显示）。
+     * <p>返回 {@code {注册名, 气体量, 容量}}，三个字段都是**原始**字符串：界面自己拼出「内容名 + 量/容量」
+     * 那一行，与流体仓的 tooltip 同一形态（所有者 2026-10-20 的实测截图：气体仓原先多出一行
+     * 「气体：」前缀、还把流体那一侧写成「空（气体占着这个仓）」，同一件事说了两遍）。
+     * 读不到气体标签时返回 {@code null}（那一行就不显示）。
      */
     @Nullable
     static String[] gasTooltip(Object entity) {
@@ -321,15 +324,16 @@ final class MekanismAnchor {
         if (fluid != null) {
             capacity = Math.max(1L, fluid.getCapacity());
         }
-        return new String[] {id + " x" + amount + " mB", Long.toString(capacity)};
+        return new String[] {id, Long.toString(amount), Long.toString(capacity)};
     }
 
     /**
      * 菜单数据槽要的两个数字：{@code {气体量, 容量}}；没有气体那一半时返回 {@code null}。
      *
-     * <p>与 {@link #gasTooltip} 分开：那个给 tooltip 的是**给人看的文字**，这个给容量条的是**数字**
-     * （菜单的数据槽只传 int）。两者都从内存里的罐算——数据槽的值由服务端每 tick 推给客户端，
-     * 所以这里读服务端那一份是准的，也不需要碰 NBT。
+     * <p>与 {@link #gasTooltip} 分开：那个给 tooltip 的是**同步过来的 NBT 读数**（三个原始字段），
+     * 这个给容量条的是**内存里的罐**（菜单的数据槽只传 int）。两者来源不同是有意的：
+     * 容量条由服务端每 tick 推给客户端，读服务端那一份是准的；tooltip 则可能在客户端从没发生过
+     * 能力查询时也要能显示（见 {@link #gasTooltip} 的注释）。
      */
     @Nullable
     static String[] menuGas(Object entity) {
@@ -358,6 +362,28 @@ final class MekanismAnchor {
             return gas == null ? 0x9E9E9E : new mekanism.api.chemical.gas.GasStack(gas, 1L).getChemicalTint();
         } catch (Throwable unavailable) {
             return 0x9E9E9E;
+        }
+    }
+
+    /**
+     * 气体的**本地化名字**（如「氢氟酸」），给界面 tooltip 的第一行。
+     *
+     * <p>走 {@link Gas#getTextComponent()} 而不是自己拼翻译键：Mekanism 把气体名放在自己的语言文件里
+     * （键形如 {@code gas.<modid>.<path>}），并且已经处理了「查不到这个名字」时的回退。
+     * 查不到这种气体时返回 {@code null}，界面回退到注册名。
+     */
+    @Nullable
+    static net.minecraft.network.chat.Component gasDisplayName(String registryName) {
+        try {
+            net.minecraft.resources.ResourceLocation id = net.minecraft.resources.ResourceLocation
+                    .tryParse(registryName);
+            if (id == null) {
+                return null;
+            }
+            Gas gas = lookupByRegistryName(id);
+            return gas == null ? null : gas.getTextComponent();
+        } catch (Throwable unavailable) {
+            return null;
         }
     }
 

@@ -62,8 +62,6 @@
   "tooltip.modular_machinery_reborn.energyhatch.charge": "%s / %s %s",
   "tooltip.modular_machinery_reborn.fluidhatch.empty": "Empty",
   "tooltip.modular_machinery_reborn.fluidhatch.tank": "%s mB / %s mB",
-  "tooltip.modular_machinery_reborn.gashatch.tank": "Gas: %s / %s mB",
-  "tooltip.modular_machinery_reborn.fluidhatch.blocked_by_gas": "Empty (gas is using this hatch)",
 
   "tooltip.modular_machinery_reborn.machine.duration.seconds": "Processing time: %.1f s",
   "tooltip.modular_machinery_reborn.machine.duration.tick": " (%s ticks)",

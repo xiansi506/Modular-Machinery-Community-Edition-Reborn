@@ -455,16 +455,24 @@ final class MekanismCompatCheck {
             report("...and it reads the generic compat accessors rather than any module type "
                     + "(the screen must not need to know which module supplies the gas)",
                     screenText.contains("ModCompat.namedValues(") || screenText.contains(".gasTooltip("));
-            // 工具提示把两件事**都**说清楚：流体那一行总是出现（没装 Mekanism 时就是从前那个 tooltip），
-            // 有气体时再加气体那一行、并且把「空」换成「空（气体占着这个仓）」。
-            // 为什么不是「只显示装着的那样」：Jade 那条路不受本模组控制（实测被 SkyResources3 的
-            // 全局 Jade 插件压掉），所以游戏内界面这一份必须是玩家能依赖的完整说法。
-            report("the tooltip always states the fluid side, and adds the gas line when gas is present "
-                    + "(the in-game tooltip must not depend on Jade to say what is in the hatch)",
-                    screenText.contains("gashatch.tank\",")
-                            && screenText.contains("gas[0], gas[1]")
-                            && screenText.contains("fluidhatch.blocked_by_gas")
-                            && screenText.contains("fluidhatch.tank"));
+            // 气体仓的 tooltip 与流体仓的**同一形态**（所有者 2026-10-20 实测截图提出）：
+            // 第一行内容名、第二行 `量 mB / 容量 mB`、最后一行坐标。
+            // 不再有「气体：」前缀，也不再把流体那一侧写成「空（气体占着这个仓）」——
+            // 一个仓里只有一种内容（互斥），有气体时再报一个 0 mB 的流体行只是把同一件事说两遍。
+            report("the gas hatch's tooltip has exactly the fluid hatch's shape: content name, amount/capacity, "
+                    + "coordinates (no \"气体：\" prefix, no \"空（气体占着这个仓）\" placeholder)",
+                    screenText.contains("gasDisplayName(")
+                            && screenText.contains("gas[1], gas[2]")
+                            && screenText.contains("fluidhatch.tank")
+                            && !screenText.contains("gashatch.tank")
+                            && !screenText.contains("blocked_by_gas"));
+            String anchorText = withoutComments(Files.readString(source));
+            report("...and the compat layer hands the screen the gas id, amount and capacity separately plus its "
+                    + "localized name (a pre-formatted \"id xN mB\" string would force the screen to parse it)",
+                    anchorText.contains("gasDisplayName")
+                            && anchorText.contains("getTextComponent()")
+                            && anchorText.contains("Long.toString(amount)")
+                            && anchorText.contains("Long.toString(capacity)"));
 
             String anchor = withoutComments(Files.readString(source));
             report("...and the gas module reports the two names the bar reads (gas.amount / gas.capacity)",

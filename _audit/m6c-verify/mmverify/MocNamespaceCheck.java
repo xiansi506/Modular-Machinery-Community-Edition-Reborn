@@ -730,11 +730,14 @@ final class MocNamespaceCheck {
         // 169 at 0.27.0; 176 from 0.29.0, when the construct tool added the original's own tooltip plus its six
         // message.structurebuild.* lines (section AA1 diffs all seven against _mmce-src's .lang); 180 with the four
         // energy unit labels, whose values ParallelCraftCheck's section R asserts one by one. 190 from 0.37.0:
-        // the fluid hatch's tooltip gained a gas line (	ooltip.modular_machinery_reborn.gashatch.tank) so that a
+        // the fluid hatch's tooltip gained a gas line (tooltip.modular_machinery_reborn.gashatch.tank) so that a
         // gas inside a fluid hatch is finally visible in game -- the owner reported that Jade showed it and the
-        // hatch screen did not.
-        check("en_us.json key count", 193, en.size());
-        check("zh_cn.json key count", 193, zh.size());
+        // hatch screen did not. 193 later.
+        // 191 from 0.63.4: the owner asked the gas hatch's tooltip to have exactly the fluid hatch's shape
+        // (content name, "N mB / M mB", coordinates), so gashatch.tank (the "气体：" prefix) and
+        // fluidhatch.blocked_by_gas ("空（气体占着这个仓）") were removed -- 193 minus 2.
+        check("en_us.json key count", 191, en.size());
+        check("zh_cn.json key count", 191, zh.size());
         Set<String> enKeys = new TreeSet<>(en.keySet());
         Set<String> zhKeys = new TreeSet<>(zh.keySet());
         report("the two files carry identical key sets (" + enKeys.size() + " keys each)", enKeys.equals(zhKeys));

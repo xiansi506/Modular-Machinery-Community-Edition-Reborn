@@ -147,9 +147,7 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
         if (gas == null || gas.length == 0) {
             return 0x9E9E9E;
         }
-        int space = gas[0].indexOf(' ');
-        String id = space > 0 ? gas[0].substring(0, space) : gas[0];
-        return com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasTint(id);
+        return com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasTint(gas[0]);
     }
 
     private static int filledPixels(float percent) {
@@ -196,39 +194,38 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
                             display.display(menu.energyCapacity())),
                     display.labelComponent()));
         }
-        // 气体那一行先算：**一个仓里只能有一种东西**（互斥，见
-        // MachineHatchBlockEntity#FluidTankWithGasPriority），但工具提示要把两件事**都**说清楚——
-        // 有气体时也要让玩家知道「液体那一半被气体占着」，而不是干脆不提。
+        // 工具提示的形态**由所有者定**（2026-10-20 实测截图）：气体仓与液体仓一样，三行——
+        // 内容名、`量 mB / 容量 mB`、坐标。一个仓里只有一种内容（互斥，见
+        // MachineHatchBlockEntity#FluidTankWithGasPriority），所以有气体时不再额外报一行 0 mB 的流体，
+        // 也不再用「气体：」前缀：那只是把同一件事说两遍，而且第一行会是「空（气体占着这个仓）」。
         //
-        // 波 5.3：流体仓的界面只画流体，所以气体进了仓在游戏里除了 Jade 没有显示——
-        // 所有者实测反馈正是「玉模组显示、游戏内界面不显示」（规矩 6：看不见的状态必须能被看见或问出来）。
-        // 取值走 MekanismModule.gasTooltip：读的是**方块实体里同步过来的存档 NBT**（gas 标签），
-        // 不是内存里的气体罐——后者只在「这条路上被走到过」时才存在，而客户端可能从没发生过能力查询
-        // （查询来自管道与机器，在服务端）。没装 Mekanism 时它返回 null，这一行不出现。
+        // 为什么游戏内界面非要有这一份：Jade 那条路**不受本模组控制**——所有者这台实例上
+        // SkyResources3 的 Jade 插件会对所有方块注册、且不判断是不是自家方块，把方块名那一段替换成
+        // 它自己的空机器（全是 0 / 空闲）。所以游戏内界面才是玩家能依赖的那一份（规矩 6）。
+        //
+        // 取值走 MekanismModule：读的是**方块实体里同步过来的存档 NBT**（gas 标签），不是内存里的气体罐
+        // ——后者只在「这条路上被走到过」时才存在，而客户端可能从没发生过能力查询（查询来自管道与机器，
+        // 在服务端）。没装 Mekanism 时它返回 null，走流体那一条分支。
         String[] gas = com.reborn.modularmachinery.compat.mekanism.MekanismModule
                 .gasTooltip(menu.hatch());
-
-        // 流体那一行**总是**出现（没装 Mekanism 时这就是从前那个 tooltip，一字不差）。
-        // 这一条是所有者实测逼出来的：Jade 那条路**不受本模组控制**——他这台实例上
-        // SkyResources3 的 Jade 插件是「对所有方块注册、且不判断是不是自家方块」，会把
-        // 方块名那一段替换掉并渲染成它自己的空机器（全是 0 / 空闲），于是我的流体栏显示不出来。
-        // 游戏内界面是本模组自己的，所以把它做成玩家能依赖的那一份。
         FluidStack fluid = menu.hatch().fluidTank().getFluid();
         List<Component> lines = new java.util.ArrayList<>(3);
-        if (fluid.isEmpty() || menu.fluidAmount() <= 0) {
-            lines.add(gas == null
-                    ? Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty")
-                    : Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.blocked_by_gas"));
+        if (gas != null) {
+            // 名字用 Mekanism 自己的翻译（zh_cn「氢氟酸」/ en_us "Hydrofluoric Acid"）；查不到这种气体时
+            // 退回注册名，至少不会显示一个空行。
+            Component name = com.reborn.modularmachinery.compat.mekanism.MekanismModule
+                    .gasDisplayName(gas[0]);
+            lines.add(name == null ? Component.literal(gas[0]) : name);
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank",
+                    gas[1], gas[2]));
+        } else if (fluid.isEmpty() || menu.fluidAmount() <= 0) {
+            lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.empty"));
             lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank", 0,
                     menu.fluidCapacity()));
         } else {
             lines.add(fluid.getDisplayName());
             lines.add(Component.translatable("tooltip.modular_machinery_reborn.fluidhatch.tank",
                     menu.fluidAmount(), menu.fluidCapacity()));
-        }
-        if (gas != null) {
-            lines.add(Component.translatable("tooltip.modular_machinery_reborn.gashatch.tank",
-                    gas[0], gas[1]));
         }
         // 最后一行写**这个方块的位置**。
         //

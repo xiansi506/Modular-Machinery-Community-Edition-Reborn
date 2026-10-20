@@ -160,13 +160,24 @@ public final class MekanismModule implements CompatModule {
     }
 
     /**
-     * 界面 tooltip 要的两个字段：{@code {内容, 容量}}；没有气体时返回 {@code null}。
+     * 界面 tooltip 要的三个字段：{@code {注册名, 气体量, 容量}}；没有气体时返回 {@code null}。
      *
-     * <p>读的是同步过来的存档 NBT 而不是内存里的气体罐，理由见 {@code MekanismAnchor#gasTooltip}。
+     * <p>三个字段都是原始字符串，由界面拼成与流体仓相同的那一行——不是给人看的成品文字。
+     * 读的是同步过来的存档 NBT 而不是内存里的气体罐，理由见 {@code MekanismAnchor#gasTooltip}。
      */
     @javax.annotation.Nullable
     public static String[] gasTooltip(Object entity) {
         return MekanismAnchor.gasTooltip(entity);
+    }
+
+    /**
+     * 某种气体的本地化名字（如「氢氟酸」），给界面 tooltip 的第一行；查不到时返回 {@code null}。
+     *
+     * <p>返回的是原版 {@code Component}：主模组只认识它，不认识 Mekanism 的气体类型（勘测 X4 的隔离）。
+     */
+    @javax.annotation.Nullable
+    public static net.minecraft.network.chat.Component gasDisplayName(String registryName) {
+        return MekanismAnchor.gasDisplayName(registryName);
     }
 
     /**
