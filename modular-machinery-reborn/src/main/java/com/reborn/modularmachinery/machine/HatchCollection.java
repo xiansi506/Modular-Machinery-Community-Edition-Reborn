@@ -1,6 +1,5 @@
 package com.reborn.modularmachinery.machine;
 
-import mekanism.api.chemical.gas.IGasHandler;
 import net.minecraftforge.energy.IEnergyStorage;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.IItemHandler;
@@ -64,9 +63,16 @@ public final class HatchCollection {
      *
      * <p>这两个桶**只有在装了 Mekanism 时才可能非空**：往里放端口的映射器由那个模块注册，
      * 没装它的时候 {@link Builder#gasPorts} 找不到任何映射器，桶就是空的。
+     *
+     * <p><b>装的是 {@code Object}，不是 {@code IGasHandler}（勘测 X4）。</b>主模组不引用任何可选模组的
+     * API 类型：{@link com.reborn.modularmachinery.compat.ModCompat} 的隔离契约要求「没装那个模组时，
+     * 它的类一个都不加载」，而字段类型在类校验时就会被解析——只要这个字段还写着 {@code IGasHandler}，
+     * 一个手工放进去的端口（任何第二个注册端口映射器的兼容模块都会造成这种情况）就会在**每次结构成型**时
+     * 抛 {@code NoClassDefFoundError}。这里只当**不透明对象**搬运，解释它的是拥有这个家族的兼容模块
+     * （Mekanism 侧 {@code GasIo} 自己转型）。
      */
-    private final List<IGasHandler> gasInputs;
-    private final List<IGasHandler> gasOutputs;
+    private final List<Object> gasInputs;
+    private final List<Object> gasOutputs;
 
     /**
      * 每个端口来自哪个打了标签的结构位置，与上面六个桶<strong>逐个对应</strong>。
@@ -106,7 +112,7 @@ public final class HatchCollection {
     private HatchCollection(List<IItemHandler> itemInputs, List<IItemHandler> itemOutputs,
                             List<IFluidHandler> fluidInputs, List<IFluidHandler> fluidOutputs,
                             List<IEnergyStorage> energyInputs, List<IEnergyStorage> energyOutputs,
-                            List<IGasHandler> gasInputs, List<IGasHandler> gasOutputs,
+                            List<Object> gasInputs, List<Object> gasOutputs,
                             List<String> itemInputTags, List<String> itemOutputTags,
                             List<String> fluidInputTags, List<String> fluidOutputTags,
                             List<String> energyInputTags, List<String> energyOutputTags,
@@ -179,12 +185,12 @@ public final class HatchCollection {
      * {@code GasIo} 对空列表一律答「没有 / 抽不到 / 灌不进」，于是一条气体配方在没有气体端口的机器上
      * 表现为**开工失败**（并给出 {@code craftcheck.failure.gas.input}），不是崩溃，也不是静默成功。
      */
-    public List<IGasHandler> gasInputs() {
+    public List<Object> gasInputs() {
         return this.gasInputs;
     }
 
     /** 气体**输出**端口。规则同 {@link #gasInputs()}。 */
-    public List<IGasHandler> gasOutputs() {
+    public List<Object> gasOutputs() {
         return this.gasOutputs;
     }
 
@@ -353,8 +359,8 @@ public final class HatchCollection {
         private final List<IFluidHandler> fluidOutputs = new ArrayList<>();
         private final List<IEnergyStorage> energyInputs = new ArrayList<>();
         private final List<IEnergyStorage> energyOutputs = new ArrayList<>();
-        private final List<IGasHandler> gasInputs = new ArrayList<>();
-        private final List<IGasHandler> gasOutputs = new ArrayList<>();
+        private final List<Object> gasInputs = new ArrayList<>();
+        private final List<Object> gasOutputs = new ArrayList<>();
 
         /** 与上面六个桶逐个对应，见 {@link HatchCollection#itemInputTags} 的说明。 */
         private final List<String> itemInputTags = new ArrayList<>();
@@ -439,17 +445,18 @@ public final class HatchCollection {
          * <p>没装那个模组时这里什么都不会发生（没有映射器），于是气体桶保持为空——而空桶的语义是安全的：
          * {@code GasIo} 对空列表一律答「没有」，一条气体配方于是**开工失败**而不是崩溃或静默成功。
          *
+         * <p>问的是 {@code "gas"} 这个家族，而桶里存的是**不透明对象**：主模组不认识
+         * {@code IGasHandler}，也不该认识（勘测 X4）。家族名就是主模组与兼容层之间的全部契约。
+         *
          * @param entity      结构位置上的方块实体
          * @param input       这个位置是输入方向还是输出方向（由仓口种类决定，与物品/流体同一条规则）
          * @param selectorTag 该位置的 {@code selector-tag}
          */
         public Builder gasPorts(Object entity, boolean input, @javax.annotation.Nullable String selectorTag) {
             String tag = (selectorTag == null || selectorTag.isEmpty()) ? UNTAGGED : selectorTag;
-            for (Object handler : com.reborn.modularmachinery.compat.ModCompat.portHandlers(entity)) {
-                if (handler instanceof IGasHandler gas) {
-                    (input ? this.gasInputs : this.gasOutputs).add(gas);
-                    (input ? this.gasInputTags : this.gasOutputTags).add(tag);
-                }
+            for (Object handler : com.reborn.modularmachinery.compat.ModCompat.portHandlers(entity, "gas")) {
+                (input ? this.gasInputs : this.gasOutputs).add(handler);
+                (input ? this.gasInputTags : this.gasOutputTags).add(tag);
             }
             return this;
         }

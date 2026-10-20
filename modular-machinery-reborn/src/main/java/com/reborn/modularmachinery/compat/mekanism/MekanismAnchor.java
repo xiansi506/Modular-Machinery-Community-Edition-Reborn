@@ -43,6 +43,11 @@ final class MekanismAnchor {
     private static final Map<MachineHatchBlockEntity, HybridGasTank> TANKS =
             Collections.synchronizedMap(new WeakHashMap<>());
 
+    /**
+     * 端口收集时用的家族名。主模组只认识这个字符串，不认识它背后的 {@link IGasHandler}（勘测 X4）。
+     */
+    static final String GAS_FAMILY = "gas";
+
     private MekanismAnchor() {
     }
 
@@ -134,7 +139,10 @@ final class MekanismAnchor {
          * 配方读到的那份状态与管道灌进去的那份必须是同一份，这是 {@code tankOf} 用身份 map 的原因。
          */
         @Override
-        public java.util.List<?> handlers(Object entity) {
+        public java.util.List<?> handlers(Object entity, @Nullable String family) {
+            if (family != null && !GAS_FAMILY.equals(family)) {
+                return java.util.List.of();
+            }
             HybridGasTank tank = tankOf(entity);
             MekanismProbe.handlers(entity, tank == null ? 0 : 1);
             return tank == null ? java.util.List.of() : java.util.List.of(tank.handler());

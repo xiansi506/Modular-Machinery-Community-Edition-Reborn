@@ -40,19 +40,6 @@ public interface BlockEntityPortMapper {
     LazyOptional<?> map(Capability<?> capability, Object entity);
 
     /**
-     * 这个实体上**属于本模块**的端口处理器，供**端口收集**使用（与 {@link #map} 的 Forge 能力查询不同）。
-     *
-     * <p>为什么需要单独一个方法：端口收集一次要拿到「这个实体上你所有的端口」，而不是回答
-     * 「某个能力是不是你的」。那时没有 {@code Capability} 对象可比——主模组根本不知道那种能力是什么，
-     * 所以只能由模块自己认出自己的实体。
-     *
-     * <p>返回的处理器是**长期持有**的引用（存进 {@code HatchCollection}，配方生命周期反复读它），
-     * 所以不要返回一个每次调用都新建的包装对象：那会让「配方看到的那一份」与「能力查询拿到的那一份」
-     * 变成两个对象、两份状态。
-     *
-     * <p>默认空列表：只加能力、不参与配方结算的模块不需要它。
-     */
-    /**
      * 这个映射器认领的是哪些能力，给**诊断**用（可读的名字，而不是 {@code Capability@25f549c}）。
      *
      * <p>为什么值得有这个方法：{@code Capability#toString()} 只给对象身份，于是
@@ -84,13 +71,21 @@ public interface BlockEntityPortMapper {
      * 「某个能力是不是你的」。那时没有 {@code Capability} 对象可比——主模组根本不知道那种能力是什么，
      * 所以只能由模块自己认出自己的实体。
      *
+     * <p><b>{@code family} 是主模组与模块之间的契约（勘测 X4）。</b>主模组的桶按家族分开
+     * （目前只有 {@code "gas"}），而主模组**不认识**家族背后的 API 类型——它只把返回的对象当不透明引用
+     * 存进 {@link HatchCollection}。所以模块必须自己判断「这个家族是不是我的」：不认识就返回空列表。
+     * {@code family == null} 表示「所有家族」，只给诊断与「有没有任何端口」这类询问用。
+     *
      * <p>返回的处理器是**长期持有**的引用（存进 {@code HatchCollection}，配方生命周期反复读它），
      * 所以不要返回一个每次调用都新建的包装对象：那会让「配方看到的那一份」与「能力查询拿到的那一份」
      * 变成两个对象、两份状态。
      *
      * <p>默认空列表：只加能力、不参与配方结算的模块不需要它。
+     *
+     * @param entity 被收集的方块实体，非空
+     * @param family 端口家族（{@code "gas"}），或 {@code null} 表示所有家族
      */
-    default java.util.List<?> handlers(Object entity) {
+    default java.util.List<?> handlers(Object entity, @Nullable String family) {
         return java.util.List.of();
     }
 

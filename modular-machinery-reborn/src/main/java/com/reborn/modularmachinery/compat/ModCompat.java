@@ -186,11 +186,28 @@ public final class ModCompat {
      *
      * <p>返回的是处理器本身而不是 {@code LazyOptional}，因为调用方（端口收集）要的是长期持有的引用，
      * 与 Forge 的能力查询语义不同——{@link BlockEntityPortMapper#handlers} 就是为这件事存在的。
+     *
+     * <p>这个无参家族的版本回答「**所有**家族」，只给诊断与「有没有任何端口」这类询问用。
+     * 端口收集走 {@link #portHandlers(Object, String)}，因为主模组的桶是按家族分开的。
      */
     public static List<Object> portHandlers(Object entity) {
+        return portHandlers(entity, null);
+    }
+
+    /**
+     * 这个实体上属于 {@code family} 家族的兼容端口处理器，按登记顺序。
+     *
+     * <p><b>为什么要家族（勘测 X4）。</b>主模组把端口存成**不透明对象**：它不引用任何可选模组的
+     * API 类型，也就不可能自己判断「这个对象是不是气体」。家族名（目前只有 {@code "gas"}）是它与
+     * 模块之间唯一的契约，由模块回答「这个家族是不是我的」。不认识该家族的模块必须返回空列表。
+     *
+     * @param entity 被收集的方块实体
+     * @param family 端口家族；{@code null} 表示所有家族
+     */
+    public static List<Object> portHandlers(Object entity, @Nullable String family) {
         List<Object> handlers = new ArrayList<>();
         for (BlockEntityPortMapper mapper : PORT_MAPPERS) {
-            handlers.addAll(mapper.handlers(entity));
+            handlers.addAll(mapper.handlers(entity, family));
         }
         return handlers;
     }

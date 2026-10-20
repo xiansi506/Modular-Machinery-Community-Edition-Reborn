@@ -24,16 +24,31 @@ import java.util.List;
  * {@code GasStack.EMPTY}：后者是**气体这一门**的空栈，而 {@code IChemicalHandler} 是四门化学共用的接口，
  * 一个实现方可以合法地不是气体 handler。虽然本项目只取 {@code IGasHandler} 形状的端口，
  * 但用 API 自己给的答案就不必依赖这个前提。
+ *
+ * <p><b>为什么参数是 {@code List<?>}（勘测 X4）。</b>主模组的 {@code HatchCollection} 把端口存成
+ * **不透明对象**，因为它不能引用 {@code IGasHandler}——否则没装 Mekanism 的进程在端口收集时就会
+ * {@code NoClassDefFoundError}。转型于是发生在这里：本类本来就属于 Mekanism 模块。列表里出现的
+ * 非气体对象被**跳过**而不是抛异常：那只会是某个兼容模块违反了家族契约，而让整条配方检查炸掉
+ * 比忽略一个不该存在的端口更糟。
  */
 final class GasIo {
 
     private GasIo() {
     }
 
+    /** 端口列表里的气体处理器；不是气体端口时返回 {@code null}。 */
+    private static IGasHandler gasOf(Object port) {
+        return port instanceof IGasHandler handler ? handler : null;
+    }
+
     /** 这些端口上现存的 {@code gas} 总量。 */
-    static int count(List<IGasHandler> handlers, GasStack gas) {
+    static int count(List<?> handlers, GasStack gas) {
         long total = 0L;
-        for (IGasHandler handler : handlers) {
+        for (Object port : handlers) {
+            IGasHandler handler = gasOf(port);
+            if (handler == null) {
+                continue;
+            }
             for (int tank = 0; tank < handler.getTanks(); tank++) {
                 GasStack stored = handler.getChemicalInTank(tank);
                 if (!stored.isEmpty() && stored.isTypeEqual(gas)) {
@@ -53,7 +68,7 @@ final class GasIo {
      * <p>先按 {@link #count} 确认总量够，再逐罐 {@code Action.EXECUTE}——
      * 与 {@code IngredientIo.drainFluid} 完全同构（那边也是先 {@code countFluid} 再逐罐 {@code EXECUTE}）。
      */
-    static boolean extract(List<IGasHandler> handlers, GasStack gas, int amount) {
+    static boolean extract(List<?> handlers, GasStack gas, int amount) {
         if (amount <= 0) {
             return true;
         }
@@ -61,7 +76,11 @@ final class GasIo {
             return false;
         }
         long remaining = amount;
-        for (IGasHandler handler : handlers) {
+        for (Object port : handlers) {
+            IGasHandler handler = gasOf(port);
+            if (handler == null) {
+                continue;
+            }
             if (remaining <= 0L) {
                 break;
             }
@@ -72,12 +91,16 @@ final class GasIo {
     }
 
     /** 这些端口能不能再接受 {@code amount}（只模拟，不改动任何东西）。 */
-    static boolean canInsert(List<IGasHandler> handlers, GasStack gas, int amount) {
+    static boolean canInsert(List<?> handlers, GasStack gas, int amount) {
         if (amount <= 0) {
             return true;
         }
         long remaining = amount;
-        for (IGasHandler handler : handlers) {
+        for (Object port : handlers) {
+            IGasHandler handler = gasOf(port);
+            if (handler == null) {
+                continue;
+            }
             if (remaining <= 0L) {
                 break;
             }
@@ -88,7 +111,7 @@ final class GasIo {
     }
 
     /** 灌入 {@code amount}，不足则**一并失败**（先模拟，够了才真的灌）。 */
-    static boolean insert(List<IGasHandler> handlers, GasStack gas, int amount) {
+    static boolean insert(List<?> handlers, GasStack gas, int amount) {
         if (amount <= 0) {
             return true;
         }
@@ -96,7 +119,11 @@ final class GasIo {
             return false;
         }
         long remaining = amount;
-        for (IGasHandler handler : handlers) {
+        for (Object port : handlers) {
+            IGasHandler handler = gasOf(port);
+            if (handler == null) {
+                continue;
+            }
             if (remaining <= 0L) {
                 break;
             }
@@ -118,9 +145,13 @@ final class GasIo {
      * 合起来就说清了「这个罐还能收多少」，不需要靠 {@code insertChemical} 去试
      * （对照 {@code IngredientIo.insertCapacity(List<IFluidHandler>, FluidStack)} 的注释）。
      */
-    static int capacity(List<IGasHandler> handlers, GasStack gas) {
+    static int capacity(List<?> handlers, GasStack gas) {
         long capacity = 0L;
-        for (IGasHandler handler : handlers) {
+        for (Object port : handlers) {
+            IGasHandler handler = gasOf(port);
+            if (handler == null) {
+                continue;
+            }
             for (int tank = 0; tank < handler.getTanks(); tank++) {
                 GasStack stored = handler.getChemicalInTank(tank);
                 long free = handler.getTankCapacity(tank);

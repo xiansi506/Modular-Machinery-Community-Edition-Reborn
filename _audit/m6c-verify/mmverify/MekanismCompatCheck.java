@@ -383,6 +383,37 @@ final class MekanismCompatCheck {
             report("withTag filters the two gas buckets as well (otherwise a tagged gas requirement would see "
                     + "every gas port)", collectionText.contains("filter(this.gasInputs, this.gasInputTags, wanted)")
                             && collectionText.contains("filter(this.gasOutputs, this.gasOutputTags, wanted)"));
+
+            // ---- 勘测 X4：主模块硬引用可选模组的 API 类型 ----------------------------------------
+            // 这一条比上面那条（只查方块实体）宽：**compat/ 之外的任何源文件**都不该出现某个可选模组的
+            // API 类型。判据刻意写成 import/全限定名，而不是「出现 mekanism 这个词」——
+            // com...compat.mekanism.MekanismModule 这类**不带第三方类型签名**的调用是允许的
+            // （它自己必须能在没装那个模组的进程里加载），而 IGasHandler 这类类型出现在签名/字段/转型里
+            // 就会在类校验时被解析。
+            List<Path> mainSources = new ArrayList<>();
+            try (java.util.stream.Stream<Path> walk = Files.walk(Path.of(
+                    "C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery"))) {
+                walk.filter(p -> p.toString().endsWith(".java"))
+                        .filter(p -> !p.toString().replace('\\', '/').contains("/compat/"))
+                        .forEach(mainSources::add);
+            }
+            List<String> apiUsers = new ArrayList<>();
+            for (Path file : mainSources) {
+                String text = withoutComments(Files.readString(file));
+                if (text.contains("import mekanism.") || text.contains("mekanism.api")) {
+                    apiUsers.add(file.getFileName().toString());
+                }
+            }
+            report("no main-module source outside compat/ imports or names a Mekanism API type (X4: it would "
+                    + "fail to load without Mekanism; offenders: " + apiUsers + ")", apiUsers.isEmpty());
+            report("the gas buckets are opaque Objects, so validating HatchCollection never resolves a Mekanism "
+                    + "type (X4)", collectionText.contains("private final List<Object> gasInputs;")
+                            && collectionText.contains("private final List<Object> gasOutputs;"));
+            report("...and gasPorts asks the compat layer for the \"gas\" family instead of testing the handler "
+                    + "type itself (X4)", collectionText.contains("portHandlers(entity, \"gas\")")
+                            && !collectionText.contains("instanceof IGasHandler"));
+            report("...while the Mekanism mapper answers only for its own family, without touching the tank map "
+                    + "for an unknown one (X4)", anchor.contains("!GAS_FAMILY.equals(family)"));
         } catch (Exception exception) {
             report("reading the port sources failed: " + exception, false);
         }

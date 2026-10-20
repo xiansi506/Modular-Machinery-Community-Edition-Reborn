@@ -1,0 +1,15 @@
+﻿== class load ==
+LOADED com.reborn.modularmachinery.machine.HatchCollection definedBy=jdk.internal.loader.ClassLoaders$AppClassLoader@7852e922
+== ordinary collection ==
+built isEmpty=true hatchCount=0
+withTag ok describeRows=0
+gasInputs=0 gasOutputs=0
+== gasPorts with no mapper registered ==
+OK gas inputs=0
+== register a mapper that returns one handler, then gasPorts ==
+2026-10-20 12:31:20,564 main WARN Advanced terminal features are not available in this environment
+[12:31:20] [main/INFO] [co.re.mo.ModularMachineryReborn/]: [modular_machinery_reborn] Compat module probe:gas registered. Requirement kinds now: [modular_machinery_reborn:item, modular_machinery_reborn:fluid, modular_machinery_reborn:energy, modular_machinery_reborn:interface_number_input, modular_machinery_reborn:ingredient_array_input]
+registered modules=1 portMappers=1
+handlers(all)=1 handlers(gas)=1 handlers(aura)=0
+OK gas inputs=1 storedType=java.lang.Object
+
