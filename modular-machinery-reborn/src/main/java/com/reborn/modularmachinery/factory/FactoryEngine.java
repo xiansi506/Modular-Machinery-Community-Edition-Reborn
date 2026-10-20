@@ -277,16 +277,24 @@ public final class FactoryEngine {
             // pays in two different groups is two candidates: which one a thread gets decides which ports it
             // will keep drawing from for the rest of the settlement.
             for (int group : ports.groupIds()) {
-                if (recipe.canStart(ports.withGroup(group), modifiers)) {
-                    out.add(new Candidate(recipe, group));
+                HatchCollection groupPorts = ports.withGroup(group);
+                // B9: a catalyst is optional and is counted only where it is present, so the effective
+                // modifiers belong to the (recipe, group) pair. They are frozen into the candidate; the host's
+                // base modifiers stay untouched because every thread shares them.
+                RecipeModifiers effective = modifiers.andThen(recipe.catalystModifiers(groupPorts));
+                if (recipe.canStart(groupPorts, effective)) {
+                    out.add(new Candidate(recipe, group, effective));
                 }
             }
         }
         return out;
     }
 
-    /** One startable pairing of a recipe with the port group it was proved to pay in. */
-    private record Candidate(MachineRecipe recipe, int group) {
+    /**
+     * One startable pairing of a recipe with the port group it was proved to pay in, plus the modifiers that
+     * pairing froze (B9: catalyst modifiers depend on which group's ports hold the catalyst).
+     */
+    private record Candidate(MachineRecipe recipe, int group, RecipeModifiers modifiers) {
     }
 
     /** The slot the next recipe should go to: an idle ordinary thread first, otherwise a new one. */
@@ -327,7 +335,8 @@ public final class FactoryEngine {
             if (thread.accepts(candidate.recipe())) {
                 // The candidate list was built from `canStart` for that group, so the first entry this thread
                 // accepts is startable.
-                return new ActiveCraft(candidate.recipe(), availableParallelism(thread), candidate.group());
+                return new ActiveCraft(candidate.recipe(), availableParallelism(thread), candidate.group(),
+                        candidate.modifiers());
             }
         }
         return null;
@@ -335,8 +344,7 @@ public final class FactoryEngine {
 
     /** Runs the start phase of {@code craft} on {@code thread} and announces it when it took. */
     private boolean begin(FactoryThread thread, ActiveCraft craft) {
-        if (!thread.begin(craft, this.host.ports().withGroup(craft.group()), this.host.modifiers(),
-                this.host.random())) {
+        if (!thread.begin(craft, this.host.ports().withGroup(craft.group()), this.host.random())) {
             return false;
         }
         this.dirty = true;
@@ -373,7 +381,7 @@ public final class FactoryEngine {
         }
 
         HatchCollection ports = this.host.ports().withGroup(craft.group());
-        RecipeModifiers modifiers = this.host.modifiers();
+        RecipeModifiers modifiers = craft.modifiers();
 
         // Re-assert the freeze every tick: the recipe object is shared with every other controller in the
         // level, so another machine's settlement must not be able to change what this thread pays.
@@ -430,9 +438,14 @@ public final class FactoryEngine {
      * simpler and identical in every case the harness and the game exercise.
      */
     private void tryRestart(FactoryThread thread, ActiveCraft finished) {
-        ActiveCraft again = new ActiveCraft(finished.recipe(), finished.parallelism(), finished.group());
-        if (thread.begin(again, this.host.ports().withGroup(again.group()), this.host.modifiers(),
-                this.host.random())) {
+        HatchCollection groupPorts = this.host.ports().withGroup(finished.group());
+        // B9: the catalyst was consumed by the previous settlement, so the restart must ask the ports again
+        // instead of inheriting the old snapshot.
+        RecipeModifiers effective = this.host.modifiers().andThen(
+                finished.recipe().catalystModifiers(groupPorts));
+        ActiveCraft again = new ActiveCraft(finished.recipe(), finished.parallelism(), finished.group(),
+                effective);
+        if (thread.begin(again, groupPorts, this.host.random())) {
             this.dirty = true;
             this.host.onThreadStarted(thread);
             return;
@@ -619,7 +632,9 @@ public final class FactoryEngine {
         if (recipe == null) {
             return;
         }
-        ActiveCraft craft = new ActiveCraft(recipe, 1, saved.group());
+        HatchCollection groupPorts = this.host.ports().withGroup(saved.group());
+        RecipeModifiers effective = this.host.modifiers().andThen(recipe.catalystModifiers(groupPorts));
+        ActiveCraft craft = new ActiveCraft(recipe, 1, saved.group(), effective);
         craft.setProgress(saved.progress());
         thread.restart(craft);
     }
@@ -650,16 +665,18 @@ public final class FactoryEngine {
         private final ResourceLocation recipeId;
         private final int parallelism;
         private final int group;
+        private final RecipeModifiers modifiers;
 
         private int progress;
         private int duration;
 
-        ActiveCraft(MachineRecipe recipe, int parallelism, int group) {
+        ActiveCraft(MachineRecipe recipe, int parallelism, int group, RecipeModifiers modifiers) {
             this.recipe = recipe;
             this.recipeId = recipe.getId();
             this.parallelism = Math.max(1, parallelism);
             this.group = group;
-            this.duration = Math.max(1, recipe.recipeTime());
+            this.modifiers = modifiers;
+            this.duration = Math.max(1, recipe.duration(modifiers));
         }
 
         public MachineRecipe recipe() {
@@ -681,6 +698,15 @@ public final class FactoryEngine {
          */
         public int group() {
             return this.group;
+        }
+
+        /**
+         * The modifiers this settlement froze at its start, catalyst modifiers included only for catalysts that
+         * were present in that group's ports then. Re-asking the ports later is wrong: the catalyst is consumed
+         * by {@code start}.
+         */
+        public RecipeModifiers modifiers() {
+            return this.modifiers;
         }
 
         /** Ticks already settled, the original's {@code ActiveMachineRecipe#getTick}. */

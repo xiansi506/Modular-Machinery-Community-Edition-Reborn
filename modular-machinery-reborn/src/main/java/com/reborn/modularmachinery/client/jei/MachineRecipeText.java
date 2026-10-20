@@ -61,6 +61,9 @@ final class MachineRecipeText {
      * M6d-b: the smart interface's three tip lines, which are the original's
      * {@code tooltip.machinery.smartinterface.value} / {@code .minvalue} / {@code .maxvalue}, re-namespaced.
      */
+    /** The original's {@code tooltip.machinery.catalyst} / {@code .effect}, re-keyed (0.65.0). */
+    private static final String KEY_CATALYST = "tooltip.modular_machinery_reborn.catalyst";
+    private static final String KEY_CATALYST_EFFECT = "tooltip.modular_machinery_reborn.catalyst.effect";
     private static final String KEY_INTERFACE_VALUE = "tooltip.modular_machinery_reborn.smartinterface.value";
     private static final String KEY_INTERFACE_MIN = "tooltip.modular_machinery_reborn.smartinterface.minvalue";
     private static final String KEY_INTERFACE_MAX = "tooltip.modular_machinery_reborn.smartinterface.maxvalue";
@@ -203,6 +206,21 @@ final class MachineRecipeText {
         }
         tooltip.add(Component.translatable(input ? KEY_MIN_MAX_IN : KEY_MIN_MAX_OUT,
                 item.minAmount(), item.maxAmount()));
+    }
+
+    /**
+     * The original's {@code JEIComponentCatalyst#onJEIHoverTooltip}: after the array line, always say the slot is
+     * an optional catalyst input, then print the author's effect lines when there are any.
+     */
+    static void addCatalystTooltip(ITooltipBuilder tooltip, List<String> effects) {
+        tooltip.add(Component.translatable(KEY_CATALYST));
+        if (effects.isEmpty()) {
+            return;
+        }
+        tooltip.add(Component.translatable(KEY_CATALYST_EFFECT));
+        for (String effect : effects) {
+            tooltip.add(Component.literal(effect));
+        }
     }
 
     /**

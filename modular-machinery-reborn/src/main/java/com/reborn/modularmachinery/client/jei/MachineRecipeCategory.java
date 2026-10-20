@@ -2,6 +2,7 @@ package com.reborn.modularmachinery.client.jei;
 
 import com.reborn.modularmachinery.block.ModBlocks;
 import com.reborn.modularmachinery.machine.MachineDefinition;
+import com.reborn.modularmachinery.recipe.CatalystRequirement;
 import com.reborn.modularmachinery.recipe.FluidRequirement;
 import com.reborn.modularmachinery.recipe.IOType;
 import com.reborn.modularmachinery.recipe.IngredientArrayRequirement;
@@ -237,7 +238,15 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
             List<ItemStack> stacks;
             float chance;
             boolean amountRange = false;
-            if (requirement instanceof IngredientArrayRequirement array) {
+            CatalystRequirement catalyst = null;
+            if (requirement instanceof CatalystRequirement catalystRequirement) {
+                // A catalyst is an input group exactly like an ingredient array, plus its own effect lines. It is
+                // not an ItemRequirement, so without this branch the cast below would crash the page (the same
+                // shape as the gas crash guarded above).
+                catalyst = catalystRequirement;
+                stacks = catalystRequirement.entryStacksFlat();
+                chance = catalystRequirement.chance();
+            } else if (requirement instanceof IngredientArrayRequirement array) {
                 stacks = array.entryStacksFlat();
                 chance = array.chance();
             } else {
@@ -261,12 +270,16 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
             }
             ItemRequirement itemForRange = amountRange ? (ItemRequirement) requirement : null;
             ItemRequirement finalItemForRange = itemForRange;
+            CatalystRequirement finalCatalyst = catalyst;
             slot.addRichTooltipCallback((view, tooltip) -> {
                 MachineRecipeText.addChanceTooltip(!output, tooltip, chance);
                 if (finalItemForRange != null) {
                     MachineRecipeText.addAmountRangeTooltip(!output, tooltip, finalItemForRange);
                 } else {
                     MachineRecipeText.addIngredientArrayTooltip(tooltip);
+                    if (finalCatalyst != null) {
+                        MachineRecipeText.addCatalystTooltip(tooltip, finalCatalyst.tooltips());
+                    }
                 }
             });
         }

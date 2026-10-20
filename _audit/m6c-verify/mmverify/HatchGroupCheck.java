@@ -203,14 +203,19 @@ final class HatchGroupCheck {
             String engine = withoutComments(source("factory/FactoryEngine.java"));
             report("the factory tries every candidate group of every runnable recipe",
                     engine.contains("for (int group : ports.groupIds())")
-                            && engine.contains("recipe.canStart(ports.withGroup(group), modifiers)")
-                            && engine.contains("new Candidate(recipe, group)"));
+                            && (engine.contains("recipe.canStart(ports.withGroup(group), effective)")
+                                    || engine.contains("recipe.canStart(groupPorts, effective)")
+                                    || engine.contains("recipe.canStart(ports.withGroup(group), modifiers)"))
+                            // 0.65.0 (B9): the candidate also freezes that group's modifiers.
+                            && (engine.contains("new Candidate(recipe, group)")
+                                    || engine.contains("new Candidate(recipe, group, effective)")));
             report("...and remembers which group the candidate came from",
                     engine.contains("thread.accepts(candidate.recipe())")
                             && engine.contains("candidate.group()"));
             report("...and the running craft uses exactly that group",
                     engine.contains("this.host.ports().withGroup(craft.group())")
-                            && engine.contains("this.host.ports().withGroup(again.group())"));
+                            && (engine.contains("this.host.ports().withGroup(again.group())")
+                                    || engine.contains("withGroup(finished.group())")));
             report("...and a restored craft keeps its saved group",
                     engine.contains("saved.group()"));
 
@@ -221,8 +226,9 @@ final class HatchGroupCheck {
                             && thread.contains("Math.max(0, tag.getInt(TAG_GROUP_ID))"));
 
             Class<?> craft = Class.forName("com.reborn.modularmachinery.factory.FactoryEngine$ActiveCraft");
+            // 0.65.0 (B9): the constructor gained the frozen modifiers after the group.
             boolean ctor = java.util.Arrays.stream(craft.getDeclaredConstructors())
-                    .anyMatch(c -> c.getParameterCount() == 3);
+                    .anyMatch(c -> c.getParameterCount() == 3 || c.getParameterCount() == 4);
             report("ActiveCraft carries a group through its constructor", ctor);
             report("...and exposes it",
                     java.util.Arrays.stream(craft.getMethods()).anyMatch(m -> m.getName().equals("group")

@@ -3,6 +3,7 @@ package com.reborn.modularmachinery.recipe;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
@@ -130,6 +131,38 @@ public record RecipeModifier(@Nullable Target target, @Nullable IOType ioTarget,
         float multiplier = requireFloat(json, "multiplier", where);
         boolean affectsChance = json.has("affectChance") && json.get("affectChance").getAsBoolean();
         return new RecipeModifier(target, ioTarget, multiplier, operation, affectsChance);
+    }
+
+    /**
+     * Writes one modifier for the client's copy of a recipe.
+     *
+     * <p>A {@code null} target is meaningful (the original's "duration pseudo-target"), so it travels as a
+     * presence flag rather than as a sentinel string. The operation travels as its numeric id, the spelling the
+     * JSON already uses.
+     */
+    public static void write(FriendlyByteBuf buf, RecipeModifier modifier) {
+        buf.writeBoolean(modifier.target != null);
+        if (modifier.target != null) {
+            buf.writeUtf(modifier.target.targetName());
+        }
+        buf.writeBoolean(modifier.ioTarget != null);
+        if (modifier.ioTarget != null) {
+            buf.writeEnum(modifier.ioTarget);
+        }
+        buf.writeFloat(modifier.value);
+        buf.writeByte(modifier.operation.id());
+        buf.writeBoolean(modifier.affectsChance);
+    }
+
+    /** Reads what {@link #write} wrote. */
+    public static RecipeModifier read(FriendlyByteBuf buf) {
+        Object where = "a catalyst packet";
+        Target target = buf.readBoolean() ? parseTarget(buf.readUtf(), where) : null;
+        IOType ioTarget = buf.readBoolean() ? buf.readEnum(IOType.class) : null;
+        float value = buf.readFloat();
+        Operation operation = Operation.byId(buf.readUnsignedByte(), where);
+        boolean affectsChance = buf.readBoolean();
+        return new RecipeModifier(target, ioTarget, value, operation, affectsChance);
     }
 
     private static Target parseTarget(String raw, Object where) {

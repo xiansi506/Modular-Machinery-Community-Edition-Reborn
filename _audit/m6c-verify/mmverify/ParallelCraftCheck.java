@@ -335,6 +335,10 @@ public final class ParallelCraftCheck {
         // 0.64.1：A3——比较器。旧版四个方块都有 hasComparatorInputOverride，本版此前一处都没有，
         // 所以红石比较器读到的永远是 0（勘测 A3）。
         ComparatorCheck.comparators();
+        // 0.65.0：Q6-B——catalyst 从旧版的「只能 CraftTweaker 建」变成一种需求类型。这里钉解析、
+        // 开工闸门、只消耗一组、modifier 折进结算，以及控制器/工厂的接线。
+        CatalystCheck.catalysts();
+        TypedRecipeCheck.typedRecipes();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -1457,7 +1461,9 @@ public final class ParallelCraftCheck {
             // were removed -- 193 minus 2.
             // 196 from 0.64.0: A2's group screen adds five gui.…groupinputconfig keys
             // (title / tooltip / value / enable / close), 191 plus 5.
-            check("the language files' key count", 196, zhMap.size());
+            // 198 from 0.65.0: Q6-B's catalyst JEI tooltip adds the original's two
+            // tooltip.modular_machinery_reborn.catalyst[.effect] lines, 196 plus 2.
+            check("the language files' key count", 198, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to

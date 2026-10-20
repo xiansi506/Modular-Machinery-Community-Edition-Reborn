@@ -69,11 +69,11 @@ final class MekanismCompatCheck {
             return;
         }
 
-        // (1) 注册之前：注册表里只有内置五种（波 5.2 的成果），没有气体。
+        // (1) 注册之前：注册表里只有内置种类，没有气体。
         report("before the module registers, '" + GAS + "' is unknown",
                 RequirementTypes.byName(GAS) == null);
-        check("the built-in kinds are still exactly the five from wave 5.2",
-                "[item, fluid, energy, interface_number_input, ingredient_array_input]", paths().toString());
+        check("the built-in kinds are still exactly the six this port registers",
+                "[item, fluid, energy, interface_number_input, ingredient_array_input, catalyst]", paths().toString());
 
         // (2) 装了就注册：走 ModCompat 的入口，不是直接调 RequirementTypes。
         List<CompatModule> registered = ModCompat.register(List.of(new MekanismModule()), modid -> true);
@@ -82,7 +82,7 @@ final class MekanismCompatCheck {
         RequirementType gasPerTick = RequirementTypes.byName(GAS_PER_TICK);
         report("'" + GAS + "' is now a registered requirement kind", gas != null);
         report("'" + GAS_PER_TICK + "' is now a registered requirement kind", gasPerTick != null);
-        check("the registry now holds the built-ins plus the two gas kinds", 7,
+        check("the registry now holds the built-ins plus the two gas kinds", 8,
                 RequirementTypes.all().size());
         check("both kinds declare the original's own modid as their requirement (RequirementTypeGas:34-36)",
                 "mekanism", String.valueOf(gas == null ? null : gas.requiresModid()));
@@ -113,9 +113,9 @@ final class MekanismCompatCheck {
             // 后面的分节会问「注册表里有什么」，被本节影响就会得到假结论。
             restoreRegistry();
         }
-        report("after the section the two gas kinds are gone again and the five built-ins remain",
+        report("after the section the two gas kinds are gone again and the six built-ins remain",
                 RequirementTypes.byName(GAS) == null && RequirementTypes.byName(GAS_PER_TICK) == null
-                        && RequirementTypes.all().size() == 5);
+                        && RequirementTypes.all().size() == 6);
     }
 
     // ================================================================== (3) field validation
@@ -597,14 +597,15 @@ final class MekanismCompatCheck {
         // 内置五种也摘掉，症状是「所有配方突然全部加载失败」。
         List<ResourceLocation> removedWhileLoaded = RequirementTypes.removeUnavailable(modid -> true);
         check("with Mekanism present nothing is withdrawn", "[]", removedWhileLoaded.toString());
-        check("...and the registry is untouched", 7, RequirementTypes.all().size());
+        check("...and the registry is untouched", 8, RequirementTypes.all().size());
 
         // 不装：恰好这两个被摘，内置五种一个不动。
         List<ResourceLocation> removed = RequirementTypes.removeUnavailable(modid -> false);
         check("with Mekanism absent exactly the two gas kinds are withdrawn", "[modular_machinery_reborn:gas, "
                 + "modular_machinery_reborn:gas_pertick]", removed.toString());
-        check("...the five built-ins survive (a wrong requiresModid would empty the registry, and every recipe "
-                + "would fail to load)", "[item, fluid, energy, interface_number_input, ingredient_array_input]",
+        check("...the six built-ins survive (a wrong requiresModid would empty the registry, and every recipe "
+                + "would fail to load)", "[item, fluid, energy, interface_number_input, ingredient_array_input, "
+                        + "catalyst]",
                 paths().toString());
         report("...and the two kinds really are gone, not merely reported as withdrawn",
                 RequirementTypes.byName(GAS) == null && RequirementTypes.byName(GAS_PER_TICK) == null);
@@ -706,7 +707,7 @@ final class MekanismCompatCheck {
         return paths;
     }
 
-    /** 把注册表与模块状态还原成「只有内置五种」，见主流程 finally 的说明。 */
+    /** 把注册表与模块状态还原成「只有内置种类」，见主流程 finally 的说明。 */
     private static void restoreRegistry() {
         RequirementTypes.deregister(ResourceLocation.tryParse(GAS));
         RequirementTypes.deregister(ResourceLocation.tryParse(GAS_PER_TICK));

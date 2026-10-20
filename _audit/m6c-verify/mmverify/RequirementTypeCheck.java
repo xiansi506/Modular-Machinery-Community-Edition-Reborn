@@ -41,7 +41,7 @@ import java.util.Set;
  *       {@code IllegalStateException("Unsupported requirement …")}。</li>
  * </ol>
  *
- * <p>同时钉住既有行为不许漂：内置五种的名字集合、命名空间三写法等价、未知类型仍然加载即报错、
+ * <p>同时钉住既有行为不许漂：内置种类的名字集合、命名空间三写法等价、未知类型仍然加载即报错、
  * 内置五种的线上字节与改动前逐字节相同。最后一条是这个类里最要紧的一条——
  * 波 4 的配方同步走的就是这条格式，顺序或种类名漂一个字，症状都是「单机能跑、联机不行」。
  *
@@ -108,14 +108,14 @@ final class RequirementTypeCheck {
      */
     private static void builtinSet() {
         Set<String> expected = new LinkedHashSet<>(Arrays.asList(
-                "item", "fluid", "energy", "interface_number_input", "ingredient_array_input"));
+                "item", "fluid", "energy", "interface_number_input", "ingredient_array_input", "catalyst"));
         Set<String> actual = new LinkedHashSet<>();
         for (RequirementType type : RequirementTypes.all()) {
             check("every registered type uses this mod's namespace: " + type.id(),
                     "modular_machinery_reborn", type.id().getNamespace());
             actual.add(type.id().getPath());
         }
-        check("the built-in kinds are exactly the five the old file hardcoded", expected.toString(),
+        check("the built-in kinds are exactly the six this port registers", expected.toString(),
                 actual.toString());
         RequirementType item = RequirementTypes.byName("item");
         if (item == null) {
@@ -174,9 +174,10 @@ final class RequirementTypeCheck {
                             && message.contains("mmverify:r"));
             report("...and the message lists what IS registered, computed from the registry rather than written "
                     + "out by hand: " + RequirementTypes.ids(), message.contains(RequirementTypes.ids()));
-            report("...and it still carries the original's explanation of why gas/item_durability/catalyst are "
-                    + "not ported (D18)", message.contains("gas_pertick") && message.contains("item_durability")
-                    && message.contains("catalyst"));
+            report("...and it still carries the original's explanation of why the gas kinds are not ported, "
+                    + "that item_durability is not a requirement type, and how catalyst used to work (D18)",
+                    message.contains("gas_pertick") && message.contains("item_durability")
+                            && message.contains("catalyst"));
         }
     }
 
@@ -220,7 +221,7 @@ final class RequirementTypeCheck {
             targets.add(type.id().getPath() + "=" + type.modifierTarget());
         }
         check("each built-in kind reports its own modifier target, all inside the closed enum", "[item=ITEM, "
-                + "fluid=FLUID, energy=ENERGY, interface_number_input=ITEM, ingredient_array_input=ITEM]",
+                + "fluid=FLUID, energy=ENERGY, interface_number_input=ITEM, ingredient_array_input=ITEM, catalyst=ITEM]",
                 targets.toString());
         boolean allClosed = true;
         for (RequirementType type : RequirementTypes.all()) {
@@ -392,9 +393,9 @@ final class RequirementTypeCheck {
         List<ResourceLocation> removed = RequirementTypes.removeUnavailable(modid -> !ABSENT_MOD.equals(modid));
         check("exactly the gated kind was withdrawn", "[mmverify:gated_kind]", removed.toString());
         check("...and nothing else", "false", String.valueOf(paths().contains("gated_kind")));
-        check("the five built-in kinds are untouched (a wrong requiresModid would empty the registry, and every "
+        check("the six built-in kinds are untouched (a wrong requiresModid would empty the registry, and every "
                 + "recipe would fail to load)", "[item, fluid, energy, interface_number_input, "
-                + "ingredient_array_input]", paths().toString());
+                + "ingredient_array_input, catalyst]", paths().toString());
     }
 
     // ================================================================== helpers

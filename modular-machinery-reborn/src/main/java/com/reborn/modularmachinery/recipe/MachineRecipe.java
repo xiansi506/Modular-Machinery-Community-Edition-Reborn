@@ -164,6 +164,25 @@ public final class MachineRecipe implements Recipe<Container> {
     }
 
     /**
+     * The modifiers the catalysts that <b>are present in these ports</b> contribute, merged.
+     *
+     * <p>A catalyst is an optional input in the original: absent means the craft runs without it and without
+     * its modifiers ({@code CraftCheck.skipComponent()} was not an error), present means it is paid once and its
+     * modifiers are folded in. Presence therefore has to be part of this query. The caller freezes the result
+     * for the lifetime of one craft: the catalyst is consumed at start, so re-asking the ports on every tick
+     * would silently strip the modifiers half-way through.
+     */
+    public RecipeModifiers catalystModifiers(HatchCollection ports) {
+        List<RecipeModifier> merged = new ArrayList<>();
+        for (MachineRequirement requirement : this.requirements) {
+            if (requirement instanceof CatalystRequirement catalyst && catalyst.hasCatalyst(ports)) {
+                merged.addAll(catalyst.modifiers());
+            }
+        }
+        return RecipeModifiers.of(merged);
+    }
+
+    /**
      * The original's {@code RecipeCraftingContext#getMaxParallelism}: the lowest ceiling any parallelisable
      * requirement is willing to serve, starting from this recipe's own limit.
      *
@@ -199,9 +218,19 @@ public final class MachineRecipe implements Recipe<Container> {
         }
     }
 
-    /** The copies currently settled per craft, as fixed by the last {@link #setParallelism}. */
+    /**
+     * The copies currently settled per craft, as fixed by the last {@link #setParallelism}.
+     *
+     * <p>Unaffected requirements are skipped: a catalyst keeps its own field on one copy, so reading it first would
+     * report 1 for a craft that is actually running several copies.
+     */
     public int parallelism() {
-        return this.requirements.isEmpty() ? 1 : this.requirements.get(0).parallelism();
+        for (MachineRequirement requirement : this.requirements) {
+            if (requirement.isParallelizable()) {
+                return requirement.parallelism();
+            }
+        }
+        return 1;
     }
 
     /** Pushes the shortened-duration cost compensation into every per-tick energy requirement. */

@@ -35,11 +35,14 @@ import java.util.function.Predicate;
  * 那里面的一切。注册表是纯逻辑，放在这里就能被复现器直接驱动——包括「注册一种新需求然后解析它」这条
  * 波 5.2 最关键的路径。
  *
- * <p><b>内置五种的 id 与旧版逐字相同</b>：{@code item} / {@code fluid} / {@code energy} /
- * {@code interface_number_input} / {@code ingredient_array_input}（对照旧
+ * <p><b>内置六种的 id 与旧版逐字相同</b>：{@code item} / {@code fluid} / {@code energy} /
+ * {@code interface_number_input} / {@code ingredient_array_input} / {@code catalyst}（对照旧
  * {@code RequirementTypesMM.java:33-43} 的 {@code KEY_*}）。
+ * 旧版的 {@code catalyst} 虽然注册过种类，但 {@code RequirementTypeCatalyst#createRequirement} 对 JSON
+ * 直接返回 {@code null}，所以 JSON 里写 catalyst 在旧版根本解析不出需求；本版 0.65.0 起把它做成真正的
+ * 需求类型（见 {@link CatalystParser}），旧版唯一的入口是 CraftTweaker 的 {@code RecipePrimer}。
  * 旧版另有 {@code fluid_pertick} / {@code gas} / {@code gas_pertick} / {@code item_durability} /
- * {@code catalyst} / {@code duration} 六个键，本版一个都不注册，理由各不相同且都已查证
+ * {@code duration} 五个键，本版不注册，理由各不相同且都已查证
  * （见 {@link MachineRequirementParser} 里未知种类的报错文案与 D18）。{@code duration} **不是需求种类**——
  * 旧版也注册过它，但唯一的用途是给「缩短时长」的修改器当目标，而 {@code RequirementDuration#createRequirement}
  * 直接抛异常；本版对应的是 {@link RecipeModifier.Target#DURATION}。
@@ -55,7 +58,7 @@ public final class RequirementTypes {
      */
     private static final Map<ResourceLocation, RequirementType> BY_ID = new LinkedHashMap<>();
 
-    // ------------------------------------------------------------------ 内置五种
+    // ------------------------------------------------------------------ 内置六种
 
     /** {@code item}：配方里写 {@code "type": "…:item"}。 */
     public static final RequirementType ITEM =
@@ -76,6 +79,10 @@ public final class RequirementTypes {
     /** {@code ingredient_array_input}：一组可选的输入，只吃一种。 */
     public static final RequirementType INGREDIENT_ARRAY_INPUT =
             of("ingredient_array_input", new IngredientArrayType());
+
+    /** {@code catalyst}：开工闸门 + 一组配方修改器，只吃一份、不随并行数放大（见 {@link CatalystRequirement}）。 */
+    public static final RequirementType CATALYST =
+            of("catalyst", new CatalystType());
 
     // ------------------------------------------------------------------ 注册与查找
 
@@ -485,6 +492,30 @@ public final class RequirementTypes {
                 parsed.add(IngredientArrayEntry.ofItem(first, amount, chance));
             }
             return new IngredientArrayRequirement(parsed, chance, nbt);
+        }
+
+        @Override
+        public RecipeModifier.Target modifierTarget() {
+            return RecipeModifier.Target.ITEM;
+        }
+    }
+
+    /** {@code catalyst}：解析与网络都委托 {@link CatalystParser}，避免两套条目语法。 */
+    private static final class CatalystType implements RequirementType.Handler {
+
+        @Override
+        public MachineRequirement read(JsonObject json, IOType ioType, Object where) {
+            return CatalystParser.parse(json, ioType, where);
+        }
+
+        @Override
+        public void write(FriendlyByteBuf buf, MachineRequirement requirement) {
+            CatalystParser.write(buf, (CatalystRequirement) requirement);
+        }
+
+        @Override
+        public MachineRequirement readBody(FriendlyByteBuf buf, IOType ioType) {
+            return CatalystParser.read(buf);
         }
 
         @Override

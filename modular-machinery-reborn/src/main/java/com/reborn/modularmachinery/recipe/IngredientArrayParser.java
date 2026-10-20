@@ -93,27 +93,7 @@ public final class IngredientArrayParser {
 
         rejectUnknownKeys(json, REQUIREMENT_KEYS, where);
 
-        JsonElement rawItems = json.get("items");
-        if (rawItems == null || !rawItems.isJsonArray()) {
-            throw new JsonParseException("Missing or malformed 'items' in " + where + ". An "
-                    + "ingredient_array_input needs \"items\" as an array of {\"item\": \"namespace:path\"} "
-                    + "objects, e.g. \"items\": [{\"item\": \"minecraft:diamond\"}, "
-                    + "{\"item\": \"#forge:gems/emerald\"}]. 'amount' and 'chance', if you want them, go next to "
-                    + "'items' and apply to the whole group.");
-        }
-        JsonArray items = rawItems.getAsJsonArray();
-        if (items.isEmpty()) {
-            throw new JsonParseException("'items' in " + where + " is empty. An ingredient_array_input needs "
-                    + "at least one entry — the group's members are the items it may consume one of.");
-        }
-
-        int requirementAmount = readAmount(json, where);
-
-        List<IngredientArrayEntry> entries = new ArrayList<>(items.size());
-        for (JsonElement element : items) {
-            entries.add(readEntry(element, requirementAmount, where));
-        }
-        entries = preferPlainItems(entries);
+        List<IngredientArrayEntry> entries = readEntries(json, where, "ingredient_array_input");
 
         float chance = readChance(json, where);
         if (chance < 1.0F) {
@@ -127,12 +107,42 @@ public final class IngredientArrayParser {
     }
 
     /**
+     * Reads the entries of an {@code items} array, sharing the entry grammar with {@code catalyst}.
+     *
+     * <p>The caller owns the requirement-level key set: {@code ingredient_array_input} allows
+     * {@code items/amount/chance/nbt}, while {@code catalyst} additionally allows {@code modifiers} and
+     * {@code tooltip}. {@code amount} is read here because both types put it next to {@code items}.
+     */
+    static List<IngredientArrayEntry> readEntries(JsonObject json, Object where, String typeName) {
+        JsonElement rawItems = json.get("items");
+        if (rawItems == null || !rawItems.isJsonArray()) {
+            throw new JsonParseException("Missing or malformed 'items' in " + where + ". A "
+                    + typeName + " needs \"items\" as an array of {\"item\": \"namespace:path\"} "
+                    + "objects, e.g. \"items\": [{\"item\": \"minecraft:diamond\"}, "
+                    + "{\"item\": \"#forge:gems/emerald\"}]. 'amount' and 'chance', if you want them, go next to "
+                    + "'items' and apply to the whole group.");
+        }
+        JsonArray items = rawItems.getAsJsonArray();
+        if (items.isEmpty()) {
+            throw new JsonParseException("'items' in " + where + " is empty. A " + typeName + " needs "
+                    + "at least one entry — the group's members are the items it may consume one of.");
+        }
+
+        int requirementAmount = readAmount(json, where);
+        List<IngredientArrayEntry> entries = new ArrayList<>(items.size());
+        for (JsonElement element : items) {
+            entries.add(readEntry(element, requirementAmount, where));
+        }
+        return preferPlainItems(entries);
+    }
+
+    /**
      * Reads the requirement-level {@code nbt}, the one the original copied onto every entry.
      *
      * <p>Like {@code RequirementTypeItem:95-119}, the value has to be a JSON compound; everything inside it
      * follows the same quoted-string rules as an item requirement's {@code nbt}.
      */
-    private static NbtPredicate readNbt(JsonObject json, Object where) {
+    static NbtPredicate readNbt(JsonObject json, Object where) {
         JsonElement raw = json.get("nbt");
         if (raw == null) {
             return null;
@@ -234,7 +244,7 @@ public final class IngredientArrayParser {
         return ordered;
     }
 
-    private static int readAmount(JsonObject json, Object where) {
+    static int readAmount(JsonObject json, Object where) {
         JsonElement element = json.get("amount");
         if (element == null) {
             return 1;
@@ -258,7 +268,7 @@ public final class IngredientArrayParser {
         return amount;
     }
 
-    private static float readChance(JsonObject json, Object where) {
+    static float readChance(JsonObject json, Object where) {
         JsonElement element = json.get("chance");
         if (element == null) {
             return 1.0F;
@@ -302,6 +312,14 @@ public final class IngredientArrayParser {
 
     /** Refuses a key this reader does not understand, naming the ones it does. */
     private static void rejectUnknownKeys(JsonObject json, Set<String> allowed, Object where) {
+        rejectUnknownKeys(json, allowed, where, "An ingredient_array_input understands 'items' (required), "
+                + "'amount', 'chance' and 'nbt' (all applying to the whole group). The original's 'minAmount' and "
+                + "'maxAmount' are not ported; write one 'modularmachinery:item' requirement per stack if you "
+                + "need them, or put 'amount'/'chance'/'nbt' next to 'items' where the original read them.");
+    }
+
+    /** The same refusal with a caller-supplied description of the accepted keys, for {@code catalyst}. */
+    static void rejectUnknownKeys(JsonObject json, Set<String> allowed, Object where, String description) {
         Set<String> unknown = new LinkedHashSet<>();
         for (String key : json.keySet()) {
             String normalised = key.toLowerCase(Locale.ROOT);
@@ -311,10 +329,7 @@ public final class IngredientArrayParser {
         }
         if (!unknown.isEmpty()) {
             throw new JsonParseException("Unsupported " + (unknown.size() == 1 ? "field " : "fields ") + unknown
-                    + " in " + where + ". An ingredient_array_input understands 'items' (required), 'amount', "
-                    + "'chance' and 'nbt' (all applying to the whole group). The original's 'minAmount' and "
-                    + "'maxAmount' are not ported; write one 'modularmachinery:item' requirement per stack if you "
-                    + "need them, or put 'amount'/'chance'/'nbt' next to 'items' where the original read them.");
+                    + " in " + where + ". " + description);
         }
     }
 }

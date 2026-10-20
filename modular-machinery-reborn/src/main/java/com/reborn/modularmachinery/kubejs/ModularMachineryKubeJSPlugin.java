@@ -3,7 +3,6 @@ package com.reborn.modularmachinery.kubejs;
 import com.reborn.modularmachinery.ModularMachineryReborn;
 import dev.latvian.mods.kubejs.KubeJSPlugin;
 import dev.latvian.mods.kubejs.event.EventGroupWrapper;
-import dev.latvian.mods.kubejs.recipe.schema.JsonRecipeSchema;
 import dev.latvian.mods.kubejs.recipe.schema.RegisterRecipeSchemasEvent;
 import dev.latvian.mods.kubejs.script.BindingsEvent;
 
@@ -41,7 +40,7 @@ public final class ModularMachineryKubeJSPlugin extends KubeJSPlugin {
 
     @Override
     public void registerRecipeSchemas(RegisterRecipeSchemasEvent event) {
-        event.namespace(ModularMachineryReborn.MOD_ID).register("machine", JsonRecipeSchema.SCHEMA);
+        event.namespace(ModularMachineryReborn.MOD_ID).register("machine", MachineRecipeSchema.SCHEMA);
         event.mapRecipe("modular_machinery_reborn:machine", "modular_machinery_reborn:machine");
         ModularMachineryReborn.LOGGER.info("[{}] KubeJS schema registered: event.recipes.modular_machinery_reborn.machine", ModularMachineryReborn.MOD_ID);
     }

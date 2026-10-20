@@ -72,6 +72,8 @@
   "tooltip.modular_machinery_reborn.machine.min_max_amount.input": "Consumption: %s ~ %s",
   "tooltip.modular_machinery_reborn.machine.min_max_amount.output": "Quantity output: %s ~ %s",
   "tooltip.modular_machinery_reborn.machine.ingredient_array_input": "Accepts the following inputs (only one of them is consumed):",
+  "tooltip.modular_machinery_reborn.catalyst": "§aAs catalyst input. (optional input)",
+  "tooltip.modular_machinery_reborn.catalyst.effect": "Catalytic effect:",
   "tooltip.modular_machinery_reborn.machine.energy.in": "Required energy: ",
   "tooltip.modular_machinery_reborn.machine.energy.out": "Produced energy: ",
   "tooltip.modular_machinery_reborn.machine.energy.tick": "%s %s/t",

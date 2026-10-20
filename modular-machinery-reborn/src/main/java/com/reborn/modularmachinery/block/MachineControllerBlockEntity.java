@@ -278,6 +278,14 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** How long the running craft takes after duration modifiers. */
     private int activeDuration = 1;
 
+    /**
+     * The modifiers this craft froze at its start, catalyst modifiers included only for catalysts that were
+     * present then. {@code null} when idle. Not written to NBT: a reload re-derives it from the ports, which is
+     * the same thing the original's in-memory crafting context did.
+     */
+    @Nullable
+    private RecipeModifiers activeCraftModifiers;
+
     /** The ceiling the last recipe search computed, i.e. what the screen's "max parallelism" line shows. */
     private int parallelCeiling = 1;
 
@@ -523,9 +531,6 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             return;
         }
 
-        recipe.applyDurationMultiplier(be.modifiers);
-        be.maxProgress = recipe.duration(be.modifiers);
-
         // A2：这一 tick 用哪个端口视图。开工时从可开工的组里选一个并锁住；运行中沿用锁住的那组；
         // 没有组号的在途合成来自 A2 之前的存档，按旧行为用全部端口，不让升级把正在跑的东西打断。
         HatchCollection scope;
@@ -535,7 +540,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             if (startGroup == null) {
                 // 今天不会走到这里（findRecipe 只返回至少有一组能开工的配方），但把「找不到组」说成
                 // 「没有配方」会是另一种撒谎；保留这条分支，原因取最后一组，与旧版的 fkey 一致。
-                be.recordStartFailureKey(recipe.startFailure(be.lastGroupScope(), be.modifiers));
+                HatchCollection last = be.lastGroupScope();
+                be.recordStartFailureKey(recipe.startFailure(last,
+                        be.modifiers.andThen(recipe.catalystModifiers(last))));
                 be.status = ControllerStatus.IDLE;
                 be.recordTiming(tickStart, searchNanos);
                 return;
@@ -547,15 +554,22 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             scope = be.hatches;
         }
 
+        RecipeModifiers effective;
         if (be.progress == 0) {
-            int parallelism = be.computeParallelism(recipe, scope);
+            // B9：催化剂只在**这次开工确实带着**时并入，且一旦并入就冻结到合成结束。不能每 tick 按当前
+            // 库存重算——催化剂在 start 时已被消耗，重算会让 modifier 中途消失。
+            effective = startGroup.modifiers();
+            recipe.applyDurationMultiplier(effective);
+            be.maxProgress = recipe.duration(effective);
+
+            int parallelism = be.computeParallelism(recipe, scope, effective);
             be.parallelCeiling = Math.max(1, parallelism);
             if (parallelism < 1) {
                 // The original fell back to a plain single-copy check when nothing could be parallelised.
                 parallelism = 1;
             }
             recipe.setParallelism(parallelism);
-            if (!recipe.canStart(scope, be.modifiers) || !recipe.canTick(scope, be.modifiers)) {
+            if (!recipe.canStart(scope, effective) || !recipe.canTick(scope, effective)) {
                 // M6d-b: say *which* start-phase requirement refused, so an interface_number_input mismatch is
                 // reported as the original's own message rather than as a bare "idle".
                 be.recordStartFailure(recipe, scope);
@@ -563,34 +577,43 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 be.recordTiming(tickStart, searchNanos);
                 return;
             }
-            if (!recipe.start(scope, level.random, be.modifiers)) {
+            if (!recipe.start(scope, level.random, effective)) {
                 be.recordStartFailure(recipe, scope);
                 be.status = ControllerStatus.IDLE;
                 be.recordTiming(tickStart, searchNanos);
                 return;
             }
             be.clearStartFailure();
+            be.activeCraftModifiers = effective;
             be.activeRecipeId = recipe.getId();
             be.activeParallelism = parallelism;
             be.activeDuration = be.maxProgress;
             be.activeGroupId = startGroup.groupId();
             be.setChanged();
+        } else {
+            effective = be.activeCraftModifiers;
+            if (effective == null) {
+                // A craft loaded from before this field existed (or from disk): re-derive once and freeze it.
+                effective = be.modifiers.andThen(recipe.catalystModifiers(scope));
+                be.activeCraftModifiers = effective;
+            }
+            recipe.applyDurationMultiplier(effective);
+            be.maxProgress = recipe.duration(effective);
         }
 
         // The craft's parallelism is frozen at start, so re-assert it every tick: the recipe object is shared
         // with every other controller in the level.
         recipe.setParallelism(be.activeParallelism);
-        recipe.applyDurationMultiplier(be.modifiers);
 
         int nextProgress = be.progress + 1;
-        if (nextProgress >= be.maxProgress && !recipe.canFinish(scope, be.modifiers)) {
+        if (nextProgress >= be.maxProgress && !recipe.canFinish(scope, effective)) {
             // The craft would complete but the results do not fit. Hold without drawing this tick's resources
             // rather than draining energy while blocked.
             be.status = ControllerStatus.CRAFTING;
             be.recordTiming(tickStart, searchNanos);
             return;
         }
-        if (!recipe.canTick(scope, be.modifiers)) {
+        if (!recipe.canTick(scope, effective)) {
             // A per-tick requirement cannot be served right now: the original's failed ioTick
             // (RecipeCraftingContext:238-298) and the one place failure-action acts.
             be.applyFailureAction();
@@ -598,15 +621,16 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.recordTiming(tickStart, searchNanos);
             return;
         }
-        recipe.tick(scope, level.random, be.modifiers);
+        recipe.tick(scope, level.random, effective);
         be.progress = nextProgress;
         be.status = ControllerStatus.CRAFTING;
 
         if (be.progress >= be.maxProgress) {
-            recipe.finish(scope, level.random, be.modifiers);
+            recipe.finish(scope, level.random, effective);
             be.progress = 0;
             be.activeRecipeId = null;
             be.activeGroupId = null;
+            be.activeCraftModifiers = null;
             be.status = ControllerStatus.IDLE;
         }
         be.setChanged();
@@ -889,12 +913,29 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * <p>{@code 0} means "not parallelisable right now", in which case the caller runs a single copy. That is
      * the original's {@code canStartCrafting} fallback.
      */
-    private int computeParallelism(MachineRecipe recipe, HatchCollection scope) {
+    private int computeParallelism(MachineRecipe recipe, HatchCollection scope, RecipeModifiers modifiers) {
         int machineCeiling = this.machineCeiling();
         if (machineCeiling <= 1) {
             return 0;
         }
-        return recipe.parallelism(scope, this.modifiers, machineCeiling);
+        return recipe.parallelism(scope, modifiers, machineCeiling);
+    }
+
+    /**
+     * The modifiers a craft of {@code recipe} runs with right now.
+     *
+     * <p>For the running craft this is the snapshot frozen at its start: B9's catalyst modifiers depend on what
+     * was in the ports then, and the catalyst itself is consumed by {@code start}, so re-deriving from the
+     * current inventory would make them vanish half-way. For anything else it is the structure/bus base only;
+     * a catalyst belongs to one craft, not to the whole structure, so it is never written back into
+     * {@link #modifiers} (the factory host reads that field).
+     */
+    private RecipeModifiers modifiersFor(MachineRecipe recipe) {
+        if (this.activeCraftModifiers != null && this.activeRecipeId != null
+                && this.activeRecipeId.equals(recipe.getId())) {
+            return this.activeCraftModifiers;
+        }
+        return this.modifiers;
     }
 
     /**
@@ -912,8 +953,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     private GroupScope startableGroup(MachineRecipe recipe) {
         for (int groupId : this.hatches.groupIds()) {
             HatchCollection scope = this.hatches.withGroup(groupId);
-            if (recipe.canStart(scope, this.modifiers)) {
-                return new GroupScope(groupId, scope);
+            RecipeModifiers effective = this.modifiers.andThen(recipe.catalystModifiers(scope));
+            if (recipe.canStart(scope, effective)) {
+                return new GroupScope(groupId, scope, effective);
             }
         }
         return null;
@@ -928,8 +970,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         return this.hatches.withGroup(last);
     }
 
-    /** 一个输入组与它筛出来的端口视图。 */
-    private record GroupScope(int groupId, HatchCollection hatches) {
+    /**
+     * 一个输入组、它筛出来的端口视图，以及这一组开工时会用的 modifiers（B9：催化剂按组在场与否并入，
+     * 所以组和 modifiers 必须一起被选中并冻结）。
+     */
+    private record GroupScope(int groupId, HatchCollection hatches, RecipeModifiers modifiers) {
     }
 
     /**
@@ -987,6 +1032,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             this.activeRecipeId = null;
             this.activeParallelism = 1;
             this.activeGroupId = null;
+            this.activeCraftModifiers = null;
             this.setChanged();
         }
     }
@@ -1078,7 +1124,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             if (this.startableGroup(recipe) != null) {
                 continue;
             }
-            return recipe.startFailure(this.lastGroupScope(), this.modifiers);
+            return recipe.startFailure(this.lastGroupScope(), modifiersFor(recipe));
         }
         return null;
     }
@@ -1359,7 +1405,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
     /** Records a start failure, pushing it to clients only when it actually changed. */
     private void recordStartFailure(MachineRecipe recipe, HatchCollection scope) {
-        recordStartFailureKey(recipe == null ? null : recipe.startFailure(scope, this.modifiers));
+        recordStartFailureKey(recipe == null ? null : recipe.startFailure(scope, modifiersFor(recipe)));
     }
 
     /** {@link #recordStartFailure(MachineRecipe)} for the cases with no recipe at all. */

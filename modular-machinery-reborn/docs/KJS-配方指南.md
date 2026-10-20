@@ -75,13 +75,76 @@ modular_machinery_reborn:item     modularmachinery:item     item
 ## 五、可用的需求类型
 
 - `item` / `fluid` / `energy`（三类基础）
-- `interface_number_input`（智能数据接口数值输入，0.24.0 起）
+- `interface_number_input`（智能数据接口数值输入，0.24.0 起；只有输入方向）
 - `ingredient_array_input`（**组内只消耗其中一个**，0.26.0 起）
+- `gas` / `gas_pertick`（0.34.0 起；**装 Mekanism 时**才存在，不装则加载即报错，与旧版 `requiresModid()` 一致）
+- `catalyst`（0.65.0 起；一组可选输入 + 修改器/效果文字，见下一节）
 
 **逐 tick 的流体**不是单独的类型：在 `fluid` 需求上加 **`"perTick": true`** 即可（开工时一次性扣 vs 每 tick 扣，由这个布尔决定）。
 
-**未支持**（写了会**加载即报错**，不会静默跳过）：`gas` / `gas_pertick`（依赖 Mekanism 气体 API）、`catalyst`、`item_durability`——后两者在原版里**根本不是需求类型**，所以**不是缺口**。原因见 [已知限制.md](已知限制.md)。
-⚠️ `fluid_pertick` **不在此列**：原版那个类型的 JSON 入口 `createRequirement` 返回 `null`（只能 CraftTweaker 构造），逐 tick 流体用上面的 `perTick` 写。
+**仍未支持**（写了会**加载即报错**，不会静默跳过）：`item_durability`、`fluid_pertick`。两者的旧版 JSON 入口 `createRequirement` 都返回 `null`（只能 CraftTweaker 构造），**不是本版缺口**；逐 tick 流体用上面的 `perTick` 写。原因见 [已知限制.md](已知限制.md)。
+
+### catalyst 的 JSON 形状（0.65.0 起）
+
+```json
+{
+  "type": "modular_machinery_reborn:catalyst",
+  "io-type": "input",
+  "items": [
+    { "item": "minecraft:diamond", "amount": 2 },
+    { "item": "#forge:gems/emerald", "amount": 1 }
+  ],
+  "amount": 2,
+  "chance": 0.5,
+  "nbt": { "energy": ">=1000" },
+  "modifiers": [
+    { "target": "duration", "io": "input", "operation": 1, "multiplier": 0.5 }
+  ],
+  "tooltip": ["Speeds this recipe up"]
+}
+```
+
+- `items` 用 **`ingredient_array_input` 的同一套条目语法**（`item` 或 `#tag`、条目内 `amount`、需求级 `amount` 兜底）；
+- `io-type` **只能是 `input`**；
+- **催化剂是可选输入**：仓里没有（或不够）时配方照常开工，不消耗、不并入修改器；
+- 一次只消耗**一组**（某个条目够数就扣那个），**不随并行数放大**；
+- `chance` 掷失败时**不消耗**，配方照常开工/运行；
+- 在场时 `modifiers` 与机器结构修改器同一套字段（`target` / `io` / `operation` / `multiplier`），在 `canStart` 之前并入，并**冻结到本次合成结束**（催化剂已在开工时消耗，不能每 tick 重问）；
+- `tooltip` 只用于 JEI 悬停；`nbt` 与物品需求同一个谓词语法。
+
+## 五之二、typed 配方 API（0.65.0 起）
+
+配方事件现在除了塞一个 raw 对象，也可以**链式**写。第一个参数是机器注册名，后续方法各加一项需求：
+
+```js
+ServerEvents.recipes(event => {
+  event.recipes.modular_machinery_reborn.machine('alloy_furnace')
+    .time(200)                                  // 可选，默认 100
+    .parallelism(64)                            // 可选
+    .registryName('alloy_furnace_demo')         // 可选
+    .itemInput('minecraft:copper_ingot', 2)
+    .itemOutput('minecraft:iron_ingot', 1, 3, 0.75) // 数量 1..3，概率 0.75
+    .fluidInput('minecraft:water', 100)
+    .energyInput(40)                            // 每 tick
+    .catalyst('minecraft:diamond', 1, 0.5)
+    .catalystEntry('#forge:gems/emerald', 1)
+    .catalystModifier('duration', 'input', 1, 0.5)
+    .catalystTooltip('Speeds this recipe up')
+})
+```
+
+| 方法 | 作用 |
+|---|---|
+| `.time(ticks)` / `.parallelism(max)` / `.registryName(name)` | 配方级字段 |
+| `.itemInput(id, amount)` / `.itemOutput(id, amount)` | 物品需求；输出另有 `(id, min, max, chance)` |
+| `.fluidInput(id, amount[, perTick])` / `.fluidOutput(...)` | 流体需求 |
+| `.energyInput(perTick)` / `.energyOutput(perTick)` | 能量需求 |
+| `.catalyst(id, amount[, chance])` | 开一组催化剂（再写 `.catalystEntry(...)` 追加备选） |
+| `.catalystModifier(target, io, operation, multiplier)` | 给**最近一组** catalyst 加修改器；`operation` 0 加法 / 1 乘法 |
+| `.catalystTooltip(text)` | 给最近一组 catalyst 加 JEI 效果行 |
+| `.requirement(jsonObject)` | 逃生口：直接塞一份需求 JSON（气体等尚未 typed 化的类型走这里） |
+
+**raw 写法仍然完全有效**，两种写法产出同一份配方 JSON。typed 链只在 `serialize()` 时组装，所以 `event.custom(...)` / 数据包不受影响。**没有** pre/post tick 之类的事件回调（Q6-B 只做 B；旧版那套 `RecipePrimer` 回调未移植）。
 
 ## 六、用 KubeJS 定义机器（0.28.0 起，核心字段；0.28.2 起列表坐标叫 `.parts`）
 

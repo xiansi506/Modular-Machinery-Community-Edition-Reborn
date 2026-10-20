@@ -61,8 +61,8 @@ final class KubeJSBindingCheck {
     private static final String EVENT_HANDLER = "dev.latvian.mods.kubejs.event.EventHandler";
     private static final String KUBEJS_JAR = "kubejs-1.20.1.jar";
     private static final String RHINO_JAR = "rhino-1.20.1.jar";
-    private static final String KUBEJS_DEOBF = "kubejs-1.20.1_mapped_official_1.20.1.jar";
-    private static final String RHINO_DEOBF = "rhino-1.20.1_mapped_official_1.20.1.jar";
+    static final String KUBEJS_DEOBF = "kubejs-1.20.1_mapped_official_1.20.1.jar";
+    static final String RHINO_DEOBF = "rhino-1.20.1_mapped_official_1.20.1.jar";
     private static final String GROUP_NAME = "MachineRegistryEvents";
     private static final String EVENT_NAME = "registry";
 
@@ -779,7 +779,19 @@ final class KubeJSBindingCheck {
      * here. It also makes the check honest about which API is being exercised: the same classes, the same
      * method signatures, just the mapping the build uses.
      */
-    private static Path findDeobfJar(String name) {
+    static Path kubeJsDeobfJar() {
+        return findDeobfJar(KUBEJS_DEOBF);
+    }
+
+    static Path rhinoDeobfJar() {
+        return findDeobfJar(RHINO_DEOBF);
+    }
+
+    static Path platformStub(Path kubeJsJar) {
+        return writePlatformStub(kubeJsJar);
+    }
+
+    static Path findDeobfJar(String name) {
         Path candidate = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
         while (candidate != null) {
             Path cache = candidate.resolve(".gradle-home/caches/forge_gradle");
@@ -807,7 +819,7 @@ final class KubeJSBindingCheck {
      * probe before this was written). This answers only what that initialiser asks for, and points the game
      * folder at a temporary directory so no real instance is touched.
      */
-    private static Path writePlatformStub(Path kubeJsJar) {
+    static Path writePlatformStub(Path kubeJsJar) {
         try {
             Path dir = Path.of(System.getProperty("java.io.tmpdir", "."), "mmverify-kjs-stub");
             Path source = dir.resolve("src/dev/architectury/platform/Platform.java");
@@ -842,7 +854,7 @@ final class KubeJSBindingCheck {
      * {@code kubejs} classes in one loader over the SRG jars makes the names agree, because the mod's KubeJS
      * classes use no Minecraft names at all — only {@code EventGroup}, {@code EventHandler} and Rhino.
      */
-    private static final class ChildLoader extends URLClassLoader {
+    static final class ChildLoader extends URLClassLoader {
 
         private static final String MOD_KUBEJS_PACKAGE = "com.reborn.modularmachinery.kubejs.";
 

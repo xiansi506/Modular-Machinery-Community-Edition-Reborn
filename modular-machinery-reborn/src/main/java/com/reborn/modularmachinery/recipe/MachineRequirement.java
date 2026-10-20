@@ -101,10 +101,15 @@ public abstract class MachineRequirement {
     /**
      * Fixes how many copies the rest of the craft settles. The original required exactly this: a parallelisable
      * requirement "should strictly adhere to that number of parallels when checking the requirement or the
-     * work, and you should not increase or decrease the number of parallels on your own".
+     * work, and you should not increase or decrease the number of parallels on your own". An unaffected
+     * requirement ignores the call and stays on one copy, as the original's own setter did.
      */
     public void setParallelism(int parallelism) {
-        this.parallelism = Math.max(1, parallelism);
+        // The original's setParallelism did nothing for an unaffected requirement; its field stayed at 1 so that
+        // "one copy" was the only thing the rest of the craft could ever observe (ComponentRequirement.java:484-489).
+        if (!this.parallelizeUnaffected) {
+            this.parallelism = Math.max(1, parallelism);
+        }
     }
 
     public boolean isParallelizeUnaffected() {
@@ -113,6 +118,9 @@ public abstract class MachineRequirement {
 
     public void setParallelizeUnaffected(boolean unaffected) {
         this.parallelizeUnaffected = unaffected;
+        if (unaffected) {
+            this.parallelism = 1;
+        }
     }
 
     /**

@@ -72,6 +72,8 @@
   "tooltip.modular_machinery_reborn.machine.min_max_amount.input": "消耗数量：%s ~ %s",
   "tooltip.modular_machinery_reborn.machine.min_max_amount.output": "产出数量：%s ~ %s",
   "tooltip.modular_machinery_reborn.machine.ingredient_array_input": "接受以下输入（只消耗其中一种）：",
+  "tooltip.modular_machinery_reborn.catalyst": "§a作为催化剂输入（可选输入）。",
+  "tooltip.modular_machinery_reborn.catalyst.effect": "催化剂效果：",
   "tooltip.modular_machinery_reborn.machine.energy.in": "能量消耗：",
   "tooltip.modular_machinery_reborn.machine.energy.out": "能量产出：",
   "tooltip.modular_machinery_reborn.machine.energy.tick": "%s %s/t",

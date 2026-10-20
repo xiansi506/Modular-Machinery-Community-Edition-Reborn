@@ -76,9 +76,9 @@ public final class MachineRequirementParser {
     private static JsonParseException unknownType(String rawType, Object where) {
         return new JsonParseException("Unknown requirement type '" + rawType + "' in " + where
                 + "'. M2 implements item, fluid and energy; M6d-b adds interface_number_input; 0.26.0 adds "
-                + "ingredient_array_input. The original's gas, gas_pertick and fluid_pertick kinds are not "
-                + "ported because they need a gas API; its item_durability and catalyst kinds are not "
-                + "requirement types at all and are not gaps (D18). Registered right now: "
+                + "ingredient_array_input; 0.65.0 adds catalyst. The original's gas, gas_pertick and fluid_pertick kinds are not "
+                + "ported because they need a gas API; its item_durability kind is not "
+                + "a requirement type at all and is not a gap (D18). The original registered catalyst but its JSON reader returned null, so only CraftTweaker could create one; this port accepts it from JSON. Registered right now: "
                 + RequirementTypes.ids() + ". A compat module adds its own kinds here when it is installed.");
     }
 
@@ -106,7 +106,7 @@ public final class MachineRequirementParser {
     /**
      * 一个必填的字符串字段。
      *
-     * <p>{@code public} 而不是 {@code private}：它是**五条 {@link RequirementType#read} 实现共用的**读取器，
+     * <p>{@code public} 而不是 {@code private}：它是**六条 {@link RequirementType#read} 实现共用的**读取器，
      * 就像各类型自己也共用了 {@link #chance}。{@code where} 的写法照旧版（{@code ModRecipeSerializers:203-208}）。
      */
     public static String string(JsonObject json, String key, Object where) {

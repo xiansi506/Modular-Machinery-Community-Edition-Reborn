@@ -215,8 +215,8 @@ public final class FactoryThread {
      * worked, and {@link #clear} drops one that did not. The pre-checks run first, so the common "cannot start"
      * answer costs no consumption at all.
      */
-    boolean begin(FactoryEngine.ActiveCraft craft, HatchCollection ports, RecipeModifiers modifiers,
-                  RandomSource random) {
+    boolean begin(FactoryEngine.ActiveCraft craft, HatchCollection ports, RandomSource random) {
+        RecipeModifiers modifiers = craft.modifiers();
         MachineRecipe recipe = craft.recipe();
         int parallelism = Math.max(1, craft.parallelism());
         recipe.setParallelism(parallelism);
