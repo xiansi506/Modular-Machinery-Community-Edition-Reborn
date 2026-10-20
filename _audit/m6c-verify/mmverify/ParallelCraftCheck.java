@@ -266,6 +266,9 @@ public final class ParallelCraftCheck {
         // 0.63.6: B1/B5, the item NBT template and the ingredient_array NBT. Reflection-first, so the
         // pre-implementation run reports FAIL instead of failing to compile.
         NbtRequirementCheck.nbtRequirements();
+        // 0.63.7: B2, the original's any:fuel was parsed but could never run. This section lives before the fix
+        // so the red run reports the current "Unknown item" message instead of failing to compile.
+        FuelRequirementCheck.fuelRequirements();
         // 0.27.0: the MOC compatibility namespace. Reflection-first for the same reason, and it owns the
         // timing check that justifies the design.
         MocNamespaceCheck.mocCompatibilityNamespace();

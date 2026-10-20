@@ -61,6 +61,24 @@ public final class LegacyIngredients {
         }
         String value = raw.trim();
 
+        // B2: the original recognized any:fuel but its consumer had no FUEL branch
+        // (RequirementItem.java:342-381), so it was a recipe that could never start. Refuse it here, at the
+        // one place every item reference passes through, instead of letting it fall through to "unknown item".
+        String beforeMeta = value;
+        int metaAt = beforeMeta.indexOf('@');
+        if (metaAt >= 0) {
+            beforeMeta = beforeMeta.substring(0, metaAt);
+        }
+        int split = beforeMeta.indexOf(':');
+        if (split > 0
+                && beforeMeta.substring(0, split).equalsIgnoreCase("any")
+                && beforeMeta.substring(split + 1).equalsIgnoreCase("fuel")) {
+            throw new JsonParseException("'" + value + "' in " + where + " is not supported. The original "
+                    + "parsed any:fuel as an input, but its consumer had no FUEL branch "
+                    + "(RequirementItem.java:342-381), so a machine using it could never start. Write the actual "
+                    + "fuel item and amount instead (for example {\"item\": \"minecraft:coal\", \"amount\": 1}).");
+        }
+
         if (value.indexOf('@') >= 0) {
             throw new JsonParseException("'" + value + "' in " + where + " uses the 1.12.2 '@meta' syntax. "
                     + "Metadata does not exist in 1.20.1; use the modern item id instead "
