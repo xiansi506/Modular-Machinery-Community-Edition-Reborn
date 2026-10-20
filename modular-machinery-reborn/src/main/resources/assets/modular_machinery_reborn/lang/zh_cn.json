@@ -130,6 +130,12 @@
   "gui.modular_machinery_reborn.parallelcontroller.max_value": "最大并行数：%s",
   "gui.modular_machinery_reborn.parallelcontroller.current_value": "当前并行数：%s",
 
+  "gui.modular_machinery_reborn.groupinputconfig.title": "组ID配置",
+  "gui.modular_machinery_reborn.groupinputconfig.tooltip": "不同的组中，配方检查独立进行",
+  "gui.modular_machinery_reborn.groupinputconfig.value": "当前ID：",
+  "gui.modular_machinery_reborn.groupinputconfig.enable": "启用组",
+  "gui.modular_machinery_reborn.groupinputconfig.close": "禁用组",
+
   "gui.modular_machinery_reborn.upgradebus.title": "升级总线",
   "gui.modular_machinery_reborn.upgradebus.bounded.empty": "无绑定机械。",
   "gui.modular_machinery_reborn.upgradebus.bounded": "已绑定 %s 个机械",

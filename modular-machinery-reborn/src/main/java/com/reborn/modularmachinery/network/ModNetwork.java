@@ -54,6 +54,11 @@ public final class ModNetwork {
      * 追加 id 是兼容方向，而一对不匹配的构建本来就会被版本字符串拒掉。
      */
     private static final int ID_MACHINE_DEFINITION_SYNC = 3;
+    /**
+     * A2 的消息：输入组配置（客户端 → 服务端）。协议版本仍为 {@code "1"}——追加 id 是兼容方向，
+     * 一对不匹配的构建本来就会被版本字符串拒掉。
+     */
+    private static final int ID_HATCH_GROUP_UPDATE = 4;
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(ModularMachineryReborn.MOD_ID, "main"),
@@ -78,6 +83,10 @@ public final class ModNetwork {
                 MachineDefinitionSyncPacket::encode,
                 MachineDefinitionSyncPacket::new,
                 MachineDefinitionSyncPacket::handle);
+        CHANNEL.registerMessage(ID_HATCH_GROUP_UPDATE, HatchGroupUpdatePacket.class,
+                HatchGroupUpdatePacket::encode,
+                HatchGroupUpdatePacket::new,
+                HatchGroupUpdatePacket::handle);
     }
 
     private ModNetwork() {

@@ -230,7 +230,7 @@ public final class FactoryEngine {
     public int searchAndStart() {
         int started = 0;
         Set<ResourceLocation> unavailable = new LinkedHashSet<>();
-        List<MachineRecipe> runnable = runnable(unavailable);
+        List<Candidate> runnable = runnable(unavailable);
         if (runnable.isEmpty()) {
             // Nothing is startable at all, so no thread is worth creating. Asking first is what keeps a factory
             // with nothing to do from spending a thread on finding that out.
@@ -260,23 +260,33 @@ public final class FactoryEngine {
     }
 
     /**
-     * The machine's recipes that no thread is settling, that this tick has not already found unstoppable, and
-     * whose one-shot inputs the structure can pay right now.
+     * The machine's (recipe, group) pairs that no thread is settling, that this tick has not already found
+     * unstoppable, and whose one-shot inputs the structure can pay right now in that group.
      */
-    private List<MachineRecipe> runnable(Set<ResourceLocation> unavailable) {
+    private List<Candidate> runnable(Set<ResourceLocation> unavailable) {
         Set<ResourceLocation> blocked = recipesInProgress();
         HatchCollection ports = this.host.ports();
         RecipeModifiers modifiers = this.host.modifiers();
-        List<MachineRecipe> out = new ArrayList<>();
+        List<Candidate> out = new ArrayList<>();
         for (MachineRecipe recipe : this.host.availableRecipes()) {
             if (blocked.contains(recipe.getId()) || unavailable.contains(recipe.getId())) {
                 continue;
             }
-            if (recipe.canStart(ports, modifiers)) {
-                out.add(recipe);
+            // Every candidate group is tried separately, in ascending order, the way the original's
+            // canStartCrafting walked its sorted group keys and locked the first one that paid. A recipe that
+            // pays in two different groups is two candidates: which one a thread gets decides which ports it
+            // will keep drawing from for the rest of the settlement.
+            for (int group : ports.groupIds()) {
+                if (recipe.canStart(ports.withGroup(group), modifiers)) {
+                    out.add(new Candidate(recipe, group));
+                }
             }
         }
         return out;
+    }
+
+    /** One startable pairing of a recipe with the port group it was proved to pay in. */
+    private record Candidate(MachineRecipe recipe, int group) {
     }
 
     /** The slot the next recipe should go to: an idle ordinary thread first, otherwise a new one. */
@@ -312,19 +322,21 @@ public final class FactoryEngine {
      * lifecycle, because the pre-check and the start must not be allowed to disagree.
      */
     @Nullable
-    private ActiveCraft nextCraft(FactoryThread thread, List<MachineRecipe> runnable) {
-        List<MachineRecipe> candidates = thread.filter(runnable);
-        if (candidates.isEmpty()) {
-            return null;
+    private ActiveCraft nextCraft(FactoryThread thread, List<Candidate> runnable) {
+        for (Candidate candidate : runnable) {
+            if (thread.accepts(candidate.recipe())) {
+                // The candidate list was built from `canStart` for that group, so the first entry this thread
+                // accepts is startable.
+                return new ActiveCraft(candidate.recipe(), availableParallelism(thread), candidate.group());
+            }
         }
-        // The candidate list was built from `canStart` for the machine as a whole, so the first entry that this
-        // thread accepts is startable.
-        return new ActiveCraft(candidates.get(0), availableParallelism(thread));
+        return null;
     }
 
     /** Runs the start phase of {@code craft} on {@code thread} and announces it when it took. */
     private boolean begin(FactoryThread thread, ActiveCraft craft) {
-        if (!thread.begin(craft, this.host.ports(), this.host.modifiers(), this.host.random())) {
+        if (!thread.begin(craft, this.host.ports().withGroup(craft.group()), this.host.modifiers(),
+                this.host.random())) {
             return false;
         }
         this.dirty = true;
@@ -360,7 +372,7 @@ public final class FactoryEngine {
             return;
         }
 
-        HatchCollection ports = this.host.ports();
+        HatchCollection ports = this.host.ports().withGroup(craft.group());
         RecipeModifiers modifiers = this.host.modifiers();
 
         // Re-assert the freeze every tick: the recipe object is shared with every other controller in the
@@ -418,8 +430,9 @@ public final class FactoryEngine {
      * simpler and identical in every case the harness and the game exercise.
      */
     private void tryRestart(FactoryThread thread, ActiveCraft finished) {
-        ActiveCraft again = new ActiveCraft(finished.recipe(), finished.parallelism());
-        if (thread.begin(again, this.host.ports(), this.host.modifiers(), this.host.random())) {
+        ActiveCraft again = new ActiveCraft(finished.recipe(), finished.parallelism(), finished.group());
+        if (thread.begin(again, this.host.ports().withGroup(again.group()), this.host.modifiers(),
+                this.host.random())) {
             this.dirty = true;
             this.host.onThreadStarted(thread);
             return;
@@ -606,7 +619,7 @@ public final class FactoryEngine {
         if (recipe == null) {
             return;
         }
-        ActiveCraft craft = new ActiveCraft(recipe, 1);
+        ActiveCraft craft = new ActiveCraft(recipe, 1, saved.group());
         craft.setProgress(saved.progress());
         thread.restart(craft);
     }
@@ -636,14 +649,16 @@ public final class FactoryEngine {
         private final MachineRecipe recipe;
         private final ResourceLocation recipeId;
         private final int parallelism;
+        private final int group;
 
         private int progress;
         private int duration;
 
-        ActiveCraft(MachineRecipe recipe, int parallelism) {
+        ActiveCraft(MachineRecipe recipe, int parallelism, int group) {
             this.recipe = recipe;
             this.recipeId = recipe.getId();
             this.parallelism = Math.max(1, parallelism);
+            this.group = group;
             this.duration = Math.max(1, recipe.recipeTime());
         }
 
@@ -658,6 +673,14 @@ public final class FactoryEngine {
         /** The copies this settlement moves per requirement — the original's {@code ActiveMachineRecipe}. */
         public int parallelism() {
             return this.parallelism;
+        }
+
+        /**
+         * The port group this settlement draws from, frozen like the parallelism — the original's
+         * {@code RecipeCraftingContext#getGroupId} once {@code canStartCrafting} had locked a group.
+         */
+        public int group() {
+            return this.group;
         }
 
         /** Ticks already settled, the original's {@code ActiveMachineRecipe#getTick}. */
@@ -689,7 +712,8 @@ public final class FactoryEngine {
 
         @Override
         public String toString() {
-            return this.recipeId + " " + this.progress + "/" + this.duration + " x" + this.parallelism;
+            return this.recipeId + " " + this.progress + "/" + this.duration + " x" + this.parallelism
+                    + " group=" + this.group;
         }
     }
 }

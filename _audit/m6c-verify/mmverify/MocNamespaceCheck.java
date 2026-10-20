@@ -736,8 +736,9 @@ final class MocNamespaceCheck {
         // 191 from 0.63.4: the owner asked the gas hatch's tooltip to have exactly the fluid hatch's shape
         // (content name, "N mB / M mB", coordinates), so gashatch.tank (the "气体：" prefix) and
         // fluidhatch.blocked_by_gas ("空（气体占着这个仓）") were removed -- 193 minus 2.
-        check("en_us.json key count", 191, en.size());
-        check("zh_cn.json key count", 191, zh.size());
+        // 196 from 0.64.0: A2's group screen adds five gui.…groupinputconfig keys, 191 plus 5.
+        check("en_us.json key count", 196, en.size());
+        check("zh_cn.json key count", 196, zh.size());
         Set<String> enKeys = new TreeSet<>(en.keySet());
         Set<String> zhKeys = new TreeSet<>(zh.keySet());
         report("the two files carry identical key sets (" + enKeys.size() + " keys each)", enKeys.equals(zhKeys));

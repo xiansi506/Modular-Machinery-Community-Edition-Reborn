@@ -130,6 +130,12 @@
   "gui.modular_machinery_reborn.parallelcontroller.max_value": "Max Parallelism: %s",
   "gui.modular_machinery_reborn.parallelcontroller.current_value": "Current Parallelism: %s",
 
+  "gui.modular_machinery_reborn.groupinputconfig.title": "Group ID Settings",
+  "gui.modular_machinery_reborn.groupinputconfig.tooltip": "In different groups, recipe checks are performed independently",
+  "gui.modular_machinery_reborn.groupinputconfig.value": "Current ID:",
+  "gui.modular_machinery_reborn.groupinputconfig.enable": "Enable Group",
+  "gui.modular_machinery_reborn.groupinputconfig.close": "Disable Group",
+
   "gui.modular_machinery_reborn.upgradebus.title": "Upgrade Bus",
   "gui.modular_machinery_reborn.upgradebus.bounded.empty": "No binding machinery.",
   "gui.modular_machinery_reborn.upgradebus.bounded": "Bound %s machinery",

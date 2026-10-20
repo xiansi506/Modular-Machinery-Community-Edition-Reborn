@@ -262,6 +262,19 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** How the craft being run was settled when it started: frozen for its whole duration. */
     private int activeParallelism = 1;
 
+    /**
+     * A2：正在跑的这条合成锁定在哪一个输入组，{@code null} 表示没有锁定（没有合成）。
+     *
+     * <p><b>为什么组号必须在开工时冻住。</b>旧版 {@code canStartCrafting} 在开工那一刻逐组试，第一组成功就
+     * {@code setGroupId} 并一直用到合成结束（{@code RecipeCraftingContext.java:502-549}）。如果每 tick 重新选，
+     * 玩家在线尾补一个仓或改一个组号就会让正在跑的合成中途换一组料——同样「只在有人动结构时出现」，
+     * 与动态结构那类幽灵缺陷一样难查。
+     *
+     * <p>类型是 {@code Integer} 而不是 {@code int}：组 0 是**合法**的一组，不能拿 0 当「没锁」的哨兵。
+     */
+    @Nullable
+    private Integer activeGroupId;
+
     /** How long the running craft takes after duration modifiers. */
     private int activeDuration = 1;
 
@@ -513,24 +526,45 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         recipe.applyDurationMultiplier(be.modifiers);
         be.maxProgress = recipe.duration(be.modifiers);
 
+        // A2：这一 tick 用哪个端口视图。开工时从可开工的组里选一个并锁住；运行中沿用锁住的那组；
+        // 没有组号的在途合成来自 A2 之前的存档，按旧行为用全部端口，不让升级把正在跑的东西打断。
+        HatchCollection scope;
+        GroupScope startGroup = null;
         if (be.progress == 0) {
-            int parallelism = be.computeParallelism(recipe);
+            startGroup = be.startableGroup(recipe);
+            if (startGroup == null) {
+                // 今天不会走到这里（findRecipe 只返回至少有一组能开工的配方），但把「找不到组」说成
+                // 「没有配方」会是另一种撒谎；保留这条分支，原因取最后一组，与旧版的 fkey 一致。
+                be.recordStartFailureKey(recipe.startFailure(be.lastGroupScope(), be.modifiers));
+                be.status = ControllerStatus.IDLE;
+                be.recordTiming(tickStart, searchNanos);
+                return;
+            }
+            scope = startGroup.hatches();
+        } else if (be.activeGroupId != null) {
+            scope = be.hatches.withGroup(be.activeGroupId);
+        } else {
+            scope = be.hatches;
+        }
+
+        if (be.progress == 0) {
+            int parallelism = be.computeParallelism(recipe, scope);
             be.parallelCeiling = Math.max(1, parallelism);
             if (parallelism < 1) {
                 // The original fell back to a plain single-copy check when nothing could be parallelised.
                 parallelism = 1;
             }
             recipe.setParallelism(parallelism);
-            if (!recipe.canStart(be.hatches, be.modifiers) || !recipe.canTick(be.hatches, be.modifiers)) {
+            if (!recipe.canStart(scope, be.modifiers) || !recipe.canTick(scope, be.modifiers)) {
                 // M6d-b: say *which* start-phase requirement refused, so an interface_number_input mismatch is
                 // reported as the original's own message rather than as a bare "idle".
-                be.recordStartFailure(recipe);
+                be.recordStartFailure(recipe, scope);
                 be.status = ControllerStatus.IDLE;
                 be.recordTiming(tickStart, searchNanos);
                 return;
             }
-            if (!recipe.start(be.hatches, level.random, be.modifiers)) {
-                be.recordStartFailure(recipe);
+            if (!recipe.start(scope, level.random, be.modifiers)) {
+                be.recordStartFailure(recipe, scope);
                 be.status = ControllerStatus.IDLE;
                 be.recordTiming(tickStart, searchNanos);
                 return;
@@ -539,6 +573,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.activeRecipeId = recipe.getId();
             be.activeParallelism = parallelism;
             be.activeDuration = be.maxProgress;
+            be.activeGroupId = startGroup.groupId();
             be.setChanged();
         }
 
@@ -548,14 +583,14 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         recipe.applyDurationMultiplier(be.modifiers);
 
         int nextProgress = be.progress + 1;
-        if (nextProgress >= be.maxProgress && !recipe.canFinish(be.hatches, be.modifiers)) {
+        if (nextProgress >= be.maxProgress && !recipe.canFinish(scope, be.modifiers)) {
             // The craft would complete but the results do not fit. Hold without drawing this tick's resources
             // rather than draining energy while blocked.
             be.status = ControllerStatus.CRAFTING;
             be.recordTiming(tickStart, searchNanos);
             return;
         }
-        if (!recipe.canTick(be.hatches, be.modifiers)) {
+        if (!recipe.canTick(scope, be.modifiers)) {
             // A per-tick requirement cannot be served right now: the original's failed ioTick
             // (RecipeCraftingContext:238-298) and the one place failure-action acts.
             be.applyFailureAction();
@@ -563,14 +598,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.recordTiming(tickStart, searchNanos);
             return;
         }
-        recipe.tick(be.hatches, level.random, be.modifiers);
+        recipe.tick(scope, level.random, be.modifiers);
         be.progress = nextProgress;
         be.status = ControllerStatus.CRAFTING;
 
         if (be.progress >= be.maxProgress) {
-            recipe.finish(be.hatches, level.random, be.modifiers);
+            recipe.finish(scope, level.random, be.modifiers);
             be.progress = 0;
             be.activeRecipeId = null;
+            be.activeGroupId = null;
             be.status = ControllerStatus.IDLE;
         }
         be.setChanged();
@@ -853,12 +889,47 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * <p>{@code 0} means "not parallelisable right now", in which case the caller runs a single copy. That is
      * the original's {@code canStartCrafting} fallback.
      */
-    private int computeParallelism(MachineRecipe recipe) {
+    private int computeParallelism(MachineRecipe recipe, HatchCollection scope) {
         int machineCeiling = this.machineCeiling();
         if (machineCeiling <= 1) {
             return 0;
         }
-        return recipe.parallelism(this.hatches, this.modifiers, machineCeiling);
+        return recipe.parallelism(scope, this.modifiers, machineCeiling);
+    }
+
+    /**
+     * 结构里第一个能凭自己让 {@code recipe} 开工的输入组（A2）。
+     *
+     * <p>旧版 {@code canStartCrafting} 逐组试整条配方，按组号顺序、第一组成功就锁定
+     * （{@code RecipeCraftingContext.java:502-549}）。这里同序：{@link HatchCollection#groupIds} 已升序，
+     * 第一个 {@code canStart} 为真的组就是旧版会锁的那一组。
+     *
+     * <p>只看 {@code canStart}，不看 {@code canTick}：旧版也只在开工检查里问前者。如果某组能开工却过不了
+     * 每 tick 检查，旧版同样会锁它然后失败，而不是悄悄换下一组——换组会让「为什么这组料不够」变成
+     * 「机器从别的组偷料」。
+     */
+    @Nullable
+    private GroupScope startableGroup(MachineRecipe recipe) {
+        for (int groupId : this.hatches.groupIds()) {
+            HatchCollection scope = this.hatches.withGroup(groupId);
+            if (recipe.canStart(scope, this.modifiers)) {
+                return new GroupScope(groupId, scope);
+            }
+        }
+        return null;
+    }
+
+    /** 最后一组的端口视图，用来取「所有组都开不了工」时的失败文案（旧版组键排序后的末项 fkey）。 */
+    private HatchCollection lastGroupScope() {
+        int last = 0;
+        for (int groupId : this.hatches.groupIds()) {
+            last = groupId;
+        }
+        return this.hatches.withGroup(last);
+    }
+
+    /** 一个输入组与它筛出来的端口视图。 */
+    private record GroupScope(int groupId, HatchCollection hatches) {
     }
 
     /**
@@ -915,6 +986,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             this.progress = 0;
             this.activeRecipeId = null;
             this.activeParallelism = 1;
+            this.activeGroupId = null;
             this.setChanged();
         }
     }
@@ -1000,10 +1072,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             //
             // 只问 `canStart` 那一半的原因：`startFailure` 是「开工阶段」的消息，
             // 而 `canTick` 失败（例如每 tick 的能源）本来就不由它描述。
-            if (recipe.canStart(this.hatches, this.modifiers)) {
+            //
+            // A2：按组问。旧版在每组都失败时用最后一组的失败文案（`RecipeCraftingContext.java:502-549`
+            // 的 fkey），这里照做——组之间缺的东西可能不同，随便取一组会给出另一组的谎。
+            if (this.startableGroup(recipe) != null) {
                 continue;
             }
-            return recipe.startFailure(this.hatches, this.modifiers);
+            return recipe.startFailure(this.lastGroupScope(), this.modifiers);
         }
         return null;
     }
@@ -1025,7 +1100,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             if (!this.machineId.equals(recipe.machineId())) {
                 continue;
             }
-            if (recipe.canStart(this.hatches, this.modifiers)) {
+            // A2：能开工 = 至少有一组能开工。锁定哪一组由 tick 里那次 startableGroup 决定，两步必须
+            // 问同一个问题，否则会出现「选出了配方、开工时却找不到组」。
+            if (this.startableGroup(recipe) != null) {
                 return recipe;
             }
         }
@@ -1049,11 +1126,14 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             if (level.getBlockEntity(pos.offset(relative)) instanceof MachineHatchBlockEntity hatch) {
                 // 把结构位置上的 `selector-tag` 一起交给端口：配方需求靠它筛出「属于那个部件」的仓口。
                 // 绝大多数结构没有标签，此时 tag() 答 null，端口就按「无标签」入桶。
+                // A2：组号与标签一起交给端口。仓口种类不可分组时 effectiveGroup() 已经是 -1；
+                // Builder 会再按种类归一一次，两层都挡「输出仓被分组」。
                 builder.add(hatch.kind(), hatch.itemHandler(), hatch.fluidTank(), hatch.energyStorage(),
-                        effectivePattern.tag(relative));
+                        effectivePattern.tag(relative), hatch.effectiveGroup());
                 // 波 5.3：**兼容端口**。主模组不知道那是什么能力（气体？灵气？），所以只把实体交出去，
                 // 由装了相应模组的兼容层回答。没装时这里什么都不加，桶保持为空。
-                builder.gasPorts(hatch, hatch.kind().isInput(), effectivePattern.tag(relative));
+                builder.gasPorts(hatch, hatch.kind().isInput(), effectivePattern.tag(relative),
+                        hatch.kind().canGroupInput() ? hatch.effectiveGroup() : -1);
             }
         }
         // M6d-b: the smart-interface values travel with the ports (see HatchCollection's class comment). The
@@ -1278,8 +1358,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
 
     /** Records a start failure, pushing it to clients only when it actually changed. */
-    private void recordStartFailure(MachineRecipe recipe) {
-        recordStartFailureKey(recipe == null ? null : recipe.startFailure(this.hatches, this.modifiers));
+    private void recordStartFailure(MachineRecipe recipe, HatchCollection scope) {
+        recordStartFailureKey(recipe == null ? null : recipe.startFailure(scope, this.modifiers));
     }
 
     /** {@link #recordStartFailure(MachineRecipe)} for the cases with no recipe at all. */
@@ -1355,6 +1435,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
     /** The ports gathered from the formed structure. */
     public HatchCollection hatches() { return this.hatches; }
+
+    /** A2：正在跑的合成锁定的输入组；{@code null} 表示没有合成在跑（或是在途的旧存档）。 */
+    @Nullable
+    public Integer activeGroupId() { return this.activeGroupId; }
 
     /**
      * The parallel controllers the formed structure contains, and the sum they contribute — the piece M6d adds
@@ -1692,6 +1776,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         tag.putInt("status", status.ordinal());
         tag.putInt("activeParallelism", activeParallelism);
         tag.putInt("activeDuration", activeDuration);
+        // A2：正在跑的那组。不存的话重进世界会退回「全部端口」，等于中途换料。
+        if (activeGroupId != null) {
+            tag.putInt("activeGroupId", activeGroupId);
+        }
         if (machineId != null) {
             tag.putString("machine", machineId.toString());
         }
@@ -1732,6 +1820,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         status = ControllerStatus.byOrdinal(tag.getInt("status"));
         activeParallelism = Math.max(1, tag.getInt("activeParallelism"));
         activeDuration = Math.max(1, tag.getInt("activeDuration"));
+        // A2：缺这个键的存档（0.63.9 及更早）代表「在途合成没有组」——保持 null，tick 里按全部端口继续。
+        activeGroupId = tag.contains("activeGroupId") ? tag.getInt("activeGroupId") : null;
         machineId = tag.contains("machine") ? ResourceLocation.tryParse(tag.getString("machine")) : null;
         machineColor = tag.contains("machineColor") ? tag.getInt("machineColor") : null;
         this.colorizedPartOffsets.clear();

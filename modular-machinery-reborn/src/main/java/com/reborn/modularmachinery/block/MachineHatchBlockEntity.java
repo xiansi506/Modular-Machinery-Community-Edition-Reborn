@@ -47,6 +47,12 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
      */
     private static final String TAG_COLOR = "machineColor";
 
+    /** A2：输入组号（仅物品输入与流体输入仓保存，见 {@link HatchKind#canGroupInput()}）。 */
+    private static final String TAG_GROUP_ID = "groupId";
+
+    /** A2：是否启用组隔离。旧版同名字段（{@code TileColorableMachineComponent#isGroupInput}）。 */
+    private static final String TAG_GROUP_INPUT = "isGroupInput";
+
     private final HatchKind kind;
     private final HatchTier tier;
 
@@ -72,6 +78,17 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     private boolean inventoryChanged;
     /** 同一游戏 tick 只跑一次：Forge 的 ticker 正常情况下就是一 tick 一次。 */
     private long lastTick = -1L;
+
+    /**
+     * A2（勘测 §4 第 115 行）：玩家给这个仓口分配的输入组号。
+     *
+     * <p>默认组 0、隔离关闭——旧版字段的默认值就是 {@code 0}/{@code false}
+     * （{@code TileColorableMachineComponent.java:27-28}），而「隔离关闭」意味着本仓是**通用端口**，
+     * 对每一组都可见（{@link HatchCollection#withGroup}）。两者必须分开记：组号 0 是合法的一组，
+     * 不能拿它当「没启用」的哨兵。
+     */
+    private int groupId;
+    private boolean groupInput;
 
     public MachineHatchBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlocks.HATCH_ENTITY.get(), pos, state);
@@ -541,6 +558,56 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         return net.minecraft.network.chat.Component.translatable(this.kind.itemTranslationKey(this.tier));
     }
 
+    // ------------------------------------------------------- A2: input groups
+
+    /** 这个仓口种类能不能被分组：只有物品输入与流体输入能（旧版 {@code canGroupInput}）。 */
+    public boolean canGroupInput() {
+        return this.kind.canGroupInput();
+    }
+
+    /** 玩家是否给这个仓启用过组隔离；不可分组的仓口恒 {@code false}。 */
+    public boolean isGroupInput() {
+        return this.canGroupInput() && this.groupInput;
+    }
+
+    /** 玩家填的组号（未启用隔离时仍是上次填的值，和旧版一样不擦除）。 */
+    public int groupId() {
+        return this.groupId;
+    }
+
+    /**
+     * 这个仓口在配方端口集合里的组号：启用隔离时是自己的组号，否则 {@code -1}（通用）。
+     *
+     * <p>这就是旧版 {@code getGroupId()} 的对应物（{@code TileColorableMachineComponent.java:105-108}）。
+     * 归一在这里做一次，{@link HatchCollection.Builder#add} 会再按仓口种类挡一次——UI 拦不住将来的
+     * 调用点，但这两层至少能让「输出仓被分组」变成不可能。
+     */
+    public int effectiveGroup() {
+        return this.isGroupInput() ? this.groupId : -1;
+    }
+
+    /** 设置组状态。不可分组的仓口静默忽略；组号下限 0（旧版也只拦了下限，见 GUI 里的钳制）。 */
+    public void setGroup(boolean enabled, int id) {
+        if (!this.canGroupInput()) {
+            return;
+        }
+        int clamped = Math.max(0, id);
+        if (this.groupInput == enabled && this.groupId == clamped) {
+            return;
+        }
+        this.groupInput = enabled;
+        this.groupId = clamped;
+        this.setChanged();
+    }
+
+    /** `/mm-diagnose` 用：这个仓口属于哪一组。 */
+    public String groupDescription() {
+        if (!this.canGroupInput()) {
+            return "组=不适用（旧版也不能分组）";
+        }
+        return this.groupInput ? "组=" + this.groupId : "组=通用（隔离未启用）";
+    }
+
     @Override
     public net.minecraft.world.inventory.AbstractContainerMenu createMenu(int id,
             net.minecraft.world.entity.player.Inventory inventory, net.minecraft.world.entity.player.Player player) {
@@ -653,6 +720,11 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         if (this.machineColor != null) {
             tag.putInt(TAG_COLOR, this.machineColor);
         }
+        // A2：只有可分组的仓口才写这两个键，理由同旧版（TileColorableMachineComponent.java:71-85）。
+        if (this.kind.canGroupInput()) {
+            tag.putInt(TAG_GROUP_ID, this.groupId);
+            tag.putBoolean(TAG_GROUP_INPUT, this.groupInput);
+        }
         // 兼容层的内容（例如流体仓上的气体）由各模块自己序列化，本类不知道里面是什么。
         com.reborn.modularmachinery.compat.ModCompat.savePorts(tag, this);
     }
@@ -671,6 +743,10 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             this.energy.receiveEnergy(tag.getInt(TAG_ENERGY), false);
         }
         this.machineColor = tag.contains(TAG_COLOR) ? tag.getInt(TAG_COLOR) : null;
+        if (this.kind.canGroupInput()) {
+            this.groupId = tag.contains(TAG_GROUP_ID) ? Math.max(0, tag.getInt(TAG_GROUP_ID)) : 0;
+            this.groupInput = tag.getBoolean(TAG_GROUP_INPUT);
+        }
         com.reborn.modularmachinery.compat.ModCompat.loadPorts(tag, this);
     }
 }

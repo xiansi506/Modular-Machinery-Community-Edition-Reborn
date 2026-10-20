@@ -66,6 +66,12 @@ public final class FactoryThread {
     public static final String TAG_ACTIVE_RECIPE = "activeRecipe";
     /** The original's NBT key for the progress within it. */
     public static final String TAG_PROGRESS = "progress";
+    /**
+     * The port group this thread's settlement draws from. Not an original key: the original re-derived its
+     * group on load ({@code RecipeCraftingContext} kept the group in memory only), which could silently move a
+     * half-finished craft onto a different group's ports after a restart. Freezing it here is deliberate.
+     */
+    public static final String TAG_GROUP_ID = "groupId";
 
     private final boolean coreThread;
     @Nullable
@@ -270,6 +276,7 @@ public final class FactoryThread {
         if (this.active != null) {
             tag.putString(TAG_ACTIVE_RECIPE, this.active.recipeId().toString());
             tag.putInt(TAG_PROGRESS, this.active.progress());
+            tag.putInt(TAG_GROUP_ID, this.active.group());
         }
         return tag;
     }
@@ -284,11 +291,11 @@ public final class FactoryThread {
         if (id == null) {
             return null;
         }
-        return new SavedCraft(id, Math.max(0, tag.getInt(TAG_PROGRESS)));
+        return new SavedCraft(id, Math.max(0, tag.getInt(TAG_PROGRESS)), Math.max(0, tag.getInt(TAG_GROUP_ID)));
     }
 
-    /** What a saved thread tag carries: which recipe and how far into it. */
-    record SavedCraft(ResourceLocation recipeId, int progress) {
+    /** What a saved thread tag carries: which recipe, how far into it, and which port group it pays from. */
+    record SavedCraft(ResourceLocation recipeId, int progress, int group) {
     }
 
     /** Length of the recipe list this thread is restricted to, for diagnostics. */
@@ -299,20 +306,6 @@ public final class FactoryThread {
     /** Whether {@code recipe} is one this thread is allowed to run. An empty set allows everything. */
     public boolean accepts(MachineRecipe recipe) {
         return this.recipeSet.isEmpty() || this.recipeSet.contains(recipe.getId());
-    }
-
-    /** The recipes this thread may run, out of a candidate list. */
-    List<MachineRecipe> filter(List<MachineRecipe> candidates) {
-        if (this.recipeSet.isEmpty()) {
-            return candidates;
-        }
-        java.util.List<MachineRecipe> out = new java.util.ArrayList<>(candidates.size());
-        for (MachineRecipe recipe : candidates) {
-            if (this.recipeSet.contains(recipe.getId())) {
-                out.add(recipe);
-            }
-        }
-        return out;
     }
 
     @Override

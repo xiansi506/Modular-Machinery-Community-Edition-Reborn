@@ -326,6 +326,9 @@ public final class ParallelCraftCheck {
         // 0.63.9：A1——仓口只存不动。旧版输入总线会从相邻容器抽、输出总线会往外推、
         // 能量输出仓每 tick 推 FE；本版方块连 getTicker 都没有（勘测 A1）。
         AutoIoCheck.autoIo();
+        // 0.64.0：A2——输入仓的组号是玩家填的、却决定配方能不能开工。旧版让同组端口独立检查，
+        // 本版此前每个端口都对整条配方可见（勘测 A2）。
+        HatchGroupCheck.hatchGroups();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -1445,7 +1448,9 @@ public final class ParallelCraftCheck {
             // 191 from 0.63.4: the owner asked the gas hatch's tooltip to have exactly the fluid hatch's shape,
             // so gashatch.tank (the "气体：" prefix) and fluidhatch.blocked_by_gas ("空（气体占着这个仓）")
             // were removed -- 193 minus 2.
-            check("the language files' key count", 191, zhMap.size());
+            // 196 from 0.64.0: A2's group screen adds five gui.…groupinputconfig keys
+            // (title / tooltip / value / enable / close), 191 plus 5.
+            check("the language files' key count", 196, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to
@@ -4229,11 +4234,12 @@ public final class ParallelCraftCheck {
             Path network = Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/"
                     + "modularmachinery/network/ModNetwork.java");
             String source = Files.readString(network);
-            check("the channel id constants are 0, 1, 2 and 3", "true",
+            check("the channel id constants are 0, 1, 2, 3 and 4", "true",
                     String.valueOf(source.contains("ID_PARALLEL_CONTROLLER_UPDATE = 0")
                             && source.contains("ID_SMART_INTERFACE_UPDATE = 1")
                             && source.contains("ID_SELECTION_SYNC = 2")
-                            && source.contains("ID_MACHINE_DEFINITION_SYNC = 3")));
+                            && source.contains("ID_MACHINE_DEFINITION_SYNC = 3")
+                            && source.contains("ID_HATCH_GROUP_UPDATE = 4")));
             int registrations = 0;
             for (String line : source.split("\n")) {
                 if (line.contains("CHANNEL.registerMessage(")) {
@@ -4244,8 +4250,9 @@ public final class ParallelCraftCheck {
             // Four from 0.32.0's wave 4: the machine-definition sync. The protocol version deliberately stays
             // "1" each time — adding an id is the compatible direction, and a mismatched pair of builds is
             // refused on the version string anyway.
-            check("the channel registers exactly four messages", 4, registrations);
-            report("all four messages are registered against those constants",
+            // Five from 0.64.0: A2's hatch group update (the group screen's only write path).
+            check("the channel registers exactly five messages", 5, registrations);
+            report("all five messages are registered against those constants",
                     source.contains("CHANNEL.registerMessage(ID_PARALLEL_CONTROLLER_UPDATE, "
                             + "ParallelControllerUpdatePacket.class")
                             && source.contains("CHANNEL.registerMessage(ID_SMART_INTERFACE_UPDATE, "
@@ -4253,7 +4260,9 @@ public final class ParallelCraftCheck {
                             && source.contains("CHANNEL.registerMessage(ID_SELECTION_SYNC, "
                                     + "SelectionSyncPacket.class")
                             && source.contains("CHANNEL.registerMessage(ID_MACHINE_DEFINITION_SYNC, "
-                                    + "MachineDefinitionSyncPacket.class"));
+                                    + "MachineDefinitionSyncPacket.class")
+                            && source.contains("CHANNEL.registerMessage(ID_HATCH_GROUP_UPDATE, "
+                                    + "HatchGroupUpdatePacket.class"));
             report("the protocol version is unchanged from 0.20.0's '1'",
                     source.contains("PROTOCOL_VERSION = \"1\""));
         } catch (Exception exception) {

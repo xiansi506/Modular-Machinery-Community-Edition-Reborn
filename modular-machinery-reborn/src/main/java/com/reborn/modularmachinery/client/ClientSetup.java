@@ -14,6 +14,8 @@ public final class ClientSetup {
             MenuScreens.register(ModMenus.MACHINE_CONTROLLER.get(), MachineControllerScreen::new);
             MenuScreens.register(ModMenus.MACHINE_HATCH.get(), MachineHatchScreen::new);
             MenuScreens.register(ModMenus.PARALLEL_CONTROLLER.get(), ParallelControllerScreen::new);
+            // A2：输入组配置窗口（旧版 GuiContainerGroupInputConfig）。
+            MenuScreens.register(ModMenus.HATCH_GROUP.get(), HatchGroupScreen::new);
             MenuScreens.register(ModMenus.UPGRADE_BUS.get(), UpgradeBusScreen::new);
             // M6e-2: the factory controller gets its own screen (280×213 panel plus the elements sheet), so it
             // needs a registration of its own on top of its own menu type. Nothing else is needed — the resource

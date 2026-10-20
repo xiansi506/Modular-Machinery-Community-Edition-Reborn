@@ -110,6 +110,14 @@ public final class DiagnoseCommand {
             source.sendSuccess(() -> Component.literal("  " + line), false);
         }
 
+        // ---- 输入组（A2）---------------------------------------------------------------------
+        // 组号是另一个看不见的状态：玩家把仓口分到几组、正在跑的是哪一组，只看世界看不出来。
+        source.sendSuccess(() -> Component.literal("--- 输入组（A2）---"), false);
+        final String groupSummary = "  组号: " + hatches.groupIds()
+                + "   正在跑的组: " + (controller.activeGroupId() == null ? "无" : controller.activeGroupId())
+                + "   （仓口行里的 group=general 是通用端口，对每组都可见）";
+        source.sendSuccess(() -> Component.literal(groupSummary), false);
+
         // ---- 结构展开后**带标签**的每一格，以及那一格里实际是什么 --------------------------------
         //
         // 这一段是「0 个端口」时的定位手段：把**相对坐标、世界坐标、标签、实际方块**并排打出来。
@@ -175,6 +183,7 @@ public final class DiagnoseCommand {
                     final String describe = "  相对" + relative.toShortString() + " 世界" + at.toShortString()
                             + " 种类=" + hatch.kind()
                             + " 标签=" + (tag == null ? "-" : tag)
+                            + " " + hatch.groupDescription()
                             + (inStructure ? "" : "   ← 不在结构的任何位置上！")
                             + "  " + hatch.autoIoDescription();
                     source.sendSuccess(() -> Component.literal(describe), false);
@@ -432,25 +441,44 @@ public final class DiagnoseCommand {
                 continue;
             }
             total++;
-            boolean canStart = recipe.canStart(hatches, controller.modifiers());
-            boolean canTick = recipe.canTick(hatches, controller.modifiers());
-            String failure = recipe.startFailure(hatches, controller.modifiers());
-            boolean ok = canStart && canTick;
+            // A2：与控制器同一规则——按组号升序，第一组能 canStart 的就是会被锁住的组。
+            // 对整份混合端口问 canStart 会算上「A 组的料 + B 组的料」，那正是隔离要排除的假成功。
+            HatchCollection lockedScope = null;
+            int lockedGroup = -1;
+            boolean lockedCanTick = false;
+            String failure = null;
+            HatchCollection lastScope = hatches;
+            for (int groupId : hatches.groupIds()) {
+                HatchCollection scope = hatches.withGroup(groupId);
+                lastScope = scope;
+                if (recipe.canStart(scope, controller.modifiers())) {
+                    lockedScope = scope;
+                    lockedGroup = groupId;
+                    lockedCanTick = recipe.canTick(scope, controller.modifiers());
+                    break;
+                }
+                failure = recipe.startFailure(scope, controller.modifiers());
+            }
+            boolean ok = lockedScope != null && lockedCanTick;
             if (ok) {
                 runnable++;
             }
             final boolean okFinal = ok;
-            final boolean startFinal = canStart;
-            final boolean tickFinal = canTick;
+            final boolean startFinal = lockedScope != null;
+            final boolean tickFinal = lockedCanTick;
+            final int lockedFinal = lockedGroup;
+            final String failureFinal = failure;
+            final HatchCollection requirementScope = lockedScope != null ? lockedScope : lastScope;
             source.sendSuccess(() -> Component.literal("  " + recipe.getId()
                     + "  可开工=" + okFinal
+                    + (startFinal ? "  锁定组=" + lockedFinal : "")
                     + (okFinal ? "" : "  (canStart=" + startFinal + " canTick=" + tickFinal
-                            + " 原因=" + (failure == null ? "无（料不够但没给出具体原因）" : failure) + ")")),
+                            + " 原因=" + (failureFinal == null ? "无（料不够但没给出具体原因）" : failureFinal) + ")")),
                     false);
             // 每条需求单独说：它绑了哪个标签、在那个标签下能不能满足。这是定位「料放错段」最快的一条。
             for (MachineRequirement requirement : recipe.requirements()) {
                 String tag = requirement.selectorTag();
-                String satisfied = String.valueOf(requirement.canSatisfy(requirement.visiblePorts(hatches)));
+                String satisfied = String.valueOf(requirement.canSatisfy(requirement.visiblePorts(requirementScope)));
                 source.sendSuccess(() -> Component.literal("      " + requirement.getClass().getSimpleName()
                         + " [" + requirement.ioType() + "] tag=" + (tag == null ? "(无)" : tag)
                         + " 满足=" + satisfied), false);

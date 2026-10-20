@@ -62,6 +62,24 @@ public enum HatchKind implements StringRepresentable {
         return this.family;
     }
 
+    /**
+     * 这个仓口能不能被玩家分到一个「输入组」（A2，勘测 §4 第 115 行）。
+     *
+     * <p>旧版只有两个家族回答 {@code true}：物品输入总线
+     * （{@code TileItemInputBus.java:141-144}）与流体输入仓
+     * （{@code base/TileFluidTank.java:144-147}，且仅 {@code IOType.INPUT}——输出仓继承同一个方法但
+     * 那一半是 {@code false}）。输出仓与能量仓从来不可分组：旧版
+     * {@code TileColorableMachineComponent#getGroupId} 对它们一律答 {@code -1}（通用）。
+     *
+     * <p>为什么这条规则住在枚举里而不是 UI 里：它同时决定「仓口能不能存组号」
+     * （{@code MachineHatchBlockEntity#saveAdditional}）、「端口收集时带不带组号」
+     * （{@code MachineControllerBlockEntity#collectHatches}）和「右键能不能打开分组界面」。
+     * 三处如果各写一遍，迟早会有一处忘了改。
+     */
+    public boolean canGroupInput() {
+        return this == ITEM_INPUT || this == FLUID_INPUT;
+    }
+
     /** The {@code size} blockstate property for this family. */
     public EnumProperty<HatchTier> sizeProperty() {
         return this.sizeProperty;

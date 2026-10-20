@@ -1,9 +1,11 @@
 package com.reborn.modularmachinery.block;
 
 import net.minecraft.core.BlockPos;
+import com.reborn.modularmachinery.menu.HatchGroupMenu;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -84,10 +86,26 @@ public abstract class MachineHatchBlock extends Block implements EntityBlock {
                                  InteractionHand hand, BlockHitResult hit) {
         // The original opened the hatch's own screen on right-click; the screen is what shows the tier's slots
         // or the tank's contents, so there is no separate chat message any more.
+        //
+        // A2 adds the original's other gesture: sneak + both hands empty on an input hatch opens the group
+        // configuration instead (EventHandler.java:165-181 — same three conditions, same "empty main and off
+        // hand" rule). Everything else keeps the normal screen, including a sneak-click while holding an item.
         if (!level.isClientSide && hand == InteractionHand.MAIN_HAND) {
             if (level.getBlockEntity(pos) instanceof MachineHatchBlockEntity hatch) {
-                net.minecraftforge.network.NetworkHooks.openScreen(
-                        (net.minecraft.server.level.ServerPlayer) player, hatch, pos);
+                boolean wantsGroupConfig = player.isShiftKeyDown()
+                        && player.getMainHandItem().isEmpty()
+                        && player.getOffhandItem().isEmpty()
+                        && hatch.canGroupInput();
+                if (wantsGroupConfig) {
+                    net.minecraftforge.network.NetworkHooks.openScreen(
+                            (net.minecraft.server.level.ServerPlayer) player,
+                            new SimpleMenuProvider((id, inventory, p) -> new HatchGroupMenu(id, inventory, hatch),
+                                    Component.translatable(HatchGroupMenu.TITLE_KEY)),
+                            pos);
+                } else {
+                    net.minecraftforge.network.NetworkHooks.openScreen(
+                            (net.minecraft.server.level.ServerPlayer) player, hatch, pos);
+                }
             }
         }
         return InteractionResult.sidedSuccess(level.isClientSide);

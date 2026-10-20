@@ -35,6 +35,7 @@ public final class HatchCollection {
     public static final HatchCollection EMPTY = new HatchCollection(List.of(), List.of(), List.of(),
             List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
             List.of(), List.of(), List.of(), List.of(),
+            List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
             () -> SmartInterfaceValueSource.NONE, () -> null);
 
     /**
@@ -96,6 +97,29 @@ public final class HatchCollection {
     private final List<String> gasOutputTags;
 
     /**
+     * 每个端口属于哪个「输入组」，与端口桶、标签列表<strong>三向对应</strong>（A2，勘测 §4 第 115 行）。
+     *
+     * <p>{@code -1} 是这个端口的「通用」标记，不是「没有组」：旧版
+     * {@code TileColorableMachineComponent#getGroupId} 对不可分组仓与未启用隔离的仓一律答 {@code -1}
+     * （{@code :105-108}），而 {@code TileMultiblockMachineController#updateComponents}
+     * （{@code :757-790}）把 {@code -1} 的组件放进 {@code generalComponents}，再加进<strong>每一个</strong>
+     * 候选组。所以通用端口对每组都可见，却不定义任何组——候选组只来自非负组号。
+     *
+     * <p>为什么要和 {@code selector-tag} 分开存：两者筛的是不同的东西。标签按<strong>结构位置</strong>分组，
+     * 组号按<strong>玩家分配</strong>分组，旧版里它们同时生效（{@code getComponentsFor} 先按标签收，
+     * 再按组桶分，{@code RecipeCraftingContext.java:212-235}）。合并成一个字段就没法表达
+     * 「同一段里的两个仓分属两组」。
+     */
+    private final List<Integer> itemInputGroups;
+    private final List<Integer> itemOutputGroups;
+    private final List<Integer> fluidInputGroups;
+    private final List<Integer> fluidOutputGroups;
+    private final List<Integer> energyInputGroups;
+    private final List<Integer> energyOutputGroups;
+    private final List<Integer> gasInputGroups;
+    private final List<Integer> gasOutputGroups;
+
+    /**
      * Where a smart-interface requirement reads its value. Never {@code null}: {@link
      * SmartInterfaceValueSource#NONE} is the honest answer for a collection built without a controller, and it
      * answers {@code null} for every type — which is the original's "no interface of that type found" case.
@@ -117,6 +141,10 @@ public final class HatchCollection {
                             List<String> fluidInputTags, List<String> fluidOutputTags,
                             List<String> energyInputTags, List<String> energyOutputTags,
                             List<String> gasInputTags, List<String> gasOutputTags,
+                            List<Integer> itemInputGroups, List<Integer> itemOutputGroups,
+                            List<Integer> fluidInputGroups, List<Integer> fluidOutputGroups,
+                            List<Integer> energyInputGroups, List<Integer> energyOutputGroups,
+                            List<Integer> gasInputGroups, List<Integer> gasOutputGroups,
                             java.util.function.Supplier<SmartInterfaceValueSource> smartInterfaces,
                             java.util.function.Supplier<MachineDefinition> machine) {
         this.itemInputs = List.copyOf(itemInputs);
@@ -137,6 +165,15 @@ public final class HatchCollection {
         this.energyOutputTags = checkedTags(energyOutputTags, this.energyOutputs.size(), "energyOutputs");
         this.gasInputTags = checkedTags(gasInputTags, this.gasInputs.size(), "gasInputs");
         this.gasOutputTags = checkedTags(gasOutputTags, this.gasOutputs.size(), "gasOutputs");
+        // 第三组与端口、标签同一条理由：错位是静默的，只会让某个组读到另一个仓的端口。
+        this.itemInputGroups = checkedGroups(itemInputGroups, this.itemInputs.size(), "itemInputs");
+        this.itemOutputGroups = checkedGroups(itemOutputGroups, this.itemOutputs.size(), "itemOutputs");
+        this.fluidInputGroups = checkedGroups(fluidInputGroups, this.fluidInputs.size(), "fluidInputs");
+        this.fluidOutputGroups = checkedGroups(fluidOutputGroups, this.fluidOutputs.size(), "fluidOutputs");
+        this.energyInputGroups = checkedGroups(energyInputGroups, this.energyInputs.size(), "energyInputs");
+        this.energyOutputGroups = checkedGroups(energyOutputGroups, this.energyOutputs.size(), "energyOutputs");
+        this.gasInputGroups = checkedGroups(gasInputGroups, this.gasInputs.size(), "gasInputs");
+        this.gasOutputGroups = checkedGroups(gasOutputGroups, this.gasOutputs.size(), "gasOutputs");
         this.smartInterfaces = smartInterfaces;
         this.machine = machine;
     }
@@ -147,6 +184,14 @@ public final class HatchCollection {
                     + tags.size() + " tags; the two lists are positional and must line up");
         }
         return List.copyOf(tags);
+    }
+
+    private static List<Integer> checkedGroups(List<Integer> groups, int ports, String bucket) {
+        if (groups.size() != ports) {
+            throw new IllegalStateException("HatchCollection." + bucket + " has " + ports + " ports but "
+                    + groups.size() + " groups; the two lists are positional and must line up");
+        }
+        return List.copyOf(groups);
     }
 
     public List<IItemHandler> itemInputs() {
@@ -230,8 +275,87 @@ public final class HatchCollection {
                 filterTags(this.energyOutputTags, wanted),
                 filterTags(this.gasInputTags, wanted),
                 filterTags(this.gasOutputTags, wanted),
+                filterGroups(this.itemInputTags, this.itemInputGroups, wanted),
+                filterGroups(this.itemOutputTags, this.itemOutputGroups, wanted),
+                filterGroups(this.fluidInputTags, this.fluidInputGroups, wanted),
+                filterGroups(this.fluidOutputTags, this.fluidOutputGroups, wanted),
+                filterGroups(this.energyInputTags, this.energyInputGroups, wanted),
+                filterGroups(this.energyOutputTags, this.energyOutputGroups, wanted),
+                filterGroups(this.gasInputTags, this.gasInputGroups, wanted),
+                filterGroups(this.gasOutputTags, this.gasOutputGroups, wanted),
                 this.smartInterfaces,
                 this.machine);
+    }
+
+    /**
+     * 只看属于输入组 {@code groupId} 的端口，外加所有通用端口（组号 {@code -1}）。
+     *
+     * <p>这是 A2 的核心：旧版 {@code TileMultiblockMachineController#updateComponents:757-790}
+     * 把通用组件并进<strong>每一个</strong>组，而 {@code canStartCrafting:502-549} 逐组试整条配方，
+     * 成功才锁定那一组。所以这里的过滤必须保留通用端口——否则玩家把两个仓分到 1 组、其余仓留在通用，
+     * 1 组就会看不见那些通用仓。
+     *
+     * <p>{@code groupId} 为 {@code -1} 时只留下通用端口（旧版的 {@code generalComponents} 视图，
+     * {@code getComponentsFor} 里组键 {@code -1} 的那一桶）。
+     *
+     * <p>输出与能量端口永远带 {@code -1}（{@link Builder#add} 按 {@code canGroupInput} 归一），
+     * 所以它们对每组都可见——这正是旧版输出侧不受组隔离影响的原因
+     * （{@code canStartCrafting(false, ...)} 只看输出的第一条路径）。
+     */
+    public HatchCollection withGroup(int groupId) {
+        return new HatchCollection(
+                filterByGroup(this.itemInputs, this.itemInputGroups, groupId),
+                filterByGroup(this.itemOutputs, this.itemOutputGroups, groupId),
+                filterByGroup(this.fluidInputs, this.fluidInputGroups, groupId),
+                filterByGroup(this.fluidOutputs, this.fluidOutputGroups, groupId),
+                filterByGroup(this.energyInputs, this.energyInputGroups, groupId),
+                filterByGroup(this.energyOutputs, this.energyOutputGroups, groupId),
+                filterByGroup(this.gasInputs, this.gasInputGroups, groupId),
+                filterByGroup(this.gasOutputs, this.gasOutputGroups, groupId),
+                filterByGroup(this.itemInputTags, this.itemInputGroups, groupId),
+                filterByGroup(this.itemOutputTags, this.itemOutputGroups, groupId),
+                filterByGroup(this.fluidInputTags, this.fluidInputGroups, groupId),
+                filterByGroup(this.fluidOutputTags, this.fluidOutputGroups, groupId),
+                filterByGroup(this.energyInputTags, this.energyInputGroups, groupId),
+                filterByGroup(this.energyOutputTags, this.energyOutputGroups, groupId),
+                filterByGroup(this.gasInputTags, this.gasInputGroups, groupId),
+                filterByGroup(this.gasOutputTags, this.gasOutputGroups, groupId),
+                filterByGroup(this.itemInputGroups, this.itemInputGroups, groupId),
+                filterByGroup(this.itemOutputGroups, this.itemOutputGroups, groupId),
+                filterByGroup(this.fluidInputGroups, this.fluidInputGroups, groupId),
+                filterByGroup(this.fluidOutputGroups, this.fluidOutputGroups, groupId),
+                filterByGroup(this.energyInputGroups, this.energyInputGroups, groupId),
+                filterByGroup(this.energyOutputGroups, this.energyOutputGroups, groupId),
+                filterByGroup(this.gasInputGroups, this.gasInputGroups, groupId),
+                filterByGroup(this.gasOutputGroups, this.gasOutputGroups, groupId),
+                this.smartInterfaces,
+                this.machine);
+    }
+
+    /**
+     * 这台机器上出现过的输入组号，升序去重；没有带组端口时返回 {@code [0]}。
+     *
+     * <p>「没有带组端口时是组 0」不是随手挑的默认值，而是旧版 {@code updateComponents} 的分支：
+     * 找不到任何带组组件时 {@code foundComponents.put(0L, generalComponents)}。也就是说一台从未用过
+     * 组隔离的机器本来就在组 0 里跑——不这么补，{@code withGroup} 会筛出空集合，配方永远开不了工。
+     *
+     * <p>只扫输入桶：{@code canGroupInput} 只允许物品输入与流体输入，输出与能量端口的组号恒为
+     * {@code -1}，扫它们不会得到任何新组号。
+     */
+    public List<Integer> groupIds() {
+        java.util.TreeSet<Integer> ids = new java.util.TreeSet<>();
+        collectGroupIds(this.itemInputGroups, ids);
+        collectGroupIds(this.fluidInputGroups, ids);
+        collectGroupIds(this.gasInputGroups, ids);
+        return ids.isEmpty() ? List.of(0) : List.copyOf(ids);
+    }
+
+    private static void collectGroupIds(List<Integer> groups, java.util.Set<Integer> into) {
+        for (int group : groups) {
+            if (group >= 0) {
+                into.add(group);
+            }
+        }
     }
 
     /** 这个位置上的端口在筛选后是否仍然可见。 */
@@ -251,21 +375,24 @@ public final class HatchCollection {
      */
     public List<String> describePorts() {
         List<String> out = new ArrayList<>();
-        describeBucket(out, "item input", this.itemInputs.size(), this.itemInputTags);
-        describeBucket(out, "item output", this.itemOutputs.size(), this.itemOutputTags);
-        describeBucket(out, "fluid input", this.fluidInputs.size(), this.fluidInputTags);
-        describeBucket(out, "fluid output", this.fluidOutputs.size(), this.fluidOutputTags);
-        describeBucket(out, "energy input", this.energyInputs.size(), this.energyInputTags);
-        describeBucket(out, "energy output", this.energyOutputs.size(), this.energyOutputTags);
-        describeBucket(out, "gas input", this.gasInputs.size(), this.gasInputTags);
-        describeBucket(out, "gas output", this.gasOutputs.size(), this.gasOutputTags);
+        describeBucket(out, "item input", this.itemInputs.size(), this.itemInputTags, this.itemInputGroups);
+        describeBucket(out, "item output", this.itemOutputs.size(), this.itemOutputTags, this.itemOutputGroups);
+        describeBucket(out, "fluid input", this.fluidInputs.size(), this.fluidInputTags, this.fluidInputGroups);
+        describeBucket(out, "fluid output", this.fluidOutputs.size(), this.fluidOutputTags, this.fluidOutputGroups);
+        describeBucket(out, "energy input", this.energyInputs.size(), this.energyInputTags, this.energyInputGroups);
+        describeBucket(out, "energy output", this.energyOutputs.size(), this.energyOutputTags, this.energyOutputGroups);
+        describeBucket(out, "gas input", this.gasInputs.size(), this.gasInputTags, this.gasInputGroups);
+        describeBucket(out, "gas output", this.gasOutputs.size(), this.gasOutputTags, this.gasOutputGroups);
         return List.copyOf(out);
     }
 
-    private static void describeBucket(List<String> out, String family, int ports, List<String> tags) {
+    private static void describeBucket(List<String> out, String family, int ports, List<String> tags,
+                                       List<Integer> groups) {
         for (int i = 0; i < ports; i++) {
             String tag = tags.get(i);
-            out.add(family + " #" + i + " tag=" + (UNTAGGED.equals(tag) ? "-" : tag));
+            int group = groups.get(i);
+            out.add(family + " #" + i + " tag=" + (UNTAGGED.equals(tag) ? "-" : tag)
+                    + " group=" + (group < 0 ? "general" : Integer.toString(group)));
         }
     }
 
@@ -284,6 +411,31 @@ public final class HatchCollection {
         for (String tag : tags) {
             if (keeps(tag, wanted)) {
                 kept.add(tag);
+            }
+        }
+        return kept;
+    }
+
+    /** 组号{@code -1}的端口（通用端口）在每一组里都可见；其余端口只在自己的那一组里可见。 */
+    private static boolean keepsGroup(int group, int wanted) {
+        return group < 0 || group == wanted;
+    }
+
+    private static <T> List<T> filterByGroup(List<T> values, List<Integer> groups, int wanted) {
+        List<T> kept = new ArrayList<>(values.size());
+        for (int i = 0; i < values.size(); i++) {
+            if (keepsGroup(groups.get(i), wanted)) {
+                kept.add(values.get(i));
+            }
+        }
+        return kept;
+    }
+
+    private static List<Integer> filterGroups(List<String> tags, List<Integer> groups, String wanted) {
+        List<Integer> kept = new ArrayList<>(groups.size());
+        for (int i = 0; i < groups.size(); i++) {
+            if (keeps(tags.get(i), wanted)) {
+                kept.add(groups.get(i));
             }
         }
         return kept;
@@ -372,6 +524,16 @@ public final class HatchCollection {
         private final List<String> gasInputTags = new ArrayList<>();
         private final List<String> gasOutputTags = new ArrayList<>();
 
+        /** 与端口桶、标签逐个对应，见 {@link HatchCollection#itemInputGroups} 的说明。 */
+        private final List<Integer> itemInputGroups = new ArrayList<>();
+        private final List<Integer> itemOutputGroups = new ArrayList<>();
+        private final List<Integer> fluidInputGroups = new ArrayList<>();
+        private final List<Integer> fluidOutputGroups = new ArrayList<>();
+        private final List<Integer> energyInputGroups = new ArrayList<>();
+        private final List<Integer> energyOutputGroups = new ArrayList<>();
+        private final List<Integer> gasInputGroups = new ArrayList<>();
+        private final List<Integer> gasOutputGroups = new ArrayList<>();
+
         /** Defaults to "nothing", so a collection built without a controller keeps behaving as it always did. */
         private SmartInterfaceValueSource smartInterfaces = SmartInterfaceValueSource.NONE;
 
@@ -404,24 +566,41 @@ public final class HatchCollection {
         public Builder add(com.reborn.modularmachinery.block.HatchKind kind,
                            IItemHandler items, IFluidHandler fluids, IEnergyStorage energy,
                            @javax.annotation.Nullable String selectorTag) {
+            return add(kind, items, fluids, energy, selectorTag, -1);
+        }
+
+        /**
+         * {@link #add} 带输入组号的版本（A2）。
+         *
+         * <p>组号在这里<strong>归一</strong>：{@code canGroupInput()} 为 {@code false} 的仓口恒记为
+         * {@code -1}（通用），不管调用者传了什么。这是旧版 {@code getGroupId} 的写法，也是唯一能保证
+         * 「输出仓不能被隔离」的地方——UI 只能拦住玩家，拦不住将来某个调用点。
+         */
+        public Builder add(com.reborn.modularmachinery.block.HatchKind kind,
+                           IItemHandler items, IFluidHandler fluids, IEnergyStorage energy,
+                           @javax.annotation.Nullable String selectorTag, int groupId) {
             String tag = (selectorTag == null || selectorTag.isEmpty()) ? UNTAGGED : selectorTag;
+            int group = kind.canGroupInput() ? Math.max(-1, groupId) : -1;
             switch (kind.family()) {
                 case ITEM -> {
                     if (items != null) {
                         (kind.isInput() ? this.itemInputs : this.itemOutputs).add(items);
                         (kind.isInput() ? this.itemInputTags : this.itemOutputTags).add(tag);
+                        (kind.isInput() ? this.itemInputGroups : this.itemOutputGroups).add(group);
                     }
                 }
                 case FLUID -> {
                     if (fluids != null) {
                         (kind.isInput() ? this.fluidInputs : this.fluidOutputs).add(fluids);
                         (kind.isInput() ? this.fluidInputTags : this.fluidOutputTags).add(tag);
+                        (kind.isInput() ? this.fluidInputGroups : this.fluidOutputGroups).add(group);
                     }
                 }
                 case ENERGY -> {
                     if (energy != null) {
                         (kind.isInput() ? this.energyInputs : this.energyOutputs).add(energy);
                         (kind.isInput() ? this.energyInputTags : this.energyOutputTags).add(tag);
+                        (kind.isInput() ? this.energyInputGroups : this.energyOutputGroups).add(group);
                     }
                 }
             }
@@ -431,7 +610,7 @@ public final class HatchCollection {
         /** {@link #add} for a position that declares no {@code selector-tag}. */
         public Builder add(com.reborn.modularmachinery.block.HatchKind kind,
                            IItemHandler items, IFluidHandler fluids, IEnergyStorage energy) {
-            return add(kind, items, fluids, energy, null);
+            return add(kind, items, fluids, energy, null, -1);
         }
 
         /**
@@ -453,10 +632,24 @@ public final class HatchCollection {
          * @param selectorTag 该位置的 {@code selector-tag}
          */
         public Builder gasPorts(Object entity, boolean input, @javax.annotation.Nullable String selectorTag) {
+            return gasPorts(entity, input, selectorTag, -1);
+        }
+
+        /**
+         * {@link #gasPorts} 带输入组号的版本（A2）。
+         *
+         * <p>气体端口挂在流体仓上，而流体输入仓是可以分组的（{@code canGroupInput}），所以它必须跟着宿主仓
+         * 一起被组过滤——旧版 {@code HybridGasTank} 就是 {@code TileFluidTank} 的一部分，组号也是那个
+         * 组件的组号。{@code input == false} 的那一半在调用点上恒传 {@code -1}（输出仓不可分组）。
+         */
+        public Builder gasPorts(Object entity, boolean input, @javax.annotation.Nullable String selectorTag,
+                                int groupId) {
             String tag = (selectorTag == null || selectorTag.isEmpty()) ? UNTAGGED : selectorTag;
+            int group = Math.max(-1, groupId);
             for (Object handler : com.reborn.modularmachinery.compat.ModCompat.portHandlers(entity, "gas")) {
                 (input ? this.gasInputs : this.gasOutputs).add(handler);
                 (input ? this.gasInputTags : this.gasOutputTags).add(tag);
+                (input ? this.gasInputGroups : this.gasOutputGroups).add(group);
             }
             return this;
         }
@@ -474,6 +667,7 @@ public final class HatchCollection {
             if (handler != null) {
                 (input ? this.itemInputs : this.itemOutputs).add(handler);
                 (input ? this.itemInputTags : this.itemOutputTags).add(UNTAGGED);
+                (input ? this.itemInputGroups : this.itemOutputGroups).add(-1);
             }
             return this;
         }
@@ -482,6 +676,7 @@ public final class HatchCollection {
             if (handler != null) {
                 (input ? this.fluidInputs : this.fluidOutputs).add(handler);
                 (input ? this.fluidInputTags : this.fluidOutputTags).add(UNTAGGED);
+                (input ? this.fluidInputGroups : this.fluidOutputGroups).add(-1);
             }
             return this;
         }
@@ -490,6 +685,7 @@ public final class HatchCollection {
             if (storage != null) {
                 (input ? this.energyInputs : this.energyOutputs).add(storage);
                 (input ? this.energyInputTags : this.energyOutputTags).add(UNTAGGED);
+                (input ? this.energyInputGroups : this.energyOutputGroups).add(-1);
             }
             return this;
         }
@@ -499,6 +695,8 @@ public final class HatchCollection {
                     this.energyInputs, this.energyOutputs, this.gasInputs, this.gasOutputs,
                     this.itemInputTags, this.itemOutputTags, this.fluidInputTags, this.fluidOutputTags,
                     this.energyInputTags, this.energyOutputTags, this.gasInputTags, this.gasOutputTags,
+                    this.itemInputGroups, this.itemOutputGroups, this.fluidInputGroups, this.fluidOutputGroups,
+                    this.energyInputGroups, this.energyOutputGroups, this.gasInputGroups, this.gasOutputGroups,
                     () -> this.smartInterfaces, this.machine);
         }
     }
