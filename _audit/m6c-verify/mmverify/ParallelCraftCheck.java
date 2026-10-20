@@ -254,6 +254,9 @@ public final class ParallelCraftCheck {
         upgradeBusEffects();
         factoryLoaderFields();
         factoryEngine();
+        // 0.64.2：A4——仓口容量与能量传输。放在配置迁移那一节之前，因为这一节要证明「spec 未加载时
+        // 回退到编译期默认值」，而那一节会把实例的配置文件装进 spec。
+        HatchCapacityCheck.hatchCapacities();
         factoryPresentationAndConfig();
         smartInterfaceChain();
         noFailureSentinel();
@@ -847,7 +850,8 @@ public final class ParallelCraftCheck {
         }
         // 13 through 0.26.0; 0.27.0's MOC namespace adds general.modular-controller-compatible-mode and
         // general.disable-moc-deprecated-tip; the display.energy unit key is the sixteenth.
-        check("the config spec defines this many keys", 16, rendered.size());
+        // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit).
+        check("the config spec defines this many keys", 40, rendered.size());
 
         String[][] expected = {
                 {"parallel-controller.normal.max-parallelism", "4"},

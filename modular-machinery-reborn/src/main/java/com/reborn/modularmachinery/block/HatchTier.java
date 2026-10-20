@@ -19,6 +19,13 @@ import java.util.List;
  *   <li>energy hatches add {@code ultimate}.</li>
  * </ul>
  * A value of {@code 0} means "this tier does not exist for that family".
+ *
+ * <p><b>The numbers below are compiled defaults, not necessarily the live capacity.</b> A4 made the fluid tank
+ * size and the energy hatch's storage and transfer configurable, as in the original
+ * ({@code FluidHatchSize.java:43-47}, {@code EnergyHatchData.java:67-85}). The live values are read through
+ * {@code com.reborn.modularmachinery.config.HatchConfig}; the accessors here remain the fallback used before the
+ * config file has been read and the defaults the keys are defined with. Item tiers were never configurable in
+ * the original ({@code ItemBusSize.java:32-36} is a TODO, not a feature), so {@link #itemSlots()} is final.
  */
 public enum HatchTier implements StringRepresentable {
 
@@ -68,17 +75,26 @@ public enum HatchTier implements StringRepresentable {
         return this.itemSlots;
     }
 
-    /** Tank size in mB for a fluid hatch of this tier; {@code 0} when the tier is not a fluid tier. */
+    /**
+     * Compiled default tank size in mB for a fluid hatch of this tier; {@code 0} when the tier is not a fluid
+     * tier. The live value is {@code HatchConfig.fluidHatchCapacity(this)}.
+     */
     public int fluidCapacity() {
         return this.fluidCapacity;
     }
 
-    /** Stored FE for an energy hatch of this tier; {@code 0} when the tier is not an energy tier. */
+    /**
+     * Compiled default stored FE for an energy hatch of this tier; {@code 0} when the tier is not an energy
+     * tier. The live value is {@code HatchConfig.energyHatchCapacity(this)}.
+     */
     public long energyCapacity() {
         return this.energyCapacity;
     }
 
-    /** FE per tick accepted or emitted by an energy hatch of this tier; {@code 0} when not an energy tier. */
+    /**
+     * Compiled default FE per tick accepted or emitted by an energy hatch of this tier; {@code 0} when not an
+     * energy tier. The live value is {@code HatchConfig.energyHatchTransfer(this)}.
+     */
     public long energyTransfer() {
         return this.energyTransfer;
     }

@@ -56,6 +56,9 @@ desktop.ini
 run/
 saves/
 config/
+# 例外：模组源码里的 config 包（上面的 config/ 是给拷进来的实例用的，不能把源码也吞掉）
+!modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/config/
+!modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/config/**
 README-工作区索引.md
 
 # ---- 原始 Gradle 日志：噪音，不是证据（SUMMARY 文件才是证据）----

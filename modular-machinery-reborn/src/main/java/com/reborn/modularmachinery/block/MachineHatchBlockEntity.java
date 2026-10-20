@@ -1,5 +1,6 @@
 package com.reborn.modularmachinery.block;
 
+import com.reborn.modularmachinery.config.HatchConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -68,6 +69,12 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     @Nullable private final FluidTank tank;
     @Nullable private final EnergyStorage energy;
 
+    /**
+     * A4：这个仓口建成时配置给出的 FE/t。Forge 的 {@link EnergyStorage} 不暴露 {@code maxExtract} 的读法，
+     * 而 {@code HatchConfig} 在改配置后可能与已建好的方块不同，所以把当时的值留在这里。
+     */
+    private final int energyTransfer;
+
     private final LazyOptional<ItemStackHandler> itemCapability;
     private final LazyOptional<FluidTank> fluidCapability;
     private final LazyOptional<EnergyStorage> energyCapability;
@@ -101,6 +108,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         ItemStackHandler itemStorage = null;
         FluidTank fluidStorage = null;
         EnergyStorage energyStorage = null;
+        int energyTransferValue = 0;
 
         switch (this.kind.family()) {
             case ITEM -> {
@@ -116,11 +124,14 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
                 };
             }
             case FLUID -> {
-                fluidStorage = new FluidTankWithGasPriority(Math.max(1, this.tier.fluidCapacity()));
+                fluidStorage = new FluidTankWithGasPriority(Math.max(1, HatchConfig.fluidHatchCapacity(this.tier)));
             }
             case ENERGY -> {
-                int capacity = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, this.tier.energyCapacity()));
-                int transfer = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, this.tier.energyTransfer()));
+                // A4: the live numbers come from the config, not from the enum. The accessors already
+                // guarantee 1 .. Integer.MAX_VALUE, so no clamp is repeated here.
+                int capacity = HatchConfig.energyHatchCapacity(this.tier);
+                int transfer = HatchConfig.energyHatchTransfer(this.tier);
+                energyTransferValue = transfer;
                 energyStorage = new EnergyStorage(capacity, transfer, transfer, 0) {
                     @Override public int receiveEnergy(int maxReceive, boolean simulate) {
                         int received = super.receiveEnergy(maxReceive, simulate);
@@ -139,6 +150,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         this.items = itemStorage;
         this.tank = fluidStorage;
         this.energy = energyStorage;
+        this.energyTransfer = energyTransferValue;
         this.itemCapability = itemStorage == null ? LazyOptional.empty() : LazyOptional.of(() -> this.items);
         this.fluidCapability = fluidStorage == null ? LazyOptional.empty() : LazyOptional.of(() -> this.tank);
         this.energyCapability = energyStorage == null ? LazyOptional.empty() : LazyOptional.of(() -> this.energy);
@@ -194,10 +206,13 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
 
     /** Human-readable capacity of this hatch, used by the tooltip and by hand-over notes. */
     public String capacityDescription() {
+        // A4: read the storage the block entity actually built rather than the tier again. After a config
+        // reload the two can differ until the chunk is rebuilt; this line then still reports what is true here.
         return switch (this.kind.family()) {
-            case ITEM -> this.tier.itemSlots() + " slots";
-            case FLUID -> this.tier.fluidCapacity() + " mB";
-            case ENERGY -> this.tier.energyCapacity() + " FE, " + this.tier.energyTransfer() + " FE/t";
+            case ITEM -> (this.items == null ? 0 : this.items.getSlots()) + " slots";
+            case FLUID -> (this.tank == null ? 0 : this.tank.getCapacity()) + " mB";
+            case ENERGY -> (this.energy == null ? 0 : this.energy.getMaxEnergyStored()) + " FE, "
+                    + this.energyTransfer + " FE/t";
         };
     }
 
@@ -290,7 +305,8 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         if (this.energy == null) {
             return;
         }
-        int limit = (int) Math.min(Integer.MAX_VALUE, this.tier.energyTransfer());
+        // A4: the transfer recorded at construction time (EnergyStorage has no max-extract getter).
+        int limit = this.energyTransfer;
         int remaining = Math.min(limit, this.energy.getEnergyStored());
         if (remaining <= 0) {
             return;

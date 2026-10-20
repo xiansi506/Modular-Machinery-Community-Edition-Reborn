@@ -1,7 +1,8 @@
 package com.reborn.modularmachinery.block;
 
-import net.minecraft.core.BlockPos;
+import com.reborn.modularmachinery.config.HatchConfig;
 import com.reborn.modularmachinery.menu.HatchGroupMenu;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -154,15 +155,16 @@ public abstract class MachineHatchBlock extends Block implements EntityBlock {
     public static Component capacityComponent(HatchKind kind, HatchTier tier) {
         return switch (kind.family()) {
             case ITEM -> Component.translatable("tooltip.modular_machinery_reborn.hatch.slots", tier.itemSlots());
-            case FLUID -> Component.translatable("tooltip.modular_machinery_reborn.hatch.tank", tier.fluidCapacity());
+            case FLUID -> Component.translatable("tooltip.modular_machinery_reborn.hatch.tank",
+                    HatchConfig.fluidHatchCapacity(tier));
             // The original printed these two with `MiscUtils.formatDecimal` (a thousands separator) in the branch
             // that is always taken — `BlockEnergyInputHatch.java:55-56` — and left the unit hard-coded as `FE`
             // there, using the configurable unit only in its IC2 and GregTech branches. The unit is configurable
             // here instead, because those two branches do not exist on 1.20.1 and a hard-coded `FE` sitting beside
             // a configurable unit is a contradiction the player can see. The grouping is the original's.
             case ENERGY -> Component.translatable("tooltip.modular_machinery_reborn.hatch.energy",
-                    com.reborn.modularmachinery.config.DisplayNumbers.grouped(tier.energyCapacity()),
-                    com.reborn.modularmachinery.config.DisplayNumbers.grouped(tier.energyTransfer()),
+                    com.reborn.modularmachinery.config.DisplayNumbers.grouped(HatchConfig.energyHatchCapacity(tier)),
+                    com.reborn.modularmachinery.config.DisplayNumbers.grouped(HatchConfig.energyHatchTransfer(tier)),
                     com.reborn.modularmachinery.config.ModConfig.energyDisplay().labelComponent());
         };
     }
