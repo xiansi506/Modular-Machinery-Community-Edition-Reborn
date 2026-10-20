@@ -247,6 +247,7 @@ public final class ParallelCraftCheck {
         selectorTags();
         dynamicPatterns();
         x2SegmentRotation();
+        x3ZeroSection();
         dynamicPatternPreviews();
         shippedContentMatches();
         packetRoundTrip();
@@ -2049,10 +2050,14 @@ public final class ParallelCraftCheck {
             oneDump.append(' ').append(entry.getKey().toShortString()).append('=').append(entry.getValue());
         }
         report("展开 1 节后的标签布局（供核对）:" + oneDump, true);
-        // 收尾段落在 startOffset + stepOffset 再加上收尾单元自己的局部坐标 (0,0,1) 上：
-        // (0,0,1) + (0,0,1) + (0,0,1) = (0,0,3)。这一条是用 DIAG 打印实测出来的，不是心算的。
-        check("...而且它就是收尾标签（落在 z=3）", "output_line_end",
-                String.valueOf(zero.tag(new BlockPos(0, 0, 3))));
+        // 收尾段锚在 startOffset + 0 节 * stepOffset，再加上收尾单元自己的局部坐标 (0,0,1)：
+        // (0,0,1) + (0,0,1) = (0,0,2)。
+        //
+        // 0.63.1 及以前这里落在 z=3：展开时无论几节都先把锚点前进一步，于是「0 节」的收尾段
+        // 与配方里写的偏移差了一格，而量长度一侧把「收尾段压在起点」算成 0 节——两侧自相矛盾，
+        // 0 节机器永远拼不成（勘测 X3）。
+        check("...而且它就是收尾标签（落在 z=2，即 start + 0 步）", "output_line_end",
+                String.valueOf(zero.tag(new BlockPos(0, 0, 2))));
         report("...并且没有生成任何段号标签", !zero.tags().containsValue("input_line_0"));
 
         // ---- (3) 量长度：四种边界，全部离线可测 ----------------------------------------------
@@ -2076,7 +2081,10 @@ public final class ParallelCraftCheck {
         // 四个位置连续匹配，所以数到 4——「起点本身算第一节」。
         check("四节都在：数到 4（起点本身算第一节）", 4,
                 noEnd.matchesSize(parts::contains, pos -> false, origin, BlockPos.ZERO, step));
-        check("一节都没有：不成立", -1,
+        // 没有收尾段时数到 0 节也成立（返回 0 而不是 -1）：作者不写 parts-end 又把 minSize 留成
+        // 缺省 0，就是在声明「这段可有可无」。旧版在这里返回 0 且它的 isMatched 只看面，所以旧版算成立；
+        // 0.62.9–0.63.1 返回 -1，0 节永远选不上（勘测 X3）。
+        check("一节都没有、也没有收尾段：0 节成立（X3）", 0,
                 noEnd.matchesSize(pos -> false, pos -> false, origin, BlockPos.ZERO, step));
 
         // 上限：maxSize=3 而世界上有 4 节时，结果是**不匹配**而不是被截断成 3。
@@ -2195,7 +2203,10 @@ public final class ParallelCraftCheck {
 
         // 未旋转的段内布局在同一片世界里量出来的节数，0..3 朝向。它就是缺陷的形状：
         // 朝向 1 少数一节、朝向 2/3 一节都量不到；而 4 重对称的十字在四个朝向下都是 4。
-        long[] asymUnrotated = {4, 3, -1, -1};
+        //
+        // 最后两个 0 在 0.63.1 时是 -1（「量失败」）。X3 之后 0 是**合法节数**，而这里问的是「从起点
+        // 一节都数不到」，所以正确的期望就是 0；这两种情形仍然证明「未旋转的布局在世界里找不到段」。
+        long[] asymUnrotated = {4, 3, 0, 0};
         for (int steps = 0; steps < 4; steps++) {
             x2SegmentRow("asym", asym, rotated, steps, asymUnrotated[steps]);
             x2SegmentRow("sym", sym, rotated, steps, 4);
@@ -2256,6 +2267,99 @@ public final class ParallelCraftCheck {
         }
         java.util.Collections.sort(out);
         return out.toString();
+    }
+
+    /**
+     * X3：0 节动态段的语义。
+     *
+     * <p>旧版把 0 节既当作<strong>合法长度</strong>（{@code kasuminova/.../DynamicPattern.java:108} 的
+     * {@code size >= minSize} 收下 0，而它的 {@code MatchResult#isMatched} 只看面），又当作「量失败」的
+     * 编码（{@code matchesSize} 失败也返回 0）。0.62.9–0.63.1 只继承了一半：{@code matchesSize} 用 -1
+     * 表示失败，但选结果那句 {@code size > best.size()} 让 0 永远选不上——{@code minSize} 缺省 0 的机器
+     * 在世界里永远不成型。
+     *
+     * <p>本版恢复「0 节成立」，但<strong>不</strong>把量失败当 0（否则 {@code minSize: 0} 时 maxSize 形同虚设）。
+     * 这里钉住三件事：判据只看面、0 节能从「还没有候选」里胜出、0 节的收尾段锚在起点（与量长度一侧一致）。
+     */
+    private static void x3ZeroSection() {
+        section("L3c. [X3] 0 节动态段：合法长度，不是量失败");
+
+        // ---- (1) 判据：有面就成立，与节数无关（旧版 DynamicPattern.java:381-392） --------------
+        check("0 节且量到了面：成立（判据是 face 非空）", "true",
+                String.valueOf(new DynamicPattern.MatchResult(0, net.minecraft.core.Direction.NORTH).isMatched()));
+        check("NO_MATCH（没有面）不成立，即使节数也是 0", "false",
+                String.valueOf(DynamicPattern.MatchResult.NO_MATCH.isMatched()));
+
+        // ---- (2) 选择规则：0 节要能从「还没有候选」里胜出，但压不过更长的候选 ------------------
+        // 0.63.1 上这个入口不存在；直接写编译期调用会让「旧版是错的」表现为整份复现器编译不过，
+        // 所以与 X2 同一种手法：反射 + 一条红断言。
+        java.lang.reflect.Method betterThan = x3BetterThan();
+        report("MatchResult 有『这个候选是否更值得采纳』的入口（0.63.1 上没有，见 -x3-red 证据）",
+                betterThan != null);
+        if (betterThan != null) {
+            DynamicPattern.MatchResult zero = new DynamicPattern.MatchResult(0, net.minecraft.core.Direction.NORTH);
+            check("0 节能从「还没有候选」里胜出", "true",
+                    String.valueOf(x3Invoke(betterThan, zero, DynamicPattern.MatchResult.NO_MATCH)));
+            check("0 节压不过已经量到的 2 节", "false",
+                    String.valueOf(x3Invoke(betterThan, zero,
+                            new DynamicPattern.MatchResult(2, net.minecraft.core.Direction.NORTH))));
+            check("3 节压得过 0 节", "true",
+                    String.valueOf(x3Invoke(betterThan,
+                            new DynamicPattern.MatchResult(3, net.minecraft.core.Direction.NORTH), zero)));
+            check("同为 0 节时保留先到的那个（等长不算更好）", "false",
+                    String.valueOf(x3Invoke(betterThan, zero,
+                            new DynamicPattern.MatchResult(0, net.minecraft.core.Direction.SOUTH))));
+        }
+
+        // ---- (3) 展开：0 节的收尾段锚在起点，1 节及以上不变 ------------------------------------
+        // 重复段是石头、收尾段是铁块，这样「世界里那一格是哪一种」能把两侧的锚点直接区分开。
+        BlockPos start = new BlockPos(0, 0, 1);
+        BlockPos step = new BlockPos(0, 0, 1);
+        MachinePattern partUnit = MachinePattern.builder()
+                .add(BlockPos.ZERO, List.of(BlockMatcher.parse("minecraft:stone")))
+                .build();
+        MachinePattern endUnit = MachinePattern.builder()
+                .add(BlockPos.ZERO, List.of(BlockMatcher.parse("minecraft:iron_block")))
+                .build();
+        DynamicPattern line = new DynamicPattern("x3_line", Set.of(net.minecraft.core.Direction.NORTH),
+                0, 15, partUnit, endUnit, start, step);
+
+        MachinePattern zeroSections = line.expand(0, 0);
+        check("展开 0 节：只有收尾段，落在 start（不再是 start + 1 步）", "[0, 0, 1]",
+                x2Keys(zeroSections.positions().keySet()));
+        check("展开 1 节：重复段在 start、收尾段在 start + 1 步", "[0, 0, 1, 0, 0, 2]",
+                x2Keys(line.expand(1, 0).positions().keySet()));
+
+        // ---- (4) 量长度：照 0 节搭出来的世界被量成 0 节 ----------------------------------------
+        // 世界直接取生产代码 expand(0) 放下的方块——那就是玩家照着预览搭出来的结构。
+        // 离线没有 Level，于是把「这一格是不是收尾段」换成集合查询（matches 的其余部分只是认方块）。
+        Set<BlockPos> built = new java.util.HashSet<>(zeroSections.positions().keySet());
+        check("0 节结构只放下一个方块（收尾段那一格）", 1, built.size());
+        int measured = line.matchesSize(pos -> false, built::contains, BlockPos.ZERO, start, step);
+        check("把照 0 节搭出来的世界量回去：0 节", 0, measured);
+        if (betterThan != null) {
+            check("...而这个 0 节结果能被采纳（0.63.1 上它压不过初值 0 节，所以永远选不上）", "true",
+                    String.valueOf(x3Invoke(betterThan,
+                            new DynamicPattern.MatchResult(measured, net.minecraft.core.Direction.NORTH),
+                            DynamicPattern.MatchResult.NO_MATCH)));
+        }
+    }
+
+    private static java.lang.reflect.Method x3BetterThan() {
+        try {
+            return DynamicPattern.MatchResult.class.getMethod("betterThan", DynamicPattern.MatchResult.class);
+        } catch (NoSuchMethodException absent) {
+            return null;
+        }
+    }
+
+    private static Object x3Invoke(java.lang.reflect.Method method, DynamicPattern.MatchResult candidate,
+                                   DynamicPattern.MatchResult other) {
+        try {
+            return method.invoke(candidate, other);
+        } catch (ReflectiveOperationException failure) {
+            return "threw " + failure;
+        }
     }
 
     /**

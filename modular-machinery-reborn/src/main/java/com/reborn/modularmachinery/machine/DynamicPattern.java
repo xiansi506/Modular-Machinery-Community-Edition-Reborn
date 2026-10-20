@@ -33,6 +33,11 @@ import java.util.Set;
  * [收尾段]（parts-end，可选）× 1   ← 尾
  * }</pre>
  *
+ * <p><strong>N 可以是 0。</strong> {@code minSize} 的缺省值就是 0，读作「这一段可有可无」：不写 {@code parts-end}
+ * 时是「一节都没有」，写了时是「收尾段紧贴起点」。旧版同样把 0 当作成立——它的 {@code MatchResult#isMatched}
+ * 只看面、不看节数（{@code kasuminova/.../DynamicPattern.java:381-392}）；0.62.9–0.63.1 曾要求
+ * {@code size > 0}，于是 {@code minSize: 0} 的机器永远不成型（勘测 X3，0.63.2 修复）。
+ *
  * <h2>匹配算法要照抄的两个细节</h2>
  *
  * <p>见 {@link #matchesSize}：太长的结构是<strong>不匹配</strong>而不是截断接受；以及回退一格之后还要再验一次
@@ -142,12 +147,19 @@ public final class DynamicPattern {
     /**
      * 量出这个模式在世界里当前重复了几节，并给出实际匹配上的方向；节数不足 {@link #minSize} 时算不匹配。
      *
-     * <p>{@code minSize} 在旧版是<strong>解析了却不使用</strong>的：它被读进来、被存下来、也被写进 NBT，
-     * 但匹配路径上没有任何一处读它（{@code matchesSize} 的返回值只与 {@code maxSize} 比较）。
-     * 本版把 {@code >= minSize} 接上，理由是本项目对「作者写下的字段」的一贯做法：
-     * 一个看起来在限制、实际不限制的字段正是本项目反复付代价的那种失败模式。
-     * 这是一处<strong>有意偏离</strong>旧版，它只会让定义更严格，不会让既有的合法结构失效——
-     * 除非作者写的 {@code minSize} 本来就没被遵守过。
+     * <p><strong>0 节是合法节数。</strong>一个动态结构可以「没有重复段」而仍然成立：它没有收尾段
+     * （那一段本来就不存在），或者收尾段就压在起点上。旧版就是如此——{@code kasuminova/.../DynamicPattern.java:108}
+     * 的 {@code if (size >= minSize)} 把 0 也收进结果表，而它的 {@code MatchResult#isMatched} 只看
+     * {@code matchFacing != null}，不看节数。{@code minSize} 缺省是 0，所以「不写 minSize」在旧版读作
+     * 「这段可有可无」。0.62.9–0.63.1 的 {@code match} 用 {@code size > best.size()} 选结果，而 {@code best}
+     * 的初值正是 0 节，于是 0 节永远选不上：{@code minSize: 0} 的机器在世界里<strong>永远不成型</strong>
+     * （勘测 X3「0 节动态段的语义反转」）。
+     *
+     * <p><strong>与旧版仍有的一处偏离：量失败（{@code -1}）不当作 0。</strong>旧版把「超过 maxSize」、
+     * 「有收尾段却两处都找不到它」和「合法的 0 节」统统编码成 0，于是 {@code minSize: 0} 时前两种也会让机器
+     * 以 0 节成型，{@code maxSize} 在那个配置下形同虚设。本版让 {@link #matchesSize} 用 {@code -1} 表示量失败，
+     * {@code -1} 一律不成立：真正量到的 0 节成立，量失败不成立。代价是玩家乱搭（多余节、收尾段放错位置）时
+     * 旧版会「缩成」0 节机器而本版不会——这是有意的，理由见 {@link #matchesSize}。
      *
      * @param level         世界
      * @param controller    控制器位置（所有偏移都相对它）
@@ -172,8 +184,15 @@ public final class DynamicPattern {
             int size = matchesSize(pos -> part.matches(level, pos),
                     pos -> endPart != null && endPart.matches(level, pos),
                     controller, start, step);
-            if (size >= this.minSize && size > best.size()) {
-                best = new MatchResult(size, face);
+            // -1 是量失败，不是「比 0 小的一点」：先挡掉它，再谈下限。
+            if (size < 0 || size < this.minSize) {
+                continue;
+            }
+            MatchResult candidate = new MatchResult(size, face);
+            // 用 betterThan 而不是内联的 size > best.size()：0 节也必须能在「还没有候选」时胜出，
+            // 而「还没有候选」与「候选是 0 节」在节数上无法区分，只能看 face 是否为空。
+            if (candidate.betterThan(best)) {
+                best = candidate;
             }
         }
         return best;
@@ -182,20 +201,13 @@ public final class DynamicPattern {
     /**
      * {@link #match} 的核心，抽成「问一个位置成不成立」的谓词形式。
      *
-     * <p><strong>为什么要有这个重载：</strong>数长度这段算术是这个特性里最值得测、也最容易写错的部分
-     * （上限判定、收尾段的两处检查、回退一格防重叠），而它的自然形态需要一个 {@code Level}——
-     * 本项目的离线复现器没有世界，于是这段逻辑会变成「测不到的代码」。
-     * 把「世界」缩小成两个 {@code BlockPos -> boolean} 之后，复现器可以用一个位置集合造出任意布局，
-     * 把每一种边界都验一遍。
+     * <p><strong>为什么抽成谓词形式：</strong>这段算术是这个特性里最值得测、也最容易写错的部分（上限判定、
+     * 收尾段的两处检查、回退一格防重叠），而它的自然形态需要一个 {@code Level}——本项目的离线复现器没有世界，
+     * 于是这段逻辑会变成「测不到的代码」。把「世界」缩小成两个 {@code BlockPos -> boolean} 之后，复现器可以
+     * 用一个位置集合造出任意布局，把每一种边界都验一遍。{@link #match} 自己只是把真实的
+     * {@link MachinePattern} 匹配包成这两个谓词，不含算术。
      *
-     * <p>公开的 {@link #match} 只是把真实的 {@link MachinePattern} 匹配包成这两个谓词，本身不含算术。
-     *
-     * @param partAt    某个位置是否是合法的重复段
-     * @param endPartAt 某个位置是否是合法的收尾段（没有收尾段时恒为 false）
-     * @return 节数（{@code >= 0}），或者 {@code -1} 表示不匹配
-     */
-    /**
-     * 量长度：从起点开始一节一节地数，直到不匹配、或者数到收尾段。
+     * <p>量长度：从起点开始一节一节地数，直到不匹配、或者数到收尾段。
      *
      * <p>这是旧版 {@code DynamicPattern#matchesSize} 的对应实现，而下面几处<strong>必须照抄</strong>：
      *
@@ -207,12 +219,19 @@ public final class DynamicPattern {
      *       {@code Prevent overlapping structures}：两个模式相邻时，一方的收尾段可能正好落在另一方重复段的位置上，
      *       不验这一下会让两段结构互相吃掉格子——在世界里表现为「机器偶尔不成型」，极难查。</li>
      *   <li>收尾段也顶上第一节的位置时（回退到起点、收尾段在那里匹配），结果是 <b>0 节</b>且<strong>成立</strong>：
-     *       一个只有收尾段的动态结构是合法的。这一点与「一节都不匹配」要分开看，后者才是不成立。</li>
+     *       一个只有收尾段的动态结构是合法的。</li>
+     *   <li><strong>没有收尾段时数到 0 节也成立</strong>（返回 0，不是 -1）：作者没写 {@code parts-end} 又让
+     *       {@code minSize} 取 0，就是在声明「这段可有可无」。旧版在这里同样返回 0，而它的 0 节是能成立的
+     *       （{@code MatchResult#isMatched} 只看面）。这一条与上一条合起来，就是勘测 X3 要恢复的语义。</li>
      * </ol>
+     *
+     * <p>只有两种情形算<strong>量失败</strong>并返回 {@code -1}：数过 {@code maxSize} 节还没到头；有收尾段、
+     * 但当前格与回退格都不是它。旧版把这两种也返回 0，于是 {@code minSize: 0} 时它们会被当成「0 节成立」。
+     * 本版不照抄这一点（理由见 {@link #match}）：量失败不是一种长度。
      *
      * @param partAt    某个位置是否是合法的重复段
      * @param endPartAt 某个位置是否是合法的收尾段（没有收尾段时恒为 false）
-     * @return 节数（{@code >= 0} 且被收尾段证实过），或者 {@code -1} 表示不匹配
+     * @return 节数（{@code >= 0}；0 是合法节数），或者 {@code -1} 表示量失败
      *
      * <p><strong>为什么是 {@code public} 而不是包私有：</strong>本项目的离线复现器在另一个包里，
      * 而这段算术<strong>必须</strong>被它覆盖到。它没有副作用、不碰世界、只读自己的两个字段与 {@code maxSize}，
@@ -247,8 +266,10 @@ public final class DynamicPattern {
                 }
                 return -1;
             }
-            // 没有收尾段：必须至少数到一节，否则这个模式没成型。
-            return count == 0 ? -1 : count;
+            // 没有收尾段：数到几节就是几节，0 节也成立。这就是旧版这一支的返回（它同样 return size，可能为 0），
+            // 也是 minSize 缺省为 0 时「这段可有可无」的字面含义。0.62.9–0.63.1 在这里返回 -1，把「没有重复段」
+            // 当成了失败，于是不写 minSize 的动态机器在世界里永远不成型（勘测 X3）。
+            return count;
         }
     }
 
@@ -283,7 +304,13 @@ public final class DynamicPattern {
         }
 
         if (this.endPart != null) {
-            addSection(builder, this.endPart, offset.offset(step), rotationSteps, 0, true);
+            // 收尾段锚在「第 size 节的位置」上：start + size * step。循环里 offset 停在最后一节，
+            // 所以 size >= 1 时再走一步就是终点；size == 0 时循环一次都没跑、offset 还停在起点，
+            // 终点就是起点本身（旧版 addPatternToBlockArray 在这里无条件 +step，把 0 节的收尾段多推了一格）。
+            // 量长度一侧从来是「收尾段顶在起点上算 0 节」，两侧对齐之后，玩家照预览搭出来的 0 节机器才既量得到、
+            // 也拼得成——这是 X3 的另一半。
+            BlockPos endAnchor = size == 0 ? offset : offset.offset(step);
+            addSection(builder, this.endPart, endAnchor, rotationSteps, 0, true);
         }
         return builder.build();
     }
@@ -365,15 +392,34 @@ public final class DynamicPattern {
     /**
      * 一次匹配的结果。
      *
-     * @param size  数到的节数；{@code 0} 表示不匹配
-     * @param face  实际匹配上的那个面；不匹配时为 {@code null}
+     * @param size 数到的节数（{@code >= 0}）；{@code 0} 是<strong>合法节数</strong>，不是「不匹配」——
+     *             {@code minSize: 0} 的动态结构允许一节都没有
+     * @param face 实际匹配上的那个面；{@code null} 表示没有匹配（{@link #NO_MATCH}）
      */
     public record MatchResult(int size, @Nullable Direction face) {
 
         public static final MatchResult NO_MATCH = new MatchResult(0, null);
 
+        /**
+         * 是否成立。
+         *
+         * <p>判据是<strong>有面</strong>，与旧版 {@code MatchResult#isMatched}（{@code return matchFacing != null;}）
+         * 逐字一致。这与 {@link #NO_MATCH} 的表示法互相咬合：没有匹配才没有面，而 0 节是可以有面的。
+         * 0.62.9–0.63.1 这里写的是 {@code size > 0 && face != null}，正是 X3 那条「0 节永不成立」的另一半。
+         */
         public boolean isMatched() {
-            return this.size > 0 && this.face != null;
+            return this.face != null;
+        }
+
+        /**
+         * 这个候选是否比现有结果更值得采纳：还没有任何候选时它赢（<strong>包括 0 节</strong>），
+         * 否则取更长的那一个。
+         *
+         * <p>旧版在结果表上取 {@code max(comparingInt(value))}；本版把「取最长」放在这里，
+         * 是因为它同时是「0 节能否被选中」的判据，而这件事必须能被离线复现器直接断言。
+         */
+        public boolean betterThan(MatchResult other) {
+            return other.face == null || this.size > other.size();
         }
     }
 
