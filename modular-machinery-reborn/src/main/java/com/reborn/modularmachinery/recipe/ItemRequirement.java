@@ -1,6 +1,7 @@
 package com.reborn.modularmachinery.recipe;
 
 import com.reborn.modularmachinery.machine.HatchCollection;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -46,23 +47,50 @@ public final class ItemRequirement extends MachineRequirement {
     private final int minAmount;
     private final int maxAmount;
     private final float chance;
+    /** The original's {@code nbt} block; input matching only. */
+    @Nullable private final NbtPredicate nbt;
+    /** The original's {@code nbt-display}, shown by JEI instead of the parsed tag. */
+    @Nullable private final CompoundTag displayTag;
 
     private ItemRequirement(IOType ioType, @Nullable Ingredient ingredient, @Nullable ItemStack stack,
-                            int minAmount, int maxAmount, float chance) {
+                            int minAmount, int maxAmount, float chance, @Nullable NbtPredicate nbt,
+                            @Nullable CompoundTag displayTag) {
         super(ioType, false);
         this.ingredient = ingredient;
         this.stack = stack == null ? null : stack.copyWithCount(1);
         this.minAmount = Math.max(1, minAmount);
         this.maxAmount = Math.max(this.minAmount, maxAmount);
         this.chance = chance;
+        this.nbt = nbt;
+        this.displayTag = displayTag == null ? null : displayTag.copy();
     }
 
     public static ItemRequirement input(Ingredient ingredient, int amount) {
-        return new ItemRequirement(IOType.INPUT, ingredient, null, amount, amount, 1.0F);
+        return input(ingredient, amount, null, null);
+    }
+
+    /**
+     * An item input with the original's {@code nbt} template.
+     *
+     * <p>{@code nbt} filters the input slots; {@code displayTag} is only for JEI, and when it is absent the
+     * preview shows the template's concrete form ({@link #previewTag()}).
+     */
+    public static ItemRequirement input(Ingredient ingredient, int amount, @Nullable NbtPredicate nbt,
+                                        @Nullable CompoundTag displayTag) {
+        return new ItemRequirement(IOType.INPUT, ingredient, null, amount, amount, 1.0F, nbt, displayTag);
     }
 
     public static ItemRequirement output(ItemStack stack, int minAmount, int maxAmount, float chance) {
-        return new ItemRequirement(IOType.OUTPUT, null, stack, minAmount, maxAmount, chance);
+        return output(stack, minAmount, maxAmount, chance, null);
+    }
+
+    /**
+     * An item output whose stack already carries the concrete tag, plus an optional {@code nbt-display}
+     * override for JEI.
+     */
+    public static ItemRequirement output(ItemStack stack, int minAmount, int maxAmount, float chance,
+                                         @Nullable CompoundTag displayTag) {
+        return new ItemRequirement(IOType.OUTPUT, null, stack, minAmount, maxAmount, chance, null, displayTag);
     }
 
     @Override
@@ -113,9 +141,51 @@ public final class ItemRequirement extends MachineRequirement {
         return this.ingredient;
     }
 
+    @Nullable
+    public NbtPredicate nbt() {
+        return this.nbt;
+    }
+
+    /** The explicit {@code nbt-display} tag, or {@code null} when the file wrote none. */
+    @Nullable
+    public CompoundTag displayTag() {
+        return this.displayTag == null ? null : this.displayTag.copy();
+    }
+
+    /**
+     * Whether an input slot stack pays this requirement: the ingredient must match <b>and</b> the stack's NBT
+     * must satisfy the template. Used by every count, extraction and container scan, so the availability the
+     * machine reports and the items it actually takes cannot diverge.
+     */
+    public boolean inputMatches(ItemStack stack) {
+        return !stack.isEmpty() && this.ingredient != null && this.ingredient.test(stack)
+                && (this.nbt == null || this.nbt.matches(stack.getTag()));
+    }
+
     /** The output stack at its maximum amount, or an empty stack for inputs. */
     public ItemStack outputStack() {
         return this.stack == null ? ItemStack.EMPTY : this.stack.copyWithCount(this.maxAmount);
+    }
+
+    /**
+     * What JEI should show for an input: the explicit {@code nbt-display} when the file wrote one, otherwise
+     * the template's concrete form. {@code null} means "show the plain ingredient".
+     */
+    @Nullable
+    public CompoundTag previewTag() {
+        if (this.displayTag != null) {
+            return this.displayTag.copy();
+        }
+        return this.nbt == null ? null : this.nbt.toTag();
+    }
+
+    /** The output stack as JEI should show it: {@code nbt-display} overrides the produced tag. */
+    public ItemStack previewOutputStack() {
+        ItemStack out = outputStack();
+        if (!out.isEmpty() && this.displayTag != null) {
+            out.setTag(this.displayTag.copy());
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ modifiers
@@ -151,7 +221,7 @@ public final class ItemRequirement extends MachineRequirement {
         int perCopy = modifiedAmount(modifiers);
         if (this.ioType() == IOType.INPUT) {
             return this.ingredient != null && perCopy > 0
-                    && IngredientIo.count(ports.itemInputs(), this.ingredient) >= perCopy * copies;
+                    && IngredientIo.count(ports.itemInputs(), this::inputMatches) >= perCopy * copies;
         }
         // Space is checked for the guaranteed maximum, so a craft cannot end when the result would not fit.
         return this.stack != null && IngredientIo.canInsertItems(ports.itemOutputs(), this.stack, perCopy * copies);
@@ -186,7 +256,7 @@ public final class ItemRequirement extends MachineRequirement {
             if (this.ingredient == null) {
                 return 0;
             }
-            return Math.min(ceiling, IngredientIo.count(ports.itemInputs(), this.ingredient) / perCopy);
+            return Math.min(ceiling, IngredientIo.count(ports.itemInputs(), this::inputMatches) / perCopy);
         }
         if (this.stack == null) {
             return ceiling;
@@ -206,7 +276,7 @@ public final class ItemRequirement extends MachineRequirement {
         if (this.ioType() == IOType.INPUT) {
             int total = perCopy * copies;
             return total <= 0
-                    || (this.ingredient != null && IngredientIo.extract(ports.itemInputs(), this.ingredient, total));
+                    || (this.ingredient != null && IngredientIo.extract(ports.itemInputs(), this::inputMatches, total));
         }
         if (this.stack == null || perCopy <= 0 || copies <= 0) {
             return true;

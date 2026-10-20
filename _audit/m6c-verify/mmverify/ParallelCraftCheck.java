@@ -263,6 +263,9 @@ public final class ParallelCraftCheck {
         // 0.26.0: ingredient_array_input. Reflection-first, so the pre-implementation run compiles and reports
         // FAIL rather than failing to build -- the red-first evidence the wave requires.
         IngredientArrayCheck.ingredientArrayInput();
+        // 0.63.6: B1/B5, the item NBT template and the ingredient_array NBT. Reflection-first, so the
+        // pre-implementation run reports FAIL instead of failing to compile.
+        NbtRequirementCheck.nbtRequirements();
         // 0.27.0: the MOC compatibility namespace. Reflection-first for the same reason, and it owns the
         // timing check that justifies the design.
         MocNamespaceCheck.mocCompatibilityNamespace();

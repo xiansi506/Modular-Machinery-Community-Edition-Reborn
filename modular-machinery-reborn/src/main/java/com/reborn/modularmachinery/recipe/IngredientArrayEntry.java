@@ -4,6 +4,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.items.IItemHandler;
 
+import javax.annotation.Nullable;
 import java.util.List;
 
 /**
@@ -90,7 +91,25 @@ final class IngredientArrayEntry {
 
     /** The usable copies of this entry that the given ports hold right now. */
     int availableIn(List<IItemHandler> handlers) {
-        return IngredientIo.count(handlers, this.ingredient);
+        return availableIn(handlers, null);
+    }
+
+    /**
+     * The usable copies of this entry that the given ports hold right now, with the requirement-level NBT
+     * template applied.
+     *
+     * <p>The original attached the requirement's one {@code nbt} to every entry
+     * ({@code RequirementTypeIngredientArray:115-125}), so the template is passed in per call rather than stored
+     * on the entry.
+     */
+    int availableIn(List<IItemHandler> handlers, @Nullable NbtPredicate nbt) {
+        return IngredientIo.count(handlers, stack -> matches(stack, nbt));
+    }
+
+    /** Whether {@code stack} satisfies both this entry and the requirement-level NBT template. */
+    boolean matches(ItemStack stack, @Nullable NbtPredicate nbt) {
+        return !stack.isEmpty() && this.ingredient.test(stack)
+                && (nbt == null || nbt.matches(stack.getTag()));
     }
 
     private static String idOf(ItemStack stack) {

@@ -3,6 +3,7 @@ package com.reborn.modularmachinery.recipe;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.reborn.modularmachinery.ModularMachineryReborn;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -248,19 +249,46 @@ public final class RequirementTypes {
             int amount = json.has("amount") ? json.get("amount").getAsInt() : 1;
             int min = json.has("minAmount") ? json.get("minAmount").getAsInt() : amount;
             int max = json.has("maxAmount") ? json.get("maxAmount").getAsInt() : amount;
+
+            // The original read nbt and nbt-display only when nbt was present, and read nbt-display only
+            // inside that branch (RequirementTypeItem.java:95-119). A lone nbt-display was therefore ignored;
+            // keep that rather than inventing a display-only template.
+            NbtPredicate nbt = null;
+            CompoundTag displayTag = null;
+            if (json.has("nbt")) {
+                nbt = readNbt(json.get("nbt"), "nbt", where);
+                if (json.has("nbt-display")) {
+                    displayTag = readNbt(json.get("nbt-display"), "nbt-display", where).toTag();
+                }
+            }
+
             if (ioType == IOType.INPUT) {
                 if (min != max) {
                     throw new JsonParseException("An item input in " + where
                             + " uses minAmount/maxAmount; only outputs may vary their amount. "
                             + "Give inputs a fixed 'amount'.");
                 }
-                return ItemRequirement.input(ingredient, min);
+                return ItemRequirement.input(ingredient, min, nbt, displayTag);
             }
-            ItemStack stack = LegacyIngredients.firstStack(ingredient);
+            ItemStack stack = LegacyIngredients.firstStack(ingredient).copy();
             if (stack.isEmpty()) {
                 throw new JsonParseException("An item output in " + where + " resolved to no concrete item");
             }
-            return ItemRequirement.output(stack, min, max, MachineRequirementParser.chance(json));
+            if (nbt != null) {
+                // The original attached the parsed tag to the produced stack (RequirementItem.java:496-498).
+                // Comparison modes are not NBT, so this is the concrete number/pattern, as in the original.
+                stack.setTag(nbt.toTag());
+            }
+            return ItemRequirement.output(stack, min, max, MachineRequirementParser.chance(json), displayTag);
+        }
+
+        private static NbtPredicate readNbt(com.google.gson.JsonElement raw, String key, Object where) {
+            if (raw == null || !raw.isJsonObject()) {
+                throw new JsonParseException("The ComponentType '" + key + "' expects a json compound that "
+                        + "defines the NBT tag" + ("nbt-display".equals(key)
+                        ? " meant to be used for displaying!" : "!"));
+            }
+            return NbtPredicate.parse(raw, where);
         }
 
         @Override
@@ -272,10 +300,18 @@ public final class RequirementTypes {
             if (item.ioType() == IOType.INPUT) {
                 Ingredient ingredient = item.ingredient();
                 (ingredient == null ? Ingredient.EMPTY : ingredient).toNetwork(buf);
+                NbtPredicate nbt = item.nbt();
+                buf.writeBoolean(nbt != null);
+                if (nbt != null) {
+                    buf.writeUtf(nbt.source());
+                }
             } else {
                 buf.writeItem(item.outputStack().copyWithCount(1));
                 buf.writeFloat(item.chance());
             }
+            // nbt-display is a preview override in both directions; the output's actual tag is already in the
+            // ItemStack above, so only this optional override travels separately.
+            buf.writeNbt(item.displayTag());
         }
 
         @Override
@@ -283,11 +319,13 @@ public final class RequirementTypes {
             int min = buf.readVarInt();
             int max = buf.readVarInt();
             if (ioType == IOType.INPUT) {
-                return ItemRequirement.input(Ingredient.fromNetwork(buf), min);
+                Ingredient ingredient = Ingredient.fromNetwork(buf);
+                NbtPredicate nbt = buf.readBoolean() ? NbtPredicate.parse(buf.readUtf(), "item requirement") : null;
+                return ItemRequirement.input(ingredient, min, nbt, buf.readNbt());
             }
             ItemStack stack = buf.readItem();
             float chance = buf.readFloat();
-            return ItemRequirement.output(stack, min, max, chance);
+            return ItemRequirement.output(stack, min, max, chance, buf.readNbt());
         }
 
         @Override
@@ -409,6 +447,11 @@ public final class RequirementTypes {
             IngredientArrayRequirement array = (IngredientArrayRequirement) requirement;
             buf.writeUtf(array.ioType().name());
             buf.writeFloat(array.chance());
+            NbtPredicate nbt = array.nbt();
+            buf.writeBoolean(nbt != null);
+            if (nbt != null) {
+                buf.writeUtf(nbt.source());
+            }
             buf.writeVarInt(array.entryCount());
             for (int index = 0; index < array.entryCount(); index++) {
                 buf.writeVarInt(array.entryAmount(index));
@@ -426,6 +469,7 @@ public final class RequirementTypes {
         @Override
         public MachineRequirement readBody(FriendlyByteBuf buf, IOType ioType) {
             float chance = buf.readFloat();
+            NbtPredicate nbt = buf.readBoolean() ? NbtPredicate.parse(buf.readUtf(), "ingredient array") : null;
             int entries = buf.readVarInt();
             List<IngredientArrayEntry> parsed = new java.util.ArrayList<>(entries);
             for (int index = 0; index < entries; index++) {
@@ -440,7 +484,7 @@ public final class RequirementTypes {
                 }
                 parsed.add(IngredientArrayEntry.ofItem(first, amount, chance));
             }
-            return new IngredientArrayRequirement(parsed, chance);
+            return new IngredientArrayRequirement(parsed, chance, nbt);
         }
 
         @Override

@@ -9,6 +9,7 @@ import net.minecraftforge.energy.IEnergyStorage;
 import net.minecraftforge.items.IItemHandler;
 
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * Static helpers for reading and writing the machine's ports.
@@ -26,11 +27,21 @@ public final class IngredientIo {
 
     /** How many items matching the ingredient are currently available across the given ports. */
     public static int count(List<IItemHandler> handlers, Ingredient ingredient) {
+        return count(handlers, ingredient::test);
+    }
+
+    /**
+     * How many items accepted by {@code filter} are currently available across the given ports.
+     *
+     * <p>The item requirement passes a predicate that checks both its ingredient and its NBT template, so
+     * this count, {@link #extract} and the machine's parallel limit all use exactly the same rule.
+     */
+    public static int count(List<IItemHandler> handlers, Predicate<ItemStack> filter) {
         int total = 0;
         for (IItemHandler handler : handlers) {
             for (int slot = 0; slot < handler.getSlots(); slot++) {
                 ItemStack stack = handler.getStackInSlot(slot);
-                if (!stack.isEmpty() && ingredient.test(stack)) {
+                if (!stack.isEmpty() && filter.test(stack)) {
                     total += stack.getCount();
                 }
             }
@@ -40,14 +51,19 @@ public final class IngredientIo {
 
     /** Removes exactly {@code amount} matching items, or nothing at all when they do not all fit. */
     public static boolean extract(List<IItemHandler> handlers, Ingredient ingredient, int amount) {
-        if (count(handlers, ingredient) < amount) {
+        return extract(handlers, ingredient::test, amount);
+    }
+
+    /** Removes exactly {@code amount} items accepted by {@code filter}, or nothing at all. */
+    public static boolean extract(List<IItemHandler> handlers, Predicate<ItemStack> filter, int amount) {
+        if (count(handlers, filter) < amount) {
             return false;
         }
         int remaining = amount;
         for (IItemHandler handler : handlers) {
             for (int slot = 0; slot < handler.getSlots() && remaining > 0; slot++) {
                 ItemStack stack = handler.getStackInSlot(slot);
-                if (stack.isEmpty() || !ingredient.test(stack)) {
+                if (stack.isEmpty() || !filter.test(stack)) {
                     continue;
                 }
                 int take = Math.min(remaining, stack.getCount());

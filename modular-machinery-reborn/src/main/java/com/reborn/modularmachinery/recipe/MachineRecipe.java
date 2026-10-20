@@ -416,14 +416,14 @@ public final class MachineRecipe implements Recipe<Container> {
             if (!(requirement instanceof ItemRequirement item) || !item.isStartPhase()) {
                 continue;
             }
-            Ingredient ingredient = item.ingredient();
-            if (ingredient == null) {
+            if (item.ingredient() == null) {
                 continue;
             }
             int found = 0;
             for (int slot = 0; slot < container.getContainerSize(); slot++) {
                 ItemStack stack = container.getItem(slot);
-                if (!stack.isEmpty() && ingredient.test(stack)) {
+                // Same rule the machine uses: ingredient plus NBT template, not the ingredient alone.
+                if (item.inputMatches(stack)) {
                     found += stack.getCount();
                 }
             }

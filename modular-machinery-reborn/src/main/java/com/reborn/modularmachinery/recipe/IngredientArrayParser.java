@@ -35,21 +35,23 @@ import java.util.Set;
  *   "chance": 0.5 }
  * }</pre>
  *
- * <p>One property of that reader is easy to get wrong and is therefore reproduced exactly:
- * <b>{@code amount} and {@code chance} are read off the requirement, not off the entry.</b> The original's
- * loops read {@code jsonObject.has("amount")} ({@code :79}) and {@code jsonObject.has("chance")} ({@code :105})
- * while iterating {@code items}, so every entry received the same pair. A pack author who writes a per-entry
- * {@code amount} gets the original's behaviour, which is that it is ignored — so this reader <b>rejects</b> an
- * {@code amount} or {@code chance} inside an entry instead of silently ignoring it, and says where it belongs.
+ * <p>One property of that reader is easy to get wrong: <b>the original read {@code amount} and {@code chance}
+ * off the requirement, not off the entry.</b> Its loops read {@code jsonObject.has("amount")} ({@code :79}) and
+ * {@code jsonObject.has("chance")} ({@code :105}) while iterating {@code items}, so every entry received the same
+ * pair; a per-entry {@code amount} was ignored. This port keeps the requirement-level {@code amount} as the
+ * fallback but honours an entry's own {@code amount} when one is written (D19, below), because the original's own
+ * documented example writes it inside every entry. A per-entry {@code chance} or {@code nbt} is still rejected
+ * instead of silently ignored, and the message says where it belongs.
  *
- * <p>The fields the original read but this port does not carry — {@code nbt} and {@code minAmount}/{@code
- * maxAmount} on the requirement — are refused by name rather than ignored, the same rule
- * {@link ModRecipeSerializers} applies to an unknown requirement kind.
+ * <p>The fields the original read but this port does not carry — {@code minAmount}/{@code maxAmount} on the
+ * requirement — are refused by name rather than ignored, the same rule {@link ModRecipeSerializers} applies to
+ * an unknown requirement kind. {@code nbt} <b>is</b> carried: the original read one template off the requirement
+ * and copied it onto every entry ({@code RequirementTypeIngredientArray:115-125}), and so does this reader.
  */
 public final class IngredientArrayParser {
 
     /** The keys the original's reader understood at the requirement level. */
-    private static final Set<String> REQUIREMENT_KEYS = Set.of("items", "amount", "chance");
+    private static final Set<String> REQUIREMENT_KEYS = Set.of("items", "amount", "chance", "nbt");
     /**
      * The keys an entry may carry.
      *
@@ -121,7 +123,25 @@ public final class IngredientArrayParser {
             }
             entries = withChance;
         }
-        return new IngredientArrayRequirement(entries, chance);
+        return new IngredientArrayRequirement(entries, chance, readNbt(json, where));
+    }
+
+    /**
+     * Reads the requirement-level {@code nbt}, the one the original copied onto every entry.
+     *
+     * <p>Like {@code RequirementTypeItem:95-119}, the value has to be a JSON compound; everything inside it
+     * follows the same quoted-string rules as an item requirement's {@code nbt}.
+     */
+    private static NbtPredicate readNbt(JsonObject json, Object where) {
+        JsonElement raw = json.get("nbt");
+        if (raw == null) {
+            return null;
+        }
+        if (!raw.isJsonObject()) {
+            throw new JsonParseException("The ComponentType 'nbt' expects a json compound that defines the NBT "
+                    + "tag! (in " + where + ")");
+        }
+        return NbtPredicate.parse(raw, where);
     }
 
     // ------------------------------------------------------------------ the pieces
@@ -274,10 +294,9 @@ public final class IngredientArrayParser {
         if (!misplaced.isEmpty()) {
             throw new JsonParseException("Field" + (misplaced.size() == 1 ? " " : "s ") + misplaced
                     + " belongs next to 'items', not inside an entry, in " + where + ". The original read "
-                    + "'chance' and 'nbt' off the requirement itself (RequirementTypeIngredientArray:105/115) and "
-                    + "rolled that one chance for the whole group, so a value written inside an entry was "
-                    + "ignored; write it once next to 'items'. (An entry's own 'amount' is honoured here — see "
-                    + "D19.)");
+                    + "'chance' and 'nbt' off the requirement itself (RequirementTypeIngredientArray:105/115), "
+                    + "so a value written inside an entry was ignored; write it once next to 'items', where this "
+                    + "reader now honours both. (An entry's own 'amount' is honoured here — see D19.)");
         }
     }
 
@@ -292,10 +311,10 @@ public final class IngredientArrayParser {
         }
         if (!unknown.isEmpty()) {
             throw new JsonParseException("Unsupported " + (unknown.size() == 1 ? "field " : "fields ") + unknown
-                    + " in " + where + ". An ingredient_array_input understands 'items' (required), 'amount' "
-                    + "and 'chance' (both applying to the whole group). The original's 'nbt', 'minAmount' and "
+                    + " in " + where + ". An ingredient_array_input understands 'items' (required), 'amount', "
+                    + "'chance' and 'nbt' (all applying to the whole group). The original's 'minAmount' and "
                     + "'maxAmount' are not ported; write one 'modularmachinery:item' requirement per stack if you "
-                    + "need them, or put 'amount'/'chance' next to 'items' where the original read them.");
+                    + "need them, or put 'amount'/'chance'/'nbt' next to 'items' where the original read them.");
         }
     }
 }

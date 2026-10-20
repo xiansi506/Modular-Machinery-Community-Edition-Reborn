@@ -22,6 +22,7 @@ import mezz.jei.api.recipe.category.IRecipeCategory;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -241,7 +242,7 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
                 chance = array.chance();
             } else {
                 ItemRequirement item = (ItemRequirement) requirement;
-                stacks = output ? List.of(item.outputStack()) : inputStacks(item);
+                stacks = output ? List.of(item.previewOutputStack()) : inputStacks(item);
                 chance = item.chance();
                 amountRange = true;
             }
@@ -375,10 +376,15 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
         }
         ItemStack[] matches = ingredient.getItems();
         int amount = item.amount();
+        CompoundTag previewTag = item.previewTag();
         List<ItemStack> stacks = new ArrayList<>(matches.length);
         for (ItemStack match : matches) {
             if (!match.isEmpty()) {
-                stacks.add(match.copyWithCount(amount));
+                ItemStack preview = match.copyWithCount(amount);
+                if (previewTag != null) {
+                    preview.setTag(previewTag.copy());
+                }
+                stacks.add(preview);
             }
         }
         return stacks;

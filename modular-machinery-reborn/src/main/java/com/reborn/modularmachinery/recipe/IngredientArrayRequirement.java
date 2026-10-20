@@ -1,6 +1,7 @@
 package com.reborn.modularmachinery.recipe;
 
 import com.reborn.modularmachinery.machine.HatchCollection;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.items.IItemHandler;
@@ -85,7 +86,21 @@ public final class IngredientArrayRequirement extends MachineRequirement {
     /** The reader's default when the requirement wrote no {@code chance} ({@code int amount = 1} era default). */
     private final float chance;
 
+    /**
+     * The requirement-level NBT template, applied to every entry.
+     *
+     * <p>The original read one {@code nbt} off the requirement object and copied it onto every
+     * {@code ChancedIngredientStack} ({@code RequirementTypeIngredientArray:115-125}), so a per-entry value was
+     * never a thing. A single predicate for the whole group mirrors that exactly.
+     */
+    @Nullable
+    private final NbtPredicate nbt;
+
     public IngredientArrayRequirement(List<IngredientArrayEntry> entries, float chance) {
+        this(entries, chance, null);
+    }
+
+    public IngredientArrayRequirement(List<IngredientArrayEntry> entries, float chance, @Nullable NbtPredicate nbt) {
         // START phase and not per-tick: the original built an input array and consumed it in startCrafting.
         super(IOType.INPUT, false);
         if (entries.isEmpty()) {
@@ -93,6 +108,7 @@ public final class IngredientArrayRequirement extends MachineRequirement {
         }
         this.entries = List.copyOf(entries);
         this.chance = chance;
+        this.nbt = nbt;
     }
 
     // ------------------------------------------------------------------ the shape the reader produced
@@ -117,6 +133,18 @@ public final class IngredientArrayRequirement extends MachineRequirement {
     /** The requirement's own chance, the one value the original's reader put on every entry. */
     public float chance() {
         return this.chance;
+    }
+
+    /** The requirement-level NBT template, or {@code null} when the group accepts any NBT. */
+    @Nullable
+    public NbtPredicate nbt() {
+        return this.nbt;
+    }
+
+    /** The template as concrete NBT for JEI previews, or {@code null} when there is none. */
+    @Nullable
+    public CompoundTag previewTag() {
+        return this.nbt == null ? null : this.nbt.toTag();
     }
 
     /** The entries, for JEI and for the network writer. */
@@ -184,7 +212,7 @@ public final class IngredientArrayRequirement extends MachineRequirement {
             if (stillWanted <= 0) {
                 break;
             }
-            served += Math.min(stillWanted, entry.availableIn(handlers) / perCopy);
+            served += Math.min(stillWanted, entry.availableIn(handlers, this.nbt) / perCopy);
         }
         return served;
     }
@@ -228,16 +256,17 @@ public final class IngredientArrayRequirement extends MachineRequirement {
             if (stillWanted <= 0) {
                 break;
             }
-            int fromThisEntry = Math.min(stillWanted, entry.availableIn(handlers) / perCopy);
+            int fromThisEntry = Math.min(stillWanted, entry.availableIn(handlers, this.nbt) / perCopy);
             perEntry[index] = fromThisEntry * perCopy;
             served += fromThisEntry;
         }
         for (int index = 0; index < this.entries.size(); index++) {
-            if (perEntry[index] > 0 && !IngredientIo.extract(handlers, this.entries.get(index).ingredient(),
-                    perEntry[index])) {
+            IngredientArrayEntry entry = this.entries.get(index);
+            if (perEntry[index] > 0 && !IngredientIo.extract(handlers,
+                    stack -> entry.matches(stack, this.nbt), perEntry[index])) {
                 // canSatisfy already proved this cannot happen; reporting it loudly beats half-consuming a craft.
                 throw new IllegalStateException("the ingredient array agreed with its own simulation and then "
-                        + "could not extract " + perEntry[index] + "x " + this.entries.get(index).itemId());
+                        + "could not extract " + perEntry[index] + "x " + entry.itemId());
             }
         }
         return true;
@@ -256,7 +285,7 @@ public final class IngredientArrayRequirement extends MachineRequirement {
      * comes out wrong because the division is wrong are different defects.
      */
     public int entryAvailableIn(int index, HatchCollection ports) {
-        return this.entries.get(index).availableIn(ports.itemInputs());
+        return this.entries.get(index).availableIn(ports.itemInputs(), this.nbt);
     }
 
     /**
@@ -264,9 +293,16 @@ public final class IngredientArrayRequirement extends MachineRequirement {
      * cell's ingredient list.
      */
     public List<ItemStack> entryStacksFlat() {
+        CompoundTag tag = previewTag();
         List<ItemStack> out = new ArrayList<>();
         for (int index = 0; index < this.entries.size(); index++) {
-            out.addAll(entryStacks(index));
+            for (ItemStack stack : entryStacks(index)) {
+                if (tag != null) {
+                    // Display only: the actual match runs through NbtPredicate, never through this stack.
+                    stack.setTag(tag.copy());
+                }
+                out.add(stack);
+            }
         }
         return out;
     }
