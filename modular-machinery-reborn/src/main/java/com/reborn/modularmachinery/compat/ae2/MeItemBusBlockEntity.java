@@ -145,13 +145,34 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
         this.mainNode.saveToNBT(tag);
     }
 
+    /**
+     * 0.73.3：chunk update tag 只需要同步配置/库存，不需要 AE2 节点数据。
+     *
+     * <p>父类的 {@code getUpdateTag()} 会走 {@code saveWithoutMetadata()}，进而调用本类的
+     * {@code saveAdditional}，把 {@code mainNode.saveToNBT} 写进去。客户端节点由 {@code onLoad()}
+     * 创建，这份数据本来就不会被读取（见 {@link #load(CompoundTag)}），不发可以减少每个总线的包体。
+     */
+    @Override
+    public CompoundTag getUpdateTag() {
+        CompoundTag tag = super.getUpdateTag();
+        tag.remove(TAG_NODE);
+        return tag;
+    }
+
     @Override
     public void load(CompoundTag tag) {
         super.load(tag);
         if (this.config != null && tag.contains(TAG_CONFIG)) {
             this.config.deserializeNBT(tag.getCompound(TAG_CONFIG));
         }
-        this.mainNode.loadFromNBT(tag);
+        // 0.73.3: 客户端收到 chunk update tag 时，BlockEntity.onLoad 已经 create 了 node；
+        // AE2 的 ManagedGridNode.loadFromNBT 在「节点已初始化」时会抛
+        // IllegalStateException: The node has already been initialized. Initialization data cannot be changed anymore.
+        // 这个异常会让 LevelChunk 处理 chunk 包时中断，表现为整个区块不可见。
+        // 节点数据只在服务端恢复；客户端节点由 onLoad 创建，不需要读 NBT。
+        if (this.level == null || !this.level.isClientSide) {
+            this.mainNode.loadFromNBT(tag);
+        }
     }
 
     @Override

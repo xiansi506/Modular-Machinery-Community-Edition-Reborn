@@ -75,6 +75,7 @@ final class MeItemBusCheck {
 
         meBlockProperties(input, output, inputTier, outputTier);
         registrationIsLazy();
+        clientUpdateTagDoesNotLoadNode();
 
         Class<?> logic = classOrNull(LOGIC);
         storageInterface = classOrNull(LOGIC + "$Storage");
@@ -312,6 +313,36 @@ final class MeItemBusCheck {
                     !callText.isEmpty() && !callText.contains(".get()"));
         } catch (java.io.IOException failure) {
             report("读源码失败：" + failure, false);
+        }
+    }
+
+    /**
+     * 0.73.3 回归：客户端收到 chunk update tag 时不能再次初始化 AE2 节点。
+     *
+     * <p>0.73.2 的 {@code MeItemBusBlockEntity.load(CompoundTag)} 无条件调
+     * {@code mainNode.loadFromNBT(tag)}。客户端 chunk 包先走 {@code BlockEntity.onLoad()} 创建节点，
+     * 再走 {@code handleUpdateTag -> load}，AE2 抛
+     * {@code IllegalStateException: The node has already been initialized. Initialization data cannot be changed anymore.}；
+     * 这个异常从 {@code LevelChunk} 冒出来，整个 chunk 包处理中断，表现就是区块里所有东西不可见。
+     *
+     * <p>AE2 类型不在离线复现器的 classpath 里，没法在这里 new 一个真实节点；所以钉源码：
+     * {@code load} 里必须先判断 {@code isClientSide}，再决定是否调用 {@code loadFromNBT}。
+     */
+    private static void clientUpdateTagDoesNotLoadNode() {
+        section("C4 回归：客户端 chunk update tag 不得重复初始化 AE2 节点（0.73.3）");
+        try {
+            String source = withoutComments(Files.readString(Path.of(
+                    "C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                            + "compat/ae2/MeItemBusBlockEntity.java")));
+            int start = source.indexOf("public void load(CompoundTag tag)");
+            int end = start < 0 ? -1 : source.indexOf("@Override", start + 1);
+            String body = start < 0 || end <= start ? "" : source.substring(start, end);
+            report("找到 MeItemBusBlockEntity.load(CompoundTag)", !body.isEmpty());
+            report("load() 在 mainNode.loadFromNBT 之前检查客户端",
+                    body.contains("isClientSide") && body.indexOf("isClientSide") < body.indexOf("mainNode.loadFromNBT"));
+            report("load() 仍会在服务端恢复节点数据", body.contains("mainNode.loadFromNBT"));
+        } catch (java.io.IOException failure) {
+            report("读 MeItemBusBlockEntity 源码失败：" + failure, false);
         }
     }
 
