@@ -34,8 +34,8 @@
   "block.modular_machinery_reborn.fluid_output_hatch": "流体输出仓",
   "block.modular_machinery_reborn.energy_input_hatch": "能源输入仓",
   "block.modular_machinery_reborn.energy_output_hatch": "能源输出仓",
-  "block.modular_machinery_reborn.me_item_input_bus": "ME 物品输入总线",
-  "block.modular_machinery_reborn.me_item_output_bus": "ME 物品输出总线",
+  "block.modular_machinery_reborn.me_item_input_bus": "ME 输入总线",
+  "block.modular_machinery_reborn.me_item_output_bus": "ME 输出总线",
   "screen.modular_machinery_reborn.me_bus.online": "网络在线",
   "screen.modular_machinery_reborn.me_bus.offline": "网络离线",
 

@@ -76,6 +76,7 @@ final class MeItemBusCheck {
         meBlockProperties(input, output, inputTier, outputTier);
         registrationIsLazy();
         clientUpdateTagDoesNotLoadNode();
+        legacyGui();
 
         Class<?> logic = classOrNull(LOGIC);
         storageInterface = classOrNull(LOGIC + "$Storage");
@@ -343,6 +344,34 @@ final class MeItemBusCheck {
             report("load() 仍会在服务端恢复节点数据", body.contains("mainNode.loadFromNBT"));
         } catch (java.io.IOException failure) {
             report("读 MeItemBusBlockEntity 源码失败：" + failure, false);
+        }
+    }
+
+    /**
+     * 0.73.4：显示名与输出窗口改回 1.12.2 的形状。
+     *
+     * <p>旧版物品输出窗口不画自己的面板，而是直接绑定 AE2 的 `textures/guis/skychest.png`；
+     * 0.73.0 为「许可干净」自绘过一张，用户明确要求改回旧版。这里钉两件事：屏幕源码引用 AE2
+     * 的那张贴图、且不再引用自绘资源；同时钉两个方块的显示名，注册名保持不动（改注册名会让
+     * 已有存档里的方块变成空气）。
+     */
+    private static void legacyGui() {
+        section("C4：ME 总线显示名与 1.12.2 窗口（0.73.4）");
+        try {
+            String screen = withoutComments(Files.readString(Path.of(
+                    "C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                            + "client/MeItemBusScreen.java")));
+            report("输出窗口引用 AE2 的 skychest 贴图",
+                    screen.contains("\"ae2\"") && screen.contains("textures/guis/skychest.png"));
+            report("输出窗口不再引用自绘的 me_item_output_bus.png",
+                    !screen.contains("me_item_output_bus.png"));
+
+            String zh = Files.readString(Path.of(
+                    "C:/mmwork/modular-machinery-reborn/src/main/resources/assets/modular_machinery_reborn/lang/zh_cn.json"));
+            report("中文显示名是「ME 输入总线」", zh.contains("\"block.modular_machinery_reborn.me_item_input_bus\": \"ME 输入总线\""));
+            report("中文显示名是「ME 输出总线」", zh.contains("\"block.modular_machinery_reborn.me_item_output_bus\": \"ME 输出总线\""));
+        } catch (java.io.IOException failure) {
+            report("读 ME 总线窗口/语言文件失败：" + failure, false);
         }
     }
 

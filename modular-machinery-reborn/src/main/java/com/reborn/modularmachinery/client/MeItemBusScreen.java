@@ -10,16 +10,17 @@ import net.minecraft.world.entity.player.Inventory;
 /**
  * C4（0.73.0）：ME 物品总线的窗口。
  *
- * <p>输入窗口沿用旧版 {@code textures/gui/meiteminputbus.png}（176×204）；输出窗口在旧版里
- * 借用 AE2 的 skychest，本版为许可干净自绘一张 176×195 的同类面板。这里不 import 任何
- * {@code appeng} 类型。
+ * <p>输入窗口沿用旧版 {@code textures/gui/meiteminputbus.png}（176×204）；输出窗口照旧版直接
+ * 引用 AE2 的 {@code ae2:textures/guis/skychest.png}（176×195 的面板画在 256×256 画布左上角）。
+ * 这里不 import 任何 {@code appeng} 类型，只在资源路径上依赖 AE2——而这两个方块本来就只有装了
+ * AE2 才会注册。
  */
 public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu> {
 
     private static final ResourceLocation INPUT =
             new ResourceLocation("modular_machinery_reborn", "textures/gui/me_item_input_bus.png");
     private static final ResourceLocation OUTPUT =
-            new ResourceLocation("modular_machinery_reborn", "textures/gui/me_item_output_bus.png");
+            new ResourceLocation("ae2", "textures/guis/skychest.png");
 
     public MeItemBusScreen(MeItemBusMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
