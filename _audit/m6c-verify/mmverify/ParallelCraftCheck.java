@@ -345,6 +345,9 @@ public final class ParallelCraftCheck {
         // 0.67.0：A10——固定 10 tick 的结构检查改成旧版三键可配的调度；调度公式与变更区域
         // 跟踪都先在这里钉住（红跑时生产类还不存在，测试走反射）。
         StructureCheckScheduleCheck.structureCheckSchedule();
+        // 0.68.0：A12——旧版 general.enable-full-data-sync（默认关）。开启后配方开始/结束把整份
+        // 方块实体 NBT 发给客户端；本版此前连键都没有，开工/完成也没有任何主动发包。
+        FullDataSyncCheck.fullDataSync();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -861,10 +864,11 @@ public final class ParallelCraftCheck {
         // 13 through 0.26.0; 0.27.0's MOC namespace adds general.modular-controller-compatible-mode and
         // general.disable-moc-deprecated-tip; the display.energy unit key is the sixteenth.
         // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit);
-        // 43 = that plus A10's three structure-check keys (delay, delayed, max-delay).
-        check("the config spec defines this many keys", 43, rendered.size());
+        // 44 = that plus A10's three structure-check keys and A12's general.enable-full-data-sync.
+        check("the config spec defines this many keys", 44, rendered.size());
 
         String[][] expected = {
+                {"general.enable-full-data-sync", "false"},
                 {"parallel-controller.normal.max-parallelism", "4"},
                 {"parallel-controller.reinforced.max-parallelism", "16"},
                 {"parallel-controller.elite.max-parallelism", "64"},
@@ -1019,7 +1023,7 @@ public final class ParallelCraftCheck {
                     }
                 }
                 check("every key with a plain path is readable from that file (missing:" + missing + ")",
-                        13, readable);
+                        14, readable);
                 report("the spec reports itself loaded after setConfig",
                         (Boolean) invokeOn(spec, "isLoaded"));
 
@@ -1049,7 +1053,7 @@ public final class ParallelCraftCheck {
                 report("...and the file grew only by those keys (was " + before.length() + ", now "
                                 + after.length() + " chars)", after.length() > before.length());
                 // The strongest form of "the old file still works": re-read what was just written and find all
-                // twelve keys with the right values in it.
+                // fourteen keys with the right values in it.
                 Object reread = newConfig(copy);
                 int found = 0;
                 for (String[] pair : expected) {
@@ -1059,7 +1063,7 @@ public final class ParallelCraftCheck {
                         found++;
                     }
                 }
-                check("...and re-reading the saved file finds all thirteen keys at their defaults", 13, found);
+                check("...and re-reading the saved file finds all fourteen keys at their defaults", 14, found);
             } catch (Exception exception) {
                 report("round-tripping the user's config failed: " + exception, false);
             } finally {

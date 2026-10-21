@@ -656,6 +656,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.activeDuration = be.maxProgress;
             be.activeGroupId = startGroup.groupId();
             be.setChanged();
+            // A12: the original's enable-full-data-sync, on the start half (TileMachineController.java:265-275).
+            be.syncFullDataIfEnabled();
         } else {
             effective = be.activeCraftModifiers;
             if (effective == null) {
@@ -698,9 +700,35 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.activeGroupId = null;
             be.activeCraftModifiers = null;
             be.status = ControllerStatus.IDLE;
+            // A12: the original's enable-full-data-sync, on the finish half (TileMachineController.java:299-306).
+            be.syncFullDataIfEnabled();
         }
         be.setChanged();
         be.recordTiming(tickStart, searchNanos);
+    }
+
+    /**
+     * A12: the original's {@code enable-full-data-sync}.
+     *
+     * <p>When the switch is on, a recipe start or finish sends the controller's whole update tag
+     * ({@link #getUpdateTag()}, i.e. {@code saveWithoutMetadata()}) to nearby clients. The original did the same
+     * through {@code markForUpdateSync()} ({@code TileMachineController.java:265-275/299-306}). The switch is
+     * deliberately <b>not</b> applied to every idle or blocked tick: the original's {@code isNotWorking} path
+     * could queue a full compound every tick, which is not worth copying for a client that only needs the
+     * transition.
+     *
+     * <p>Server-only and null-level-safe: the controller tick already returns on the client, but the factory
+     * callbacks are also reachable from tests and from a not-yet-added entity.
+     */
+    private void syncFullDataIfEnabled() {
+        if (!ModConfig.enableFullDataSync()) {
+            return;
+        }
+        if (this.level == null || this.level.isClientSide) {
+            return;
+        }
+        this.level.sendBlockUpdated(this.worldPosition, this.getBlockState(), this.getBlockState(),
+                Block.UPDATE_ALL);
     }
 
     private void recordTiming(long tickStartNanos, long searchNanos) {
@@ -903,11 +931,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         @Override
         public void onThreadStarted(FactoryThread thread) {
             MachineControllerBlockEntity.this.factoryTouched();
+            // A12: the factory's start half (TileFactoryController.java:274-284).
+            MachineControllerBlockEntity.this.syncFullDataIfEnabled();
         }
 
         @Override
         public void onThreadFinished(FactoryThread thread) {
             MachineControllerBlockEntity.this.factoryTouched();
+            // A12: the factory's finish half (TileFactoryController.java:304-311).
+            MachineControllerBlockEntity.this.syncFullDataIfEnabled();
         }
 
         @Override

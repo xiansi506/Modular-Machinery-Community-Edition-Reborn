@@ -118,6 +118,8 @@ public final class ModConfig {
     private static final String STRUCTURE_CHECK_DELAY = "structure-check-delay";
     private static final String DELAYED_STRUCTURE_CHECK = "delayed-structure-check";
     private static final String MAX_STRUCTURE_CHECK_DELAY = "max-structure-check-delay";
+    /** The original's full-NBT switch: general.enable-full-data-sync. */
+    private static final String ENABLE_FULL_DATA_SYNC = "enable-full-data-sync";
     /** The original's own category and key spelling: {@code display.energy.Display_Energy_Type}. */
     private static final String DISPLAY_ENERGY_ROOT = "display.energy";
     private static final String DISPLAY_ENERGY_KEY = "Display_Energy_Type";
@@ -174,6 +176,8 @@ public final class ModConfig {
     private static ForgeConfigSpec.BooleanValue DELAYED_STRUCTURE_CHECK_VALUE;
     /** general.max-structure-check-delay. Assigned in build(). */
     private static ForgeConfigSpec.IntValue MAX_STRUCTURE_CHECK_DELAY_VALUE;
+    /** general.enable-full-data-sync. Assigned in build(). */
+    private static ForgeConfigSpec.BooleanValue ENABLE_FULL_DATA_SYNC_VALUE;
     /**
      * The original warned when structure-check-delay >= max-structure-check-delay and then reset both values
      * (TileMultiblockMachineController.java:184-188). The normalized scheduler applies the same reset; this
@@ -287,6 +291,18 @@ public final class ModConfig {
         MAX_STRUCTURE_CHECK_DELAY_VALUE = builder.defineInRange(
                 List.of(GENERAL_ROOT, MAX_STRUCTURE_CHECK_DELAY),
                 StructureCheckScheduler.DEFAULT_MAX_DELAY, 2, 1200);
+
+        // ---- general.*: the original's full-NBT switch (A12) -----------------------------------------
+        // The original read this in loadFromConfig (TileMultiblockMachineController.java:193-198), in the
+        // "general" category, default false. When true, a recipe start or finish calls markForUpdateSync()
+        // (TileMachineController.java:265-275/299-306, TileFactoryController.java:274-284/304-311), which
+        // sends the whole tile-entity NBT; when false the original only marked the chunk dirty. This port's
+        // getUpdateTag() is already the whole saved state, so the switch only decides whether to send it.
+        builder.comment("Send the controller's full NBT to the client when a recipe starts and finishes",
+                "(the original's enable-full-data-sync). Default false. A controller otherwise only sends",
+                "a full block-entity update when its structure, failure text, colour or threads change.");
+        ENABLE_FULL_DATA_SYNC_VALUE = builder.define(
+                List.of(GENERAL_ROOT, ENABLE_FULL_DATA_SYNC), false);
 
         // ---- Section 6 of 6: display.energy.Display_Energy_Type ---------------------------------------
         // The original's key, in the original's own category and with the original's own spelling and casing
@@ -518,6 +534,22 @@ public final class ModConfig {
             return StructureCheckScheduler.DEFAULT_MAX_DELAY;
         }
         return MAX_STRUCTURE_CHECK_DELAY_VALUE.get();
+    }
+
+    /**
+     * {@code general.enable-full-data-sync} — the original's opt-in full block-entity sync
+     * ({@code TileMultiblockMachineController.java:126}, read at {@code :193-198}). Default false.
+     *
+     * <p>The original sent the whole tile-entity NBT on a recipe start and finish when this was true
+     * ({@code TileMachineController.java:265-275/299-306}); when false it only marked the chunk dirty. The
+     * controller still pushes its whole update tag for structure, failure and thread changes, because those are
+     * how the screen learns about them at all.
+     */
+    public static boolean enableFullDataSync() {
+        if (ENABLE_FULL_DATA_SYNC_VALUE == null || !SPEC.isLoaded()) {
+            return false;
+        }
+        return ENABLE_FULL_DATA_SYNC_VALUE.get();
     }
 
     /**
