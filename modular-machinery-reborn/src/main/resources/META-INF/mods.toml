@@ -86,4 +86,15 @@ description='''A Forge 1.20.1 reimplementation foundation for Modular Machinery:
     versionRange="[4,)"
     ordering="AFTER"
     side="BOTH"
+# 0.73.0（C4）：AE2。ME 物品输入/输出总线是第一个需要 AE2 类型（节点、MEStorage）的集成。
+#
+# mandatory=false：没装 AE2 时两个方块不注册，模组照常启动；HatchKind 里仍保留这两个常量，
+# 但没有任何代码会去解析 appeng 类型（方块实体类只在 AE2 存在时才被实例化）。
+# ordering=AFTER：方块实体的字段/方法签名引用 AE2 API，让 FML 保证 AE2 先构造。
+[[dependencies.${mod_id}]]
+    modId="ae2"
+    mandatory=false
+    versionRange="[15,)"
+    ordering="AFTER"
+    side="BOTH"
 

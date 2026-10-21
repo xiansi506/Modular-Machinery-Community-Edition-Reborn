@@ -360,6 +360,8 @@ public final class ParallelCraftCheck {
         // 0.72.0：C9——旧版 MultiBlockModifierReplacement 的真实语义是「额外一段多块结构条件，
         // 命中后贡献 RecipeModifier」，不是替换方块。字段名与匹配/合并口径先在这里钉住。
         MultiBlockModifierCheck.multiBlockModifiers();
+        // 0.73.0：C4——ME 物品输入/输出总线。搬运算法与 AE2 隔离，先用假网络钉住数量关系。
+        MeItemBusCheck.meItemBuses();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -1489,8 +1491,9 @@ public final class ParallelCraftCheck {
             // (title / tooltip / value / enable / close), 191 plus 5.
             // 198 from 0.65.0: Q6-B's catalyst JEI tooltip adds the original's two
             // tooltip.modular_machinery_reborn.catalyst[.effect] lines, 196 plus 2.
-            // 200 from 0.71.0: E5 adds the formed/unformed preview toggle tips, 198 plus 2.
-            check("the language files' key count", 200, zhMap.size());
+            // 204 from 0.73.0: C4 adds two ME bus block names and the online/offline screen strings,
+            // 200 plus 4.
+            check("the language files' key count", 204, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to

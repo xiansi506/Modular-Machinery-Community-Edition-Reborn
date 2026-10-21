@@ -37,7 +37,17 @@ public enum HatchTier implements StringRepresentable {
     HUGE("huge", 16, 8_000, 131_072L, 32_768L),
     LUDICROUS("ludicrous", 32, 16_000, 524_288L, 131_072L),
     ULTIMATE("ultimate", 0, 0, 2_097_152L, 131_072L),
-    VACUUM("vacuum", 0, 32_000, 0L, 0L);
+    VACUUM("vacuum", 0, 32_000, 0L, 0L),
+
+    /**
+     * C4（0.73.0）：AE2 ME 物品输入总线的固定档位。旧版没有「tier」概念，输入总线就是 16 个
+     * 内部槽 + 16 个配置槽；这里借枚举携带槽数，但不把这两个值放进 {@link #ITEM_LADDER}，
+     * 否则普通物品仓会凭空多出两个 tier。
+     */
+    ME_INPUT("me_input", 16, 0, 0L, 0L),
+
+    /** C4（0.73.0）：AE2 ME 物品输出总线。旧版固定 36 个输出槽。 */
+    ME_OUTPUT("me_output", 36, 0, 0L, 0L);
 
     /** {@code ItemBusSize}: seven tiers, matching the original exactly. */
     public static final List<HatchTier> ITEM_LADDER =

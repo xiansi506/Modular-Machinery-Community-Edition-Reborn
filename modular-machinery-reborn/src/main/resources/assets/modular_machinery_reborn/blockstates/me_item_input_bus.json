@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "size=me_input": { "model": "modular_machinery_reborn:block/me_item_input_bus" }
+  }
+}

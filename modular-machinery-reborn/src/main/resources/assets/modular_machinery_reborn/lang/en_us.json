@@ -34,6 +34,10 @@
   "block.modular_machinery_reborn.fluid_output_hatch": "Fluid Output Hatch",
   "block.modular_machinery_reborn.energy_input_hatch": "Energy Input Hatch",
   "block.modular_machinery_reborn.energy_output_hatch": "Energy Output Hatch",
+  "block.modular_machinery_reborn.me_item_input_bus": "ME Item Input Bus",
+  "block.modular_machinery_reborn.me_item_output_bus": "ME Item Output Bus",
+  "screen.modular_machinery_reborn.me_bus.online": "Network online",
+  "screen.modular_machinery_reborn.me_bus.offline": "Network offline",
 
   "block.modular_machinery_reborn.parallel_controller": "Parallel Controller",
   "block.modular_machinery_reborn.parallel_controller_normal": "§aNormal Parallel Controller",

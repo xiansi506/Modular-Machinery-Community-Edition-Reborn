@@ -13,6 +13,8 @@ public final class ModMenus {
     public static final RegistryObject<MenuType<MachineControllerMenu>> MACHINE_CONTROLLER = MENUS.register("machine_controller", () -> IForgeMenuType.create((windowId, inv, data) -> new MachineControllerMenu(windowId, inv, data)));
     /** One menu type serves every hatch family and tier; the screen varies, the window does not. */
     public static final RegistryObject<MenuType<MachineHatchMenu>> MACHINE_HATCH = MENUS.register("machine_hatch", () -> IForgeMenuType.create((windowId, inv, data) -> new MachineHatchMenu(windowId, inv, data)));
+    /** C4（0.73.0）：AE2 ME 物品总线的窗口。没有 AE2 时方块不会注册，但菜单类型无条件注册。 */
+    public static final RegistryObject<MenuType<MeItemBusMenu>> ME_ITEM_BUS = MENUS.register("me_item_bus", () -> IForgeMenuType.create((windowId, inv, data) -> new MeItemBusMenu(windowId, inv, data)));
     /**
      * A2：输入组配置窗口。与仓口窗口分开注册，因为它是「改仓口设置」而不是「看仓口库存」，
      * 两者槽位与语义都不同（旧版也是两个 Container：{@code ContainerGroupInputConfig} 与各仓口自己的）。

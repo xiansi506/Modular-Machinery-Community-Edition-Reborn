@@ -15,6 +15,9 @@ public final class ClientSetup {
         event.enqueueWork(() -> {
             MenuScreens.register(ModMenus.MACHINE_CONTROLLER.get(), MachineControllerScreen::new);
             MenuScreens.register(ModMenus.MACHINE_HATCH.get(), MachineHatchScreen::new);
+            // C4（0.73.0）：AE2 ME 物品总线。这个屏幕类不引用任何 appeng 类型，所以即使没装 AE2
+            // 也可以安全注册；方块与方块实体只在 AE2 存在时才注册。
+            MenuScreens.register(ModMenus.ME_ITEM_BUS.get(), MeItemBusScreen::new);
             MenuScreens.register(ModMenus.PARALLEL_CONTROLLER.get(), ParallelControllerScreen::new);
             // A2：输入组配置窗口（旧版 GuiContainerGroupInputConfig）。
             MenuScreens.register(ModMenus.HATCH_GROUP.get(), HatchGroupScreen::new);

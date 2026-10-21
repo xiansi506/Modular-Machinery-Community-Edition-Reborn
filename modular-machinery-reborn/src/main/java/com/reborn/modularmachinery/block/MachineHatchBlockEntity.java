@@ -97,8 +97,21 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     private int groupId;
     private boolean groupInput;
 
+    /** The ordinary six hatch families use the shared {@code machine_hatch} block entity type. */
     public MachineHatchBlockEntity(BlockPos pos, BlockState state) {
-        super(ModBlocks.HATCH_ENTITY.get(), pos, state);
+        this(ModBlocks.HATCH_ENTITY.get(), pos, state);
+    }
+
+    /**
+     * C4（0.73.0）：子类（ME 总线）有自己的方块实体类型。
+     *
+     * <p>{@code BlockEntity#getType()} 必须返回注册时用的那个类型，否则客户端在收到方块实体更新时
+     * 会按 {@code machine_hatch} 去找一个实际注册为 {@code me_item_bus} 的实例。所以这里把类型作为
+     * 参数传进来，而不是写死 {@code ModBlocks.HATCH_ENTITY}。
+     */
+    public MachineHatchBlockEntity(net.minecraft.world.level.block.entity.BlockEntityType<?> type,
+                                   BlockPos pos, BlockState state) {
+        super(type, pos, state);
         this.kind = state.getBlock() instanceof MachineHatchBlock hatch ? hatch.kind() : HatchKind.ITEM_INPUT;
         this.tier = state.getValue(this.kind.sizeProperty());
 

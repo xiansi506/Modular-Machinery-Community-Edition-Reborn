@@ -7,6 +7,7 @@ import com.reborn.modularmachinery.item.ModItems;
 import com.reborn.modularmachinery.item.ParallelControllerItem;
 import com.reborn.modularmachinery.item.PropertyBlockItem;
 import com.reborn.modularmachinery.item.UpgradeBusItem;
+import com.reborn.modularmachinery.compat.ae2.Ae2ItemBusRegistry;
 import com.reborn.modularmachinery.machine.MachineDirectory;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -16,6 +17,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
@@ -312,14 +314,42 @@ public final class ModBlocks {
 
     public static final List<RegistryObject<Item>> CASING_ITEMS = new ArrayList<>();
 
-    /** One block per hatch family; see {@link HatchKind}. */
+    /** One block per hatch family; see {@link HatchKind}. The two ME buses join only when AE2 is present. */
     private static final Map<HatchKind, RegistryObject<Block>> HATCH_BLOCKS = new EnumMap<>(HatchKind.class);
 
-    /** One block item per (family, tier): 7×2 item + 8×2 fluid + 8×2 energy = 46. */
+    /** One block item per (family, tier): 7×2 item + 8×2 fluid + 8×2 energy = 46, plus the ME buses. */
     private static final List<RegistryObject<Item>> HATCH_ITEMS = new ArrayList<>();
+
+    /**
+     * C4（0.73.0）：AE2 是否在场，在<b>注册期</b>就要知道。
+     *
+     * <p>为什么不在运行时再判断：方块与物品的注册名一旦缺一个，旧存档里那个方块就读不出来；
+     * 反过来，没装 AE2 的整合包也不该多出两个点不动的方块。所以这是一次「注册期二选一」，
+     * 而不是能力查询时的软开关。{@code ModList.get()} 在离线断言里可能是 {@code null}，因此包一层。
+     */
+    public static final boolean AE2_LOADED = detectAe2();
+
+    private static boolean detectAe2() {
+        try {
+            return ModList.get() != null && ModList.get().isLoaded("ae2");
+        } catch (Throwable throwable) {
+            ModularMachineryReborn.LOGGER.warn("[{}] Could not ask whether AE2 is loaded, so the ME item buses "
+                    + "will not be registered: {}", ModularMachineryReborn.MOD_ID, throwable.toString());
+            return false;
+        }
+    }
+
+    /** C4：the two ME bus blocks, or {@code null} when AE2 is not installed. */
+    public static final RegistryObject<Block> ME_ITEM_INPUT_BLOCK;
+    public static final RegistryObject<Block> ME_ITEM_OUTPUT_BLOCK;
 
     static {
         for (HatchKind kind : HatchKind.values()) {
+            // The ME buses are registered below, and only when AE2 is present: their block entity class
+            // references appeng types, which must not be loaded on a pack without AE2.
+            if (kind.isMeBus()) {
+                continue;
+            }
             RegistryObject<Block> block = BLOCKS.register(kind.id(), () -> createHatchBlock(kind));
             HATCH_BLOCKS.put(kind, block);
             for (HatchTier tier : kind.ladder()) {
@@ -327,6 +357,26 @@ public final class ModBlocks {
                         () -> new PropertyBlockItem(block.get(), kind.sizeProperty(), tier,
                                 kind.itemTranslationKey(tier), new Item.Properties())));
             }
+        }
+
+        if (AE2_LOADED) {
+            ME_ITEM_INPUT_BLOCK = BLOCKS.register(HatchKind.ME_ITEM_INPUT.id(),
+                    () -> createHatchBlock(HatchKind.ME_ITEM_INPUT));
+            ME_ITEM_OUTPUT_BLOCK = BLOCKS.register(HatchKind.ME_ITEM_OUTPUT.id(),
+                    () -> createHatchBlock(HatchKind.ME_ITEM_OUTPUT));
+            for (HatchKind kind : List.of(HatchKind.ME_ITEM_INPUT, HatchKind.ME_ITEM_OUTPUT)) {
+                RegistryObject<Block> block = kind == HatchKind.ME_ITEM_INPUT
+                        ? ME_ITEM_INPUT_BLOCK : ME_ITEM_OUTPUT_BLOCK;
+                HATCH_BLOCKS.put(kind, block);
+                for (HatchTier tier : kind.ladder()) {
+                    HATCH_ITEMS.add(ITEMS.register(kind.itemId(tier),
+                            () -> new PropertyBlockItem(block.get(), kind.sizeProperty(), tier,
+                                    kind.itemTranslationKey(tier), new Item.Properties())));
+                }
+            }
+        } else {
+            ME_ITEM_INPUT_BLOCK = null;
+            ME_ITEM_OUTPUT_BLOCK = null;
         }
         for (CasingType casing : CasingType.values()) {
             String id = casing.itemId();
@@ -344,6 +394,19 @@ public final class ModBlocks {
             BLOCK_ENTITIES.register("machine_hatch", () -> BlockEntityType.Builder.of(
                     MachineHatchBlockEntity::new,
                     HATCH_BLOCKS.values().stream().map(RegistryObject::get).toArray(Block[]::new)).build(null));
+
+    /**
+     * C4（0.73.0）：ME 总线自己的方块实体类型，{@code null} when AE2 is absent.
+     *
+     * <p>Why a second type instead of reusing {@code machine_hatch}: the ME entity overrides
+     * {@code serverTick}, {@code createMenu}, {@code saveAdditional} and {@code load}, and it implements
+     * AE2's grid-host interfaces. Binding it to the shared type would mean every ordinary hatch could
+     * deserialise as an ME bus. The factory is behind {@link Ae2ItemBusRegistry} so this file does not
+     * name any {@code appeng} type.
+     */
+    public static final RegistryObject<BlockEntityType<?>> ME_ITEM_BUS_ENTITY =
+            AE2_LOADED ? Ae2ItemBusRegistry.register(BLOCK_ENTITIES, ME_ITEM_INPUT_BLOCK.get(),
+                    ME_ITEM_OUTPUT_BLOCK.get()) : null;
 
     // ------------------------------------------------------- M6d: parallel controller
 
@@ -460,6 +523,9 @@ public final class ModBlocks {
             case ITEM_INPUT, ITEM_OUTPUT -> new MachineHatchBlock.ItemPort(kind, properties);
             case FLUID_INPUT, FLUID_OUTPUT -> new MachineHatchBlock.FluidPort(kind, properties);
             case ENERGY_INPUT, ENERGY_OUTPUT -> new MachineHatchBlock.EnergyPort(kind, properties);
+            // Only reached when AE2 is loaded; the ME block entity is the class that references appeng.
+            case ME_ITEM_INPUT -> new MeItemBusBlock.Input(properties);
+            case ME_ITEM_OUTPUT -> new MeItemBusBlock.Output(properties);
         };
     }
 

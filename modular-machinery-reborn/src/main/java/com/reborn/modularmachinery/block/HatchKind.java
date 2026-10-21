@@ -6,7 +6,10 @@ import net.minecraft.world.level.block.state.properties.EnumProperty;
 import java.util.List;
 
 /**
- * The six hatch families of the original mod, in the original input/output × item/fluid/energy split.
+ * The six hatch families of the original mod, in the original input/output × item/fluid/energy split,
+ * plus the two AE2 ME item buses added by C4 (0.73.0). The ME buses are only registered when AE2 is
+ * installed; the enum constants exist unconditionally so the rest of the code can talk about them
+ * without loading any {@code appeng} class.
  *
  * <p>Each family owns exactly one registered block whose {@code size} property selects the tier,
  * mirroring the original {@code blockinputbus} / {@code blockoutputbus} / {@code blockenergyinputhatch}
@@ -20,7 +23,17 @@ public enum HatchKind implements StringRepresentable {
     FLUID_INPUT("fluid_input_hatch", HatchTier.FLUID_LADDER, true, Family.FLUID),
     FLUID_OUTPUT("fluid_output_hatch", HatchTier.FLUID_LADDER, false, Family.FLUID),
     ENERGY_INPUT("energy_input_hatch", HatchTier.ENERGY_LADDER, true, Family.ENERGY),
-    ENERGY_OUTPUT("energy_output_hatch", HatchTier.ENERGY_LADDER, false, Family.ENERGY);
+    ENERGY_OUTPUT("energy_output_hatch", HatchTier.ENERGY_LADDER, false, Family.ENERGY),
+
+    /**
+     * C4（0.73.0）：AE2 ME 物品输入总线。旧版一个方块、固定 16 个内部槽 + 16 个配置槽，没有 tier
+     * 阶梯；这里的 {@link #ladder()} 只有 {@link HatchTier#ME_INPUT} 一项，只为复用仓口的方块状态
+     * 与物品模型。只有装了 AE2 才注册这个方块。
+     */
+    ME_ITEM_INPUT("me_item_input_bus", List.of(HatchTier.ME_INPUT), true, Family.ITEM),
+
+    /** C4（0.73.0）：AE2 ME 物品输出总线，固定 36 个输出槽。 */
+    ME_ITEM_OUTPUT("me_item_output_bus", List.of(HatchTier.ME_OUTPUT), false, Family.ITEM);
 
     /** Which storage a hatch of this family carries. */
     public enum Family {
@@ -77,7 +90,13 @@ public enum HatchKind implements StringRepresentable {
      * 三处如果各写一遍，迟早会有一处忘了改。
      */
     public boolean canGroupInput() {
-        return this == ITEM_INPUT || this == FLUID_INPUT;
+        // C4：旧版 MEItemInputBus.canGroupInput() 返回 true（它继承 TileItemInputBus 的分组能力）。
+        return this == ITEM_INPUT || this == FLUID_INPUT || this == ME_ITEM_INPUT;
+    }
+
+    /** C4（0.73.0）：这是不是两个 AE2 ME 物品总线之一。 */
+    public boolean isMeBus() {
+        return this == ME_ITEM_INPUT || this == ME_ITEM_OUTPUT;
     }
 
     /** The {@code size} blockstate property for this family. */
@@ -87,6 +106,11 @@ public enum HatchKind implements StringRepresentable {
 
     /** Registry path of a single tier's block item, e.g. {@code item_input_hatch_tiny}. */
     public String itemId(HatchTier tier) {
+        // The ME buses have exactly one tier and their block id is already the complete name; appending
+        // "_me_input" would make the item id differ from the block id for no reason.
+        if (isMeBus()) {
+            return this.id;
+        }
         return this.id + "_" + tier.getSerializedName();
     }
 
