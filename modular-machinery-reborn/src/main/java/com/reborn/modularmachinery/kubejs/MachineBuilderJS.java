@@ -206,6 +206,7 @@ public final class MachineBuilderJS extends EventJS {
     private static final String KEY_FACTORY_ONLY = "factory-only";
     private static final String KEY_MAX_THREADS = "max-threads";
     private static final String KEY_MODIFIERS = "modifiers";
+    private static final String KEY_MULTI_BLOCK_MODIFIERS = "multi-block-modifiers";
     private static final String KEY_SMART_INTERFACES = "smart-interfaces";
     private static final String KEY_CORE_THREADS = "core-threads";
     private static final String KEY_GEO_MODEL = "geo-model";
@@ -330,6 +331,23 @@ public final class MachineBuilderJS extends EventJS {
             entry.addProperty("description", requireText(description, "description"));
         }
         array(KEY_MODIFIERS).add(entry);
+        return this;
+    }
+
+    /**
+     * One {@code multi-block-modifiers} entry：额外一段结构条件，整段命中时贡献配方修改器。
+     *
+     * <pre>{@code
+     * .multiBlockModifier('{"parts":[{"x":1,"y":0,"z":0,"elements":"minecraft:stone"}],' +
+     *                     '"modifier":{"target":"item","io":"output","operation":1,"multiplier":2.0}}')
+     * }</pre>
+     *
+     * <p>只把对象原样写进数组，<strong>不在这里校验</strong>：{@code parts} 的坐标/元素展开、错误文案都归
+     * {@link MachineSchema#read}，与 {@link #modifier(int, int, int, Object, Object, Object)} 的约定一致。
+     * 接受 JSON 字符串或 KubeJS 对象字面量，与 {@link #modifier} 的 modifier 参数相同。
+     */
+    public MachineBuilderJS multiBlockModifier(Object entry) {
+        array(KEY_MULTI_BLOCK_MODIFIERS).add(requireObject(entry, "multiBlockModifier"));
         return this;
     }
 

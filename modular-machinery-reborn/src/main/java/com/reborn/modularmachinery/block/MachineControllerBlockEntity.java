@@ -11,6 +11,7 @@ import com.reborn.modularmachinery.machine.FailureAction;
 import com.reborn.modularmachinery.machine.HatchCollection;
 import com.reborn.modularmachinery.machine.MachineDefinition;
 import com.reborn.modularmachinery.machine.MachineModifier;
+import com.reborn.modularmachinery.machine.MachineMultiBlockModifier;
 import com.reborn.modularmachinery.machine.DynamicPattern;
 import com.reborn.modularmachinery.machine.MachinePattern;
 import com.reborn.modularmachinery.machine.MachineRegistry;
@@ -289,6 +290,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** Structure modifiers whose block is present, recomputed with the structure. */
     private List<MachineModifier> activeModifiers = List.of();
 
+    /** 额外多块结构条件中全部命中的那些，同样随结构重算。 */
+    private List<MachineMultiBlockModifier> activeMultiBlockModifiers = List.of();
+
     /** The recipe modifiers they contribute, flattened once per structure check. */
     private RecipeModifiers modifiers = RecipeModifiers.EMPTY;
 
@@ -518,12 +522,16 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.activeModifiers = match == null
                     ? List.of()
                     : evaluateModifiers(level, pos, match.machine(), match.rotationSteps());
+            be.activeMultiBlockModifiers = match == null
+                    ? List.of()
+                    : evaluateMultiBlockModifiers(level, pos, match.machine(), match.rotationSteps());
             // The two sources of RecipeModifier meet here and only here. M6c evaluates the definition's
             // structure modifiers; M6b adds what the buses in the same structure contribute. They stay separate
             // computations (the scoping document's §5.2 forbids merging the two paths) and are concatenated into
             // the one RecipeModifiers the whole recipe lifecycle already takes - RecipeModifiers#andThen exists
             // for exactly this join.
-            RecipeModifiers structural = MachineDefinition.flatten(be.activeModifiers);
+            RecipeModifiers structural = MachineDefinition.flatten(be.activeModifiers,
+                    be.activeMultiBlockModifiers);
             if (match != null) {
                 // The controller binds itself to each bus it finds, which is the original's
                 // UpgradeBusProvider#boundMachine (TileUpgradeBus.java:236-245). Nothing unbinds here: the bus
@@ -1132,6 +1140,31 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
 
     /**
+     * 哪些多块结构条件真正命中。与 {@link #evaluateModifiers} 分开调用，但共用同一个结构检查时机：
+     * 结构一变成型/失效，两者一起重算，不会出现「单块条件已刷新、多块条件还是上一轮」的半状态。
+     */
+    private static List<MachineMultiBlockModifier> evaluateMultiBlockModifiers(Level level, BlockPos pos,
+                                                                               MachineDefinition machine,
+                                                                               int rotationSteps) {
+        if (machine.multiBlockModifiers().isEmpty()) {
+            return List.of();
+        }
+        return MachineMultiBlockModifier.active(machine.multiBlockModifiers(), pos, rotationSteps,
+                (at, accepted) -> {
+                    if (!level.isLoaded(at)) {
+                        return false;
+                    }
+                    BlockState state = level.getBlockState(at);
+                    for (var matcher : accepted) {
+                        if (matcher.matches(state)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+    }
+
+    /**
      * True when the structure is incomplete at least partly because a position it covers is not loaded. The
      * original reported this separately as {@code chunk_unloaded}; 1.20.1's {@code Level#getBlockState} would
      * quietly answer air for an unloaded chunk, which is indistinguishable from a missing block.
@@ -1629,6 +1662,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
     /** Structure modifiers whose block is present right now. */
     public List<MachineModifier> activeModifiers() { return this.activeModifiers; }
+
+    /** 当前命中的额外多块结构条件，按声明顺序。 */
+    public List<MachineMultiBlockModifier> activeMultiBlockModifiers() {
+        return this.activeMultiBlockModifiers;
+    }
 
     /** The recipe modifiers the formed structure contributes, flattened. */
     public RecipeModifiers modifiers() { return this.modifiers; }

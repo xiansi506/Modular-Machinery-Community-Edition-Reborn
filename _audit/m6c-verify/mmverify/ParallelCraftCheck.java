@@ -357,6 +357,9 @@ public final class ParallelCraftCheck {
         // 0.71.0：E5/E4——求值 hide-components-when-formed，并给蓝图预览加成型开关。
         // 世界隐藏仍依赖外接 hider（Multiblocked/component_model_hider），本版不做。
         HideComponentsCheck.hideComponentsWhenFormed();
+        // 0.72.0：C9——旧版 MultiBlockModifierReplacement 的真实语义是「额外一段多块结构条件，
+        // 命中后贡献 RecipeModifier」，不是替换方块。字段名与匹配/合并口径先在这里钉住。
+        MultiBlockModifierCheck.multiBlockModifiers();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");

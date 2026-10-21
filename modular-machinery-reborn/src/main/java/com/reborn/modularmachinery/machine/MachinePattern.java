@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiPredicate;
 
 /**
  * The static, data-driven structure of a machine definition.
@@ -127,12 +128,20 @@ public final class MachinePattern {
 
     /** {@code true} when every pattern position holds one of its accepted blocks. */
     public boolean matches(Level level, BlockPos controller) {
+        return matches(controller, (at, accepted) -> level.isLoaded(at)
+                && anyMatches(level.getBlockState(at), accepted));
+    }
+
+    /**
+     * 用任意谓词检查整段结构，谓词收到<strong>世界绝对坐标</strong>与该位置允许的方块列表。
+     *
+     * <p>这个重载把「结构是否完整」与「世界在哪儿」分开，离线复现器不必造一个真的 {@link Level}。
+     * 它<strong>不检查区块是否加载</strong>：加载判断属于调用者，{@link #matches(Level, BlockPos)} 的谓词
+     * 里做了 {@code level.isLoaded}，与旧行为一致。
+     */
+    public boolean matches(BlockPos controller, BiPredicate<BlockPos, List<BlockMatcher>> at) {
         for (Map.Entry<BlockPos, List<BlockMatcher>> entry : this.positions.entrySet()) {
-            BlockPos at = controller.offset(entry.getKey());
-            if (!level.isLoaded(at)) {
-                return false;
-            }
-            if (!anyMatches(level.getBlockState(at), entry.getValue())) {
+            if (!at.test(controller.offset(entry.getKey()), entry.getValue())) {
                 return false;
             }
         }
@@ -167,6 +176,21 @@ public final class MachinePattern {
             }
         }
         return builder.build();
+    }
+
+    /**
+     * 旋转 {@code steps} 个四分之一圈；4 步与 0 步等价，负数按 {@link Math#floorMod(int, int)} 归一。
+     *
+     * <p>动态结构与多块条件都按控制器的朝向把整段几何转过去，调用方只拿「相对 NORTH 的步数」，
+     * 不必自己写循环，也不会漏掉标签。
+     */
+    public MachinePattern rotated(int steps) {
+        int turns = Math.floorMod(steps, 4);
+        MachinePattern result = this;
+        for (int i = 0; i < turns; i++) {
+            result = result.rotateYCounterClockwise();
+        }
+        return result;
     }
 
     public static final class Builder {

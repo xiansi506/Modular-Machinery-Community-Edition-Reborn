@@ -248,10 +248,11 @@ event.machine('kubejs_wall')
 | `factory-only` | `.factoryOnly(false)` |
 | `max-threads` | `.maxThreads(4)` |
 | `modifiers` | `.modifier(x, y, z, 方块, 修改器对象)` |
+| `multi-block-modifiers` | `.multiBlockModifier({ parts: [...], modifier: {...} })` —— 只把对象写进数组，校验归 schema |
 | `smart-interfaces` | `.smartInterface(类型, 默认值, 优先级)` + 可选的第 4 个参数 |
 | `core-threads` | `.coreThread('名字')` 或 `.coreThread('名字', '配方 id', …)` |
 
-**带嵌套结构的三个**（`modifier` / `smartInterface` / `coreThread` 的第 4 个参数）**两种写法都收**：
+**带嵌套结构的几项**（`modifier` 的修改器对象、`multiBlockModifier` 的整项、`smartInterface` / `coreThread` 的第 4 个参数）**两种写法都收**：
 
 ```js
 MachineRegistryEvents.registry(event => {
@@ -260,6 +261,12 @@ MachineRegistryEvents.registry(event => {
     // 结构：控制器上方一格放通风机箱 → 物品产出翻倍
     .modifier(0, 1, 0, 'modular_machinery_reborn:blockcasing[casing=vent]',
               { target: 'item', io: 'output', operation: 1, multiplier: 2.0 })
+    // 额外条件：控制器上方两格的那段结构全部命中时，输出再乘 1.5
+    .multiBlockModifier({
+      parts: [{ x: 0, y: 2, z: 0, elements: ['minecraft:stone'] }],
+      modifier: { target: 'item', io: 'output', operation: 1, multiplier: 1.5 },
+      description: '额外结构加成'
+    })
     .smartInterface('mode', 0, 1000)                       // 类型 / 默认值 / 优先级
     .smartInterface('temp', 20, 0, { header: 'gui.example.temp' })
     .coreThread('smelter')                                 // 空槽位：什么配方都能跑
@@ -279,6 +286,7 @@ MachineRegistryEvents.registry(event => {
 - **校验仍然全部由 schema 做**：`operation` 写 9、`failure-action` 拼错、`core-threads` 重名、
   并行上限互相矛盾——报的句子与数据包里写错时**逐字相同**；
 - **`modifier` 写在 `(0,0,0)`**（控制器自己那格）会被跳过并打一行告警——旧版行为，写相邻格子。
+- **`multiBlockModifier` 的 `parts` 允许 `(0,0,0)`**：它只是额外条件，不替换控制器格；整段每一格都匹配才生效。多块条件**没有名字**，命中几项就叠加几项（旧版 CraftTweaker 按名字覆盖，本版不复刻）。
 
 > `core-threads` 的语义：这条槽位**从成型那一刻就存在、闲置也不回收**（普通槽位闲置 200 tick 回收）。
 > `.coreThread('名字')` 不写配方 = 该槽位可以跑这台机器的任何配方。

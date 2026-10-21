@@ -13,10 +13,11 @@ import java.util.List;
 /**
  * A loaded machine definition: the data-driven counterpart of the original {@code DynamicMachine}.
  *
- * <p>M1 carries the fields that describe a structure and the machine's identity. The remaining original root
- * fields ({@code color}, {@code prefix}, {@code has-factory}, {@code factory-only},
- * {@code hide-components-when-formed}, {@code controller-bounding-box}, {@code dynamic-patterns}) are
- * deliberately not implemented yet and are still listed as gaps.
+ * <p>M1 carries the fields that describe a structure and the machine's identity. Most of the original root
+ * fields have since been implemented: {@code color}, {@code has-factory}, {@code factory-only},
+ * {@code hide-components-when-formed} and {@code dynamic-patterns}. The remaining two
+ * ({@code prefix} and {@code controller-bounding-box}) are deliberately not implemented yet and are still
+ * listed as gaps.
  *
  * <h2>M6c: parallelism and modifiers</h2>
  *
@@ -105,6 +106,14 @@ public final class MachineDefinition {
     private final int internalParallelism;
     private final boolean parallelizable;
     private final List<MachineModifier> modifiers;
+
+    /**
+     * 额外多块结构条件（{@code multi-block-modifiers}）。每条是一整段结构，全部命中才贡献 modifier。
+     *
+     * <p>与按单个坐标的 {@link #modifiers} 分开存：前者是「某个格子是什么」，后者是「另一段结构还在不在」，
+     * 解析、求值和诊断都应能分别看见两者。空列表是常态。
+     */
+    private final List<MachineMultiBlockModifier> multiBlockModifiers;
 
     // ---------------------------------------------------------------- M6e: the factory
     private final int maxThreads;
@@ -224,7 +233,7 @@ public final class MachineDefinition {
                              List<DynamicPattern> dynamicPatterns) {
         this(id, localizedName, pattern, failureAction, requiresBlueprint, maxParallelism, internalParallelism,
                 parallelizable, modifiers, maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces,
-                dynamicPatterns, DEFAULT_COLOR, null, false);
+                dynamicPatterns, DEFAULT_COLOR, null, false, List.of());
     }
 
     /** 规范构造器：**唯一**给所有字段赋值的那一个，包括 {@code color}。 */
@@ -236,7 +245,8 @@ public final class MachineDefinition {
                               List<FactoryThreadModel.CoreThreadSpec> coreThreads,
                               List<SmartInterfaceType> smartInterfaces,
                               List<DynamicPattern> dynamicPatterns, int color,
-                              @Nullable GeoModelSpec geoModel, boolean hideComponentsWhenFormed) {
+                              @Nullable GeoModelSpec geoModel, boolean hideComponentsWhenFormed,
+                              List<MachineMultiBlockModifier> multiBlockModifiers) {
         this.id = id;
         this.localizedName = localizedName;
         this.pattern = pattern;
@@ -247,6 +257,7 @@ public final class MachineDefinition {
         this.parallelizable = parallelizable;
         this.hideComponentsWhenFormed = hideComponentsWhenFormed;
         this.modifiers = List.copyOf(modifiers);
+        this.multiBlockModifiers = List.copyOf(multiBlockModifiers);
         this.maxThreads = Math.max(0, maxThreads);
         this.hasFactory = hasFactory;
         this.factoryOnly = factoryOnly;
@@ -274,7 +285,7 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, color, this.geoModel,
-                this.hideComponentsWhenFormed);
+                this.hideComponentsWhenFormed, this.multiBlockModifiers);
     }
 
     /**
@@ -294,7 +305,7 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, geoModel,
-                this.hideComponentsWhenFormed);
+                this.hideComponentsWhenFormed, this.multiBlockModifiers);
     }
 
     /**
@@ -307,13 +318,22 @@ public final class MachineDefinition {
         return this.hideComponentsWhenFormed;
     }
 
+    /** 带指定 extra 多块条件的副本；定义本身不可变。 */
+    public MachineDefinition withMultiBlockModifiers(List<MachineMultiBlockModifier> multiBlockModifiers) {
+        return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
+                this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
+                this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
+                this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
+                this.hideComponentsWhenFormed, multiBlockModifiers);
+    }
+
     /** 带指定成型隐藏开关的副本；解析器用它，而不是去改一个已经建好的定义。 */
     public MachineDefinition withHideComponentsWhenFormed(boolean hideComponentsWhenFormed) {
         return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
-                hideComponentsWhenFormed);
+                hideComponentsWhenFormed, this.multiBlockModifiers);
     }
 
     /** Registry name of the machine, e.g. {@code modular_machinery_reborn:transformer}. */
@@ -403,13 +423,32 @@ public final class MachineDefinition {
         return this.modifiers;
     }
 
+    /**
+     * 额外多块结构条件（{@code multi-block-modifiers}），按声明顺序。
+     *
+     * <p>每条的 {@code pattern} 是相对控制器的坐标；求值时按控制器朝向旋转，整段都命中才算条件成立。
+     * 与 {@link #modifiers()} 一样只描述「声明了什么」，命中结果在控制器里按结构实时求值。
+     */
+    public List<MachineMultiBlockModifier> multiBlockModifiers() {
+        return this.multiBlockModifiers;
+    }
+
     /** The recipe modifiers contributed by an arbitrary set of the machine's structure modifiers. */
     public static RecipeModifiers flatten(List<MachineModifier> active) {
-        if (active.isEmpty()) {
+        return flatten(active, List.of());
+    }
+
+    /** 单块条件与多块条件汇合到一处：两者都只是「命中的 modifier」，合并顺序是单块在前、多块按声明顺序在后。 */
+    public static RecipeModifiers flatten(List<MachineModifier> active,
+                                          List<MachineMultiBlockModifier> multiBlockActive) {
+        if (active.isEmpty() && multiBlockActive.isEmpty()) {
             return RecipeModifiers.EMPTY;
         }
         List<RecipeModifier> flat = new ArrayList<>();
         for (MachineModifier modifier : active) {
+            flat.addAll(modifier.modifiers());
+        }
+        for (MachineMultiBlockModifier modifier : multiBlockActive) {
             flat.addAll(modifier.modifiers());
         }
         return RecipeModifiers.of(flat);

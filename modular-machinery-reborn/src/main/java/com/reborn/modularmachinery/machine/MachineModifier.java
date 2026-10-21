@@ -17,13 +17,14 @@ import java.util.List;
  * the machinery behind the alloy furnace's built-in trick — put a vent above the controller and its item output
  * is doubled ({@code alloy_furnace.json}).
  *
- * <p>Two of the original's three replacement classes are deliberately not ported, because neither has a
- * counterpart in this mod's data model:
+ * <p>这描述的是旧版三个 replacement 类里的 {@code SingleBlockModifierReplacement}：一个坐标、一格方块。
+ * 另外两个的现状：
  *
  * <ul>
- *   <li>{@code MultiBlockModifierReplacement} replaces a whole <b>dynamic pattern</b>, and
- *       {@code dynamic-patterns} is still unimplemented (see the M1 gap list).</li>
- *   <li>{@code DynamicModifierReplacement} is the dynamic-machine form of the same thing.</li>
+ *   <li>{@code MultiBlockModifierReplacement} 做的是「另一段结构是否还在」，<strong>不是</strong>替换动态段；
+ *       0.72.0（C9）把它移植为 {@link MachineMultiBlockModifier}，见 {@code multi-block-modifiers}。</li>
+ *   <li>{@code DynamicModifierReplacement} 是同一件事的动态机器形态；本版没有对应的动态 modifier 入口，
+ *       仍不移植。</li>
  * </ul>
  */
 public record MachineModifier(BlockPos offset, List<BlockMatcher> accepted, List<RecipeModifier> modifiers,

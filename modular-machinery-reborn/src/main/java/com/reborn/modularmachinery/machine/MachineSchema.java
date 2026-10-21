@@ -70,7 +70,7 @@ public final class MachineSchema {
      */
     public static final List<String> KNOWN_ROOT_FIELDS = List.of(
             "registryname", "localizedname", "parts", "failure-action", "requires-blueprint",
-            "max-parallelism", "internal-parallelism", "parallelizable", "modifiers",
+            "max-parallelism", "internal-parallelism", "parallelizable", "modifiers", "multi-block-modifiers",
             "has-factory", "factory-only", "max-threads", "core-threads", "smart-interfaces",
             "dynamic-patterns",
             // 0.60.0: `color`。它此前在 UNIMPLEMENTED_ROOT_FIELDS 里（「识别但不求值」），
@@ -210,6 +210,7 @@ public final class MachineSchema {
         }
 
         List<MachineModifier> modifiers = readModifiers(root, variables, where);
+        List<MachineMultiBlockModifier> multiBlockModifiers = readMultiBlockModifiers(root, variables, where);
 
         // ---------------------------------------------------------------- M6e: the factory
         int maxThreads = MachineDefinition.DEFAULT_MAX_THREADS;
@@ -305,7 +306,8 @@ public final class MachineSchema {
                 maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces, dynamicPatterns)
                 .withColor(MachineRootFields.color(root, String.valueOf(where)))
                 .withGeoModel(MachineRootFields.geoModel(root, String.valueOf(where)))
-                .withHideComponentsWhenFormed(hideComponentsWhenFormed);
+                .withHideComponentsWhenFormed(hideComponentsWhenFormed)
+                .withMultiBlockModifiers(multiBlockModifiers);
     }
 
     // 0.31.0 removed rejectDeferred(JsonObject, Object, boolean) and its call above read()'s body. It existed to
@@ -614,24 +616,7 @@ public final class MachineSchema {
 
             // The original accepted either a single 'modifier' object or a 'modifiers' array of them; both
             // spellings appear in the wild and both are kept.
-            JsonElement rawModifiers = part.has("modifier") ? part.get("modifier")
-                    : part.get("modifiers");
-            if (rawModifiers == null) {
-                throw new JsonParseException("A modifier of " + where + " has neither 'modifier' nor "
-                        + "'modifiers'. Write \"modifier\": { \"target\": \"item\", \"io\": \"output\", "
-                        + "\"operation\": 1, \"multiplier\": 2.0 }.");
-            }
-            List<RecipeModifier> parsed = new ArrayList<>();
-            if (rawModifiers.isJsonArray()) {
-                for (JsonElement single : rawModifiers.getAsJsonArray()) {
-                    parsed.add(RecipeModifier.parse(single, where));
-                }
-                if (parsed.isEmpty()) {
-                    throw new JsonParseException("The 'modifiers' array of a modifier in " + where + " is empty");
-                }
-            } else {
-                parsed.add(RecipeModifier.parse(rawModifiers, where));
-            }
+            List<RecipeModifier> parsed = readRecipeModifiers(part, where);
 
             String description = part.has("description") ? part.get("description").getAsString() : "";
             boolean any = false;
@@ -655,6 +640,78 @@ public final class MachineSchema {
             }
         }
         return List.copyOf(modifiers);
+    }
+
+    /**
+     * 读 {@code multi-block-modifiers}：每项是一整段额外结构条件，命中时贡献它的 {@code modifier}。
+     *
+     * <p>与单块 {@code modifiers} 的区别只有两点：坐标描述的是<strong>一整段结构</strong>（因此复用
+     * {@code readParts}，但<strong>不跳过原点</strong>——旧版 {@code BlockArray} 没有坐标限制），以及
+     * 没有 {@code x/y/z} 这一层可按坐标展开的外壳。错误文案点名根字段与第几项，避免作者在几十条里找。
+     */
+    private static List<MachineMultiBlockModifier> readMultiBlockModifiers(JsonObject root,
+                                                                          Map<String, List<String>> variables,
+                                                                          Object where) {
+        JsonElement element = root.get("multi-block-modifiers");
+        if (element == null) {
+            return List.of();
+        }
+        if (!element.isJsonArray()) {
+            throw new JsonParseException("'multi-block-modifiers' of " + where + " must be an array of "
+                    + "structure conditions. Write \"multi-block-modifiers\": [ { \"parts\": [ ... ], "
+                    + "\"modifier\": { ... } } ], or remove the field.");
+        }
+        List<MachineMultiBlockModifier> result = new ArrayList<>();
+        int index = 0;
+        for (JsonElement entry : element.getAsJsonArray()) {
+            Object entryWhere = where + " 'multi-block-modifiers'[" + index + "]";
+            JsonObject part = asObject(entry, entryWhere);
+            if (!part.has("parts")) {
+                throw new JsonParseException(entryWhere + " has no 'parts'. A multi-block modifier is a whole "
+                        + "extra structure, so it needs at least one part (the controller itself need not be "
+                        + "listed: coordinates are relative to it).");
+            }
+            JsonArray parts = asArray(part.get("parts"), entryWhere + " 'parts'");
+            if (parts.isEmpty()) {
+                throw new JsonParseException("'parts' of " + entryWhere + " is empty. A multi-block modifier "
+                        + "needs at least one part; remove the field or list the structure it requires.");
+            }
+            MachinePattern.Builder builder = MachinePattern.builder();
+            readParts(parts, builder, variables, entryWhere, false);
+            List<RecipeModifier> parsed = readRecipeModifiers(part, entryWhere);
+            String description = part.has("description") ? part.get("description").getAsString() : "";
+            result.add(new MachineMultiBlockModifier(builder.build(), parsed, description));
+            index++;
+        }
+        return List.copyOf(result);
+    }
+
+    /**
+     * 读一个对象里的 {@code modifier} / {@code modifiers}，两种写法都收。
+     *
+     * <p>单块 {@code modifiers} 与多块 {@code multi-block-modifiers} 共用这段解析：两处对「写成什么、
+     * 空数组怎么报」必须一字不差，否则作者会在两个相近字段上得到两套规则。错误文案里的 {@code where}
+     * 由调用者给，单块路径保持原来的说法不变。
+     */
+    private static List<RecipeModifier> readRecipeModifiers(JsonObject part, Object where) {
+        JsonElement rawModifiers = part.has("modifier") ? part.get("modifier") : part.get("modifiers");
+        if (rawModifiers == null) {
+            throw new JsonParseException("A modifier of " + where + " has neither 'modifier' nor "
+                    + "'modifiers'. Write \"modifier\": { \"target\": \"item\", \"io\": \"output\", "
+                    + "\"operation\": 1, \"multiplier\": 2.0 }.");
+        }
+        List<RecipeModifier> parsed = new ArrayList<>();
+        if (rawModifiers.isJsonArray()) {
+            for (JsonElement single : rawModifiers.getAsJsonArray()) {
+                parsed.add(RecipeModifier.parse(single, where));
+            }
+            if (parsed.isEmpty()) {
+                throw new JsonParseException("The 'modifiers' array of a modifier in " + where + " is empty");
+            }
+        } else {
+            parsed.add(RecipeModifier.parse(rawModifiers, where));
+        }
+        return List.copyOf(parsed);
     }
 
     /**
