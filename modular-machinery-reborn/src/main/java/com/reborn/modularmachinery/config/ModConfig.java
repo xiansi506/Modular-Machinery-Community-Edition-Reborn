@@ -125,6 +125,8 @@ public final class ModConfig {
     /** The original's own category and key spelling: {@code display.energy.Display_Energy_Type}. */
     private static final String DISPLAY_ENERGY_ROOT = "display.energy";
     private static final String DISPLAY_ENERGY_KEY = "Display_Energy_Type";
+    /** The original's duration-multiplier switch: general.enable-duration-multiplier. */
+    private static final String ENABLE_DURATION_MULTIPLIER = "enable-duration-multiplier";
 
     private static final Map<ParallelControllerTier, ForgeConfigSpec.IntValue> PARALLELISM =
             new EnumMap<>(ParallelControllerTier.class);
@@ -182,6 +184,8 @@ public final class ModConfig {
     private static ForgeConfigSpec.BooleanValue ENABLE_FULL_DATA_SYNC_VALUE;
     /** general.enable-security-system. Assigned in build(). */
     private static ForgeConfigSpec.BooleanValue ENABLE_SECURITY_SYSTEM_VALUE;
+    /** general.enable-duration-multiplier. Assigned in build(). */
+    private static ForgeConfigSpec.BooleanValue ENABLE_DURATION_MULTIPLIER_VALUE;
     /**
      * The original warned when structure-check-delay >= max-structure-check-delay and then reset both values
      * (TileMultiblockMachineController.java:184-188). The normalized scheduler applies the same reset; this
@@ -319,6 +323,19 @@ public final class ModConfig {
                 "The owner is always recorded on placement, whether this is on or off.");
         ENABLE_SECURITY_SYSTEM_VALUE = builder.define(
                 List.of(GENERAL_ROOT, ENABLE_SECURITY_SYSTEM), false);
+
+        // ---- general.*: the original's duration-multiplier switch (B11) --------------------------------
+        // The original's Java field says true (Config.java:44), but load() always overwrites it from
+        // getBoolean(..., false, ...) (Config.java:92), so the observable default is false. The switch only
+        // affects per-tick energy: RecipeCraftingContext#getDurationMultiplier returns 1f while it is off
+        // (RecipeCraftingContext.java:196-199), and the recipe's duration is reduced either way. This port had
+        // no switch before 0.77.0 and always applied the compensation; see RecipeModifiers#durationMultiplier.
+        builder.comment("Scale per-tick energy when a duration modifier shortens or lengthens a craft",
+                "(the original's enable-duration-multiplier). Default false, the value the original's",
+                "config file actually used. When false, a duration modifier still changes how many ticks",
+                "the craft takes, but the energy drawn per tick is not scaled to keep the total constant.");
+        ENABLE_DURATION_MULTIPLIER_VALUE = builder.define(
+                List.of(GENERAL_ROOT, ENABLE_DURATION_MULTIPLIER), false);
 
         // ---- Section 6 of 6: display.energy.Display_Energy_Type ---------------------------------------
         // The original's key, in the original's own category and with the original's own spelling and casing
@@ -581,6 +598,28 @@ public final class ModConfig {
             return false;
         }
         return ENABLE_SECURITY_SYSTEM_VALUE.get();
+    }
+
+    /**
+     * {@code general.enable-duration-multiplier} — whether a {@code duration} modifier also scales the energy a
+     * craft draws per tick, keeping its total energy cost constant
+     * ({@code RecipeCraftingContext.java:196-199} in the original).
+     *
+     * <p><b>Default false.</b> The original's Java field is initialised to {@code true}
+     * ({@code Config.java:44}), but {@code Config.load()} always overwrites it from
+     * {@code getBoolean("enable-duration-multiplier", "general", false, ...)} ({@code Config.java:92}); with a
+     * config file present — always, in practice — the effective default was false. This port applied the
+     * compensation unconditionally until 0.77.0 (B11) and its old comment claimed the opposite default.
+     *
+     * <p>The switch is about <b>energy only</b>. A duration modifier changes {@link
+     * com.reborn.modularmachinery.recipe.MachineRecipe#duration} whether this is on or off; with it off, a
+     * 100-tick craft shortened to 50 ticks still pays the recipe's normal per-tick rate for 50 ticks.
+     */
+    public static boolean enableDurationMultiplier() {
+        if (ENABLE_DURATION_MULTIPLIER_VALUE == null || !SPEC.isLoaded()) {
+            return false;
+        }
+        return ENABLE_DURATION_MULTIPLIER_VALUE.get();
     }
 
     /**

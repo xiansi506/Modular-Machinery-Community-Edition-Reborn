@@ -611,7 +611,8 @@ final class MocNamespaceCheck {
         // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit);
         // 44 = that plus A10's three structure-check keys and A12's general.enable-full-data-sync.
         // 45 = that plus A11's general.enable-security-system.
-        check("the config spec defines this many keys", 45, rendered.size());
+        // 46 = that plus B11's general.enable-duration-multiplier.
+        check("the config spec defines this many keys", 46, rendered.size());
 
         String[][] expected = {
                 {"general.modular-controller-compatible-mode", "false"},

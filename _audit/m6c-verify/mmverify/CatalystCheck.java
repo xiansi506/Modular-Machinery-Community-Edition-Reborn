@@ -269,14 +269,15 @@ final class CatalystCheck {
             ItemStackHandler input = new ItemStackHandler(1);
             HatchCollection empty = HatchCollection.builder().addItemHandler(input, true).build();
             RecipeModifiers absent = (RecipeModifiers) accessor.invoke(recipe, empty);
+            // B11: the config default is off; this check is about modifier arithmetic, so opt in.
             check("a catalyst that is not in the ports contributes no modifier", "1.0",
-                    Float.toString(absent.durationMultiplier(100)));
+                    Float.toString(absent.durationMultiplier(100, true)));
             input.setStackInSlot(0, new ItemStack(Items.DIAMOND, 1));
             RecipeModifiers modifiers = (RecipeModifiers) accessor.invoke(recipe, empty);
             check("a present catalyst duration modifier halves a 100-tick recipe", 50L, (long) recipe.duration(modifiers));
             check("the raw duration is unchanged without it", 100L, (long) recipe.duration(RecipeModifiers.EMPTY));
             check("the duration multiplier is the inverse ratio", "2.0",
-                    Float.toString(modifiers.durationMultiplier(100)));
+                    Float.toString(modifiers.durationMultiplier(100, true)));
         } catch (ReflectiveOperationException missing) {
             report("MachineRecipe#catalystModifiers(HatchCollection) is missing: " + missing, false);
         }

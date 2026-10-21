@@ -133,6 +133,7 @@ modular_machinery_reborn:item     modularmachinery:item     item
 - 一次只消耗**一组**（某个条目够数就扣那个），**不随并行数放大**；
 - `chance` 掷失败时**不消耗**，配方照常开工/运行；
 - 在场时 `modifiers` 与机器结构修改器同一套字段（`target` / `io` / `operation` / `multiplier`），在 `canStart` 之前并入，并**冻结到本次合成结束**（催化剂已在开工时消耗，不能每 tick 重问）；
+- `target: "duration"` 改变的是**时长**。0.77.0 起默认**不**再按比例缩放每 tick 能量（对齐旧版配置的实际默认），总耗能随配方变短/变长；把 `general.enable-duration-multiplier` 设为 `true` 可恢复「总耗能恒定」的补偿；
 - `tooltip` 只用于 JEI 悬停；`nbt` 与物品需求同一个谓词语法。
 
 ## 五之二、typed 配方 API（0.65.0 起）

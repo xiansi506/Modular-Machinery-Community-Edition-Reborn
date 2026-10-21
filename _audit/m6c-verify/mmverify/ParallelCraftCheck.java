@@ -196,7 +196,9 @@ public final class ParallelCraftCheck {
                 new RecipeModifier(RecipeModifier.Target.DURATION, null, 0.5F,
                         RecipeModifier.Operation.MULTIPLY, false)));
         check("10 ticks x 0.5", 5, recipe.duration(faster));
-        check("duration multiplier", "2.0", String.valueOf(faster.durationMultiplier(10)));
+        // B11: the config default is now off; these sections are about the compensation arithmetic itself,
+        // so they opt in explicitly. DurationMultiplierCheck covers the default and the switch.
+        check("duration multiplier", "2.0", String.valueOf(faster.durationMultiplier(10, true)));
         reset(128, 4, 1_000_000);
         craft(recipe, faster, 2);
         check("FE drawn is unchanged in total for a halved duration", 2 * 100L * 10L,
@@ -372,6 +374,9 @@ public final class ParallelCraftCheck {
         // 0.76.0：B8——旧版配方的 machine 字段可写成非空数组，并可带 startCommands /
         // processingCommands / finishCommands 三条命令数组。红跑时这些 API 还不存在，全部走反射。
         recipeShapeSection();
+        // 0.77.0：B11——旧版 general.enable-duration-multiplier 默认关；关闭时时长修改器只改时长，
+        // 不再反向放大每 tick 能量。红跑时配置键/新重载/门控都还不存在，全部走反射。
+        DurationMultiplierCheck.durationMultiplierConfig();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -890,7 +895,8 @@ public final class ParallelCraftCheck {
         // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit);
         // 44 = that plus A10's three structure-check keys and A12's general.enable-full-data-sync.
         // 45 = that plus A11's general.enable-security-system.
-        check("the config spec defines this many keys", 45, rendered.size());
+        // 46 = that plus B11's general.enable-duration-multiplier.
+        check("the config spec defines this many keys", 46, rendered.size());
 
         String[][] expected = {
                 {"general.enable-full-data-sync", "false"},
@@ -3327,7 +3333,7 @@ public final class ParallelCraftCheck {
         check("a speed upgrade contributes one modifier", 1, fast.modifiers().size());
         check("duration with the speed upgrade (5 ticks x 0.5)", 3, recipe.duration(fast));
         check("duration multiplier with the speed upgrade", "2.0",
-                String.valueOf(fast.durationMultiplier(recipe.recipeTime())));
+                String.valueOf(fast.durationMultiplier(recipe.recipeTime(), true)));
         // The per-tick rate compensation: the shortened craft draws `rate * parallelism * durationMultiplier`
         // for `duration(modifiers)` ticks. 8 copies x 100 FE/t x 2.0 x 3 ticks = 4800.
         // NOTE: this is NOT the unmodified total of 4000, and that is a pre-existing M6c behaviour rather than a
@@ -3621,7 +3627,8 @@ public final class ParallelCraftCheck {
     private static int craftCountingTicks(MachineRecipe recipe, RecipeModifiers modifiers, int parallelism) {
         HatchCollection ports = ports();
         recipe.setParallelism(Math.max(1, parallelism));
-        recipe.applyDurationMultiplier(modifiers);
+        // B11: opt in explicitly; the config default (false) is covered by DurationMultiplierCheck.
+        recipe.applyDurationMultiplier(modifiers, true);
         int duration = recipe.duration(modifiers);
         if (!recipe.canStart(ports, modifiers) || !recipe.canTick(ports, modifiers)) {
             throw new IllegalStateException("craft could not start");
@@ -4906,7 +4913,8 @@ public final class ParallelCraftCheck {
     private static void craft(MachineRecipe recipe, HatchCollection ports, RecipeModifiers modifiers,
                               int parallelism) {
         recipe.setParallelism(Math.max(1, parallelism));
-        recipe.applyDurationMultiplier(modifiers);
+        // B11: opt in explicitly; the config default (false) is covered by DurationMultiplierCheck.
+        recipe.applyDurationMultiplier(modifiers, true);
         int duration = recipe.duration(modifiers);
         if (!recipe.canStart(ports, modifiers) || !recipe.canTick(ports, modifiers)) {
             throw new IllegalStateException("craft could not start");

@@ -1,5 +1,7 @@
 package com.reborn.modularmachinery.recipe;
 
+import com.reborn.modularmachinery.config.ModConfig;
+
 import javax.annotation.Nullable;
 import java.util.List;
 
@@ -122,12 +124,26 @@ public final class RecipeModifiers {
      * that <i>shortens</i> the recipe yields a multiplier above 1. Per-tick requirements consume
      * {@code rate * parallelism * multiplier} to keep the total cost of a shortened craft unchanged.
      *
-     * <p>The original guarded this behind {@code Config.enableDurationMultiplier} (default {@code true}). This
-     * mod always applies it, because the only way to shorten a craft here is an explicit {@code duration}
-     * modifier in a machine definition — there is no global switch to leave on.
+     * <p>The original guarded this behind {@code Config.enableDurationMultiplier}
+     * ({@code RecipeCraftingContext.java:196-199}). Its <b>effective default is false</b>: the Java field says
+     * {@code true} ({@code Config.java:44}), but {@code load()} always overwrites it from
+     * {@code getBoolean(..., false, ...)} ({@code Config.java:92}). This one-argument overload reads this port's
+     * equivalent key through {@link ModConfig#enableDurationMultiplier()}; the two-argument overload takes the
+     * decision explicitly, so callers and the offline harness can exercise both branches without a loaded
+     * config file.
      */
     public float durationMultiplier(int baseTicks) {
-        if (this.modifiers.isEmpty() || baseTicks <= 0) {
+        return durationMultiplier(baseTicks, ModConfig.enableDurationMultiplier());
+    }
+
+    /**
+     * {@link #durationMultiplier(int)} with the config decision supplied by the caller.
+     *
+     * @param enabled whether a duration modifier should also scale per-tick energy; {@code false} returns
+     *                {@code 1.0} and leaves every per-tick rate untouched
+     */
+    public float durationMultiplier(int baseTicks, boolean enabled) {
+        if (!enabled || this.modifiers.isEmpty() || baseTicks <= 0) {
             return 1.0F;
         }
         double modified = applyDuration(baseTicks);

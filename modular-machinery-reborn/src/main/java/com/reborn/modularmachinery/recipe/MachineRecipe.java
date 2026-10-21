@@ -11,6 +11,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.Container;
+import com.reborn.modularmachinery.config.ModConfig;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -356,9 +357,21 @@ public final class MachineRecipe implements Recipe<Container> {
         return 1;
     }
 
-    /** Pushes the shortened-duration cost compensation into every per-tick energy requirement. */
+    /**
+     * Pushes the shortened-duration cost compensation into every per-tick energy requirement.
+     *
+     * <p>The config decision is {@link ModConfig#enableDurationMultiplier()}: with the original's default
+     * ({@code false}) this method writes {@code 1.0} and a duration modifier only changes the tick count. The
+     * overload takes the decision explicitly for callers that have already resolved it, and for the offline
+     * harness, which has no loaded config file.
+     */
     public void applyDurationMultiplier(RecipeModifiers modifiers) {
-        float multiplier = modifiers.isEmpty() ? 1.0F : modifiers.durationMultiplier(this.recipeTime);
+        applyDurationMultiplier(modifiers, ModConfig.enableDurationMultiplier());
+    }
+
+    /** {@link #applyDurationMultiplier(RecipeModifiers)} with the config decision supplied by the caller. */
+    public void applyDurationMultiplier(RecipeModifiers modifiers, boolean enabled) {
+        float multiplier = modifiers.durationMultiplier(this.recipeTime, enabled);
         for (MachineRequirement requirement : this.requirements) {
             if (requirement instanceof EnergyRequirement energy) {
                 energy.setDurationMultiplier(multiplier);
