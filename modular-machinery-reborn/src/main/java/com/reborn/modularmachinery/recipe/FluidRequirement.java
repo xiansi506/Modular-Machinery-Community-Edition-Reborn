@@ -82,11 +82,8 @@ public final class FluidRequirement extends MachineRequirement {
         return (int) Math.max(0.0, Math.floor(modified));
     }
 
-    /** The chance one copy is produced with, after the chance bucket of this requirement's modifiers. */
+    /** The chance one copy is produced or consumed with, after the chance bucket of its modifiers. */
     public float modifiedChance(RecipeModifiers modifiers) {
-        if (this.ioType() != IOType.OUTPUT) {
-            return 1.0F;
-        }
         return (float) Math.max(0.0, Math.min(1.0, modifiers.apply(this, (double) this.chance, true)));
     }
 
@@ -152,11 +149,17 @@ public final class FluidRequirement extends MachineRequirement {
 
     private boolean transfer(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
         int total = modifiedAmount(modifiers) * this.parallelism();
-        if (this.ioType() == IOType.INPUT) {
-            return total <= 0 || IngredientIo.drainFluid(ports.fluidInputs(), this.fluid, total);
-        }
-        if (total <= 0 || modifiedChance(modifiers) < 1.0F && random.nextFloat() >= modifiedChance(modifiers)) {
+        float decidedChance = modifiedChance(modifiers);
+        // One roll per settlement in both directions. A missed input roll drains nothing but does not fail the
+        // craft, matching the original's startCrafting gate.
+        if (decidedChance < 1.0F && total > 0 && random.nextFloat() >= decidedChance) {
             return true;
+        }
+        if (total <= 0) {
+            return true;
+        }
+        if (this.ioType() == IOType.INPUT) {
+            return IngredientIo.drainFluid(ports.fluidInputs(), this.fluid, total);
         }
         return IngredientIo.fillFluid(ports.fluidOutputs(), this.fluid, total);
     }
@@ -165,7 +168,7 @@ public final class FluidRequirement extends MachineRequirement {
     public String describe() {
         // Forge 1.20.1 has no FluidStack#getHoverName; the display name lives in getDisplayName().
         String name = this.fluid.getDisplayName().getString();
-        String chanceText = this.ioType() == IOType.OUTPUT && this.chance < 1.0F
+        String chanceText = this.chance < 1.0F
                 ? String.format(Locale.ROOT, " (%.0f%%)", this.chance * 100.0F) : "";
         String perTickText = this.perTick() ? "/t" : "";
         return this.amount + " mB " + name + perTickText + chanceText;

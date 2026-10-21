@@ -275,7 +275,8 @@ public final class RequirementTypes {
                             + " uses minAmount/maxAmount; only outputs may vary their amount. "
                             + "Give inputs a fixed 'amount'.");
                 }
-                return ItemRequirement.input(ingredient, min, nbt, displayTag);
+                return ItemRequirement.input(ingredient, min, nbt, displayTag,
+                        MachineRequirementParser.chance(json));
             }
             ItemStack stack = LegacyIngredients.firstStack(ingredient).copy();
             if (stack.isEmpty()) {
@@ -312,6 +313,7 @@ public final class RequirementTypes {
                 if (nbt != null) {
                     buf.writeUtf(nbt.source());
                 }
+                buf.writeFloat(item.chance());
             } else {
                 buf.writeItem(item.outputStack().copyWithCount(1));
                 buf.writeFloat(item.chance());
@@ -328,7 +330,8 @@ public final class RequirementTypes {
             if (ioType == IOType.INPUT) {
                 Ingredient ingredient = Ingredient.fromNetwork(buf);
                 NbtPredicate nbt = buf.readBoolean() ? NbtPredicate.parse(buf.readUtf(), "item requirement") : null;
-                return ItemRequirement.input(ingredient, min, nbt, buf.readNbt());
+                float chance = buf.readFloat();
+                return ItemRequirement.input(ingredient, min, nbt, buf.readNbt(), chance);
             }
             ItemStack stack = buf.readItem();
             float chance = buf.readFloat();

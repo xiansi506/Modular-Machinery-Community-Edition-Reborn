@@ -120,8 +120,8 @@ public final class MachineRequirementParser {
      * 需求上的 {@code chance}，没写时为 {@code 1.0}。
      *
      * <p>读法照旧版：不校验类型，也不校验范围（改动前 {@code ModRecipeSerializers:152} 就是这一行）。
-     * 「`chance` 在输入侧被静默忽略、`fluid` 输入的 `modifiedChance` 恒为 1」是**已登记的既有缺陷**，
-     * 不在波 5.2 的范围里，所以这里不顺手改——改了它，配方文件的行为就会在本波里悄悄变一次。
+     * 0.74.0 起输入侧也求值它：物品/流体/气体输入都会在消耗前掷一次，未命中就不扣料、配方照跑；
+     * 这复刻旧版 {@code RequirementItem#startCrafting} 等处的门控，而不是把它当成开工条件。
      */
     public static float chance(JsonObject json) {
         return json.has("chance") ? json.get("chance").getAsFloat() : 1.0F;

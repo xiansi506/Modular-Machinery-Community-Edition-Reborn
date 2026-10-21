@@ -15,8 +15,10 @@ import java.util.Locale;
  * An item input or output of a machine recipe.
  *
  * <p>Inputs accept an {@link Ingredient}, which covers plain items as well as the item tags that replace the
- * original's ore dictionary. Outputs carry a concrete stack plus the original's {@code chance} — each output
- * requirement is rolled on its own, which is why the centrifuge wool recipe lists four separate string outputs
+ * original's ore dictionary. Both directions carry the original's {@code chance}: an output is only produced
+ * when its roll hits, and an input is only consumed when its roll hits. A missed input roll skips that
+ * requirement for this craft without failing the craft, exactly as {@code RequirementItem#startCrafting} did.
+ * Outputs are rolled on their own, which is why the centrifuge wool recipe lists four separate string outputs
  * with different chances instead of one output with an amount range.
  *
  * <p>Outputs also honour the original's {@code minAmount}/{@code maxAmount} pair: the amount is rolled per
@@ -77,7 +79,19 @@ public final class ItemRequirement extends MachineRequirement {
      */
     public static ItemRequirement input(Ingredient ingredient, int amount, @Nullable NbtPredicate nbt,
                                         @Nullable CompoundTag displayTag) {
-        return new ItemRequirement(IOType.INPUT, ingredient, null, amount, amount, 1.0F, nbt, displayTag);
+        return input(ingredient, amount, nbt, displayTag, 1.0F);
+    }
+
+    /**
+     * An item input that is consumed with {@code chance}.
+     *
+     * <p>A failed roll consumes nothing and does not fail the craft. The original did the same in
+     * {@code RequirementItem#startCrafting}: the roll gated {@code doItemIO}, while {@code canStartCrafting}
+     * only checked that the ingredients were present.
+     */
+    public static ItemRequirement input(Ingredient ingredient, int amount, @Nullable NbtPredicate nbt,
+                                        @Nullable CompoundTag displayTag, float chance) {
+        return new ItemRequirement(IOType.INPUT, ingredient, null, amount, amount, chance, nbt, displayTag);
     }
 
     public static ItemRequirement output(ItemStack stack, int minAmount, int maxAmount, float chance) {
@@ -196,11 +210,8 @@ public final class ItemRequirement extends MachineRequirement {
         return (int) Math.max(0.0, Math.floor(modified));
     }
 
-    /** The chance one copy is produced with, after the chance bucket of this requirement's modifiers. */
+    /** The chance one copy is produced or consumed with, after the chance bucket of its modifiers. */
     public float modifiedChance(RecipeModifiers modifiers) {
-        if (this.ioType() != IOType.OUTPUT || this.stack == null) {
-            return 1.0F;
-        }
         return (float) Math.max(0.0, Math.min(1.0, modifiers.apply(this, (double) this.chance, true)));
     }
 
@@ -275,8 +286,16 @@ public final class ItemRequirement extends MachineRequirement {
         int copies = this.parallelism();
         if (this.ioType() == IOType.INPUT) {
             int total = perCopy * copies;
-            return total <= 0
-                    || (this.ingredient != null && IngredientIo.extract(ports.itemInputs(), this::inputMatches, total));
+            if (total <= 0) {
+                return true;
+            }
+            // One roll per settlement, like the output side: a miss leaves the inputs untouched and the craft
+            // still runs. This is the original's startCrafting gate, not a canStart condition.
+            float decidedChance = modifiedChance(modifiers);
+            if (decidedChance < 1.0F && random.nextFloat() >= decidedChance) {
+                return true;
+            }
+            return this.ingredient != null && IngredientIo.extract(ports.itemInputs(), this::inputMatches, total);
         }
         if (this.stack == null || perCopy <= 0 || copies <= 0) {
             return true;
@@ -317,7 +336,7 @@ public final class ItemRequirement extends MachineRequirement {
         String amountText = this.hasAmountRange()
                 ? this.minAmount + "-" + this.maxAmount
                 : Integer.toString(this.maxAmount);
-        String chanceText = this.ioType() == IOType.OUTPUT && this.chance < 1.0F
+        String chanceText = this.chance < 1.0F
                 ? String.format(Locale.ROOT, " (%.0f%%)", this.chance * 100.0F) : "";
         return amountText + "x " + what + chanceText;
     }

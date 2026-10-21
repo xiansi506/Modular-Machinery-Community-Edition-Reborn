@@ -65,10 +65,16 @@ modular_machinery_reborn:item     modularmachinery:item     item
 | 配方 id | `registryName`（可选） |
 | 耗时 | `recipeTime`（可选，默认 100，**≥1**） |
 | 需求列表 | `requirements`（**必填非空**） |
-| 物品 | `item`（支持 `minecraft:xxx`、`#forge:...` 标签、旧版 `ore:ingotIron`）+ `amount`；输出可用 `chance` |
+| 物品 | `item`（支持 `minecraft:xxx`、`#forge:...` 标签、旧版 `ore:ingotIron`）+ `amount`；输入/输出都可用 `chance` |
 | 流体 | `fluid` + `amount`；可按 tick 消耗用 `perTick` |
 | 能源 | `energyPerTick` |
 | 输入/输出 | `io-type` |
+
+**输入也能写 `chance`（0.74.0 起）**：命中才扣料，未命中不扣料、也不让配方失败，配方照常开工与运行。一次掷决定整笔并行消耗，不是每份独立掷。`item`、`fluid`、`gas` 输入都适用；`chance: 0` 仍可开工，但永不消耗。
+
+```js
+{ type: 'modular_machinery_reborn:item', 'io-type': 'input', item: 'minecraft:coal', amount: 1, chance: 0.25 }
+```
 
 **配方只在对应机器成型时生效**——机器没搭好就不会跑。
 

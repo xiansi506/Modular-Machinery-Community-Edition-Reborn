@@ -136,11 +136,8 @@ public final class GasRequirement extends MachineRequirement {
         return (int) Math.max(0.0, Math.floor(modified));
     }
 
-    /** 一份合成产出它所用的概率，过完 chance 那一桶修改器之后。 */
+    /** 一份合成产出或消耗它所用的概率，过完 chance 那一桶修改器之后。 */
     public float modifiedChance(RecipeModifiers modifiers) {
-        if (this.ioType() != IOType.OUTPUT) {
-            return 1.0F;
-        }
         return (float) Math.max(0.0, Math.min(1.0, modifiers.apply(this, (double) this.chance, true)));
     }
 
@@ -206,11 +203,16 @@ public final class GasRequirement extends MachineRequirement {
 
     private boolean transfer(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
         int total = modifiedAmount(modifiers) * this.parallelism();
-        if (this.ioType() == IOType.INPUT) {
-            return total <= 0 || GasIo.extract(ports.gasInputs(), this.gas, total);
-        }
-        if (total <= 0 || modifiedChance(modifiers) < 1.0F && random.nextFloat() >= modifiedChance(modifiers)) {
+        float decidedChance = modifiedChance(modifiers);
+        // 判断顺序：先掷概率（输入未命中时同样不消耗、不失败），再看数量。
+        if (decidedChance < 1.0F && total > 0 && random.nextFloat() >= decidedChance) {
             return true;
+        }
+        if (total <= 0) {
+            return true;
+        }
+        if (this.ioType() == IOType.INPUT) {
+            return GasIo.extract(ports.gasInputs(), this.gas, total);
         }
         return GasIo.insert(ports.gasOutputs(), this.gas, total);
     }
@@ -218,7 +220,7 @@ public final class GasRequirement extends MachineRequirement {
     @Override
     public String describe() {
         String name = this.gas.getType().getTextComponent().getString();
-        String chanceText = this.ioType() == IOType.OUTPUT && this.chance < 1.0F
+        String chanceText = this.chance < 1.0F
                 ? String.format(Locale.ROOT, " (%.0f%%)", this.chance * 100.0F) : "";
         String perTickText = this.perTick() ? "/t" : "";
         return this.amount + " mB " + name + perTickText + chanceText;

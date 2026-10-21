@@ -362,6 +362,9 @@ public final class ParallelCraftCheck {
         MultiBlockModifierCheck.multiBlockModifiers();
         // 0.73.0：C4——ME 物品输入/输出总线。搬运算法与 AE2 隔离，先用假网络钉住数量关系。
         MeItemBusCheck.meItemBuses();
+        // 0.74.0：B6——输入侧 chance。旧版是「按概率消耗」，未命中不扣料但配方仍跑；
+        // 此前解析/网络/求值三层都把输入 chance 丢了。
+        InputChanceCheck.inputChances();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
