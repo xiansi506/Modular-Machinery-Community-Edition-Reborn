@@ -22,6 +22,8 @@ minecraft {
 repositories {
     maven { name = 'Aliyun'; url = 'https://maven.aliyun.com/repository/public' }
     maven { name = 'BlameJared'; url = 'https://maven.blamejared.com' }
+    // 0.70.0（C7）：GeckoLib 4.4.9。本地构建走 libs/ 里的 jar；非 local 构建从这里取。
+    maven { name = 'GeckoLib'; url = 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/' }
     flatDir { dirs 'libs' }
 }
 
@@ -53,9 +55,13 @@ dependencies {
         compileOnly fg.deobf('libs:mekanism:1.20.1-10.4.16.80')
         compileOnly fg.deobf('libs:appliedenergistics2:forge-15.4.10')
         compileOnly fg.deobf('libs:guideme:20.1.15')
+        // 0.70.0（C7）：控制器自定义模型。选 4.4.9 而不是 latest 4.8.4：4.4.9 的 GeoObjectRenderer
+        // 与旧版 GeoBlockRenderer 的 preRender/actuallyRender 语义接近，且这个版本已在 libs/ 里核对过源码。
+        compileOnly fg.deobf('libs:geckolib-forge-1.20.1:4.4.9')
     } else {
         compileOnly fg.deobf('dev.latvian.mods:kubejs-forge:2001.6.5-build.16')
         compileOnly fg.deobf('mezz.jei:jei-1.20.1-forge:15.2.0.27')
+        compileOnly fg.deobf('software.bernie.geckolib:geckolib-forge-1.20.1:4.4.9')
     }
 }
 

@@ -75,3 +75,15 @@ description='''A Forge 1.20.1 reimplementation foundation for Modular Machinery:
     versionRange="[1,)"
     ordering="AFTER"
     side="BOTH"
+# 0.70.0（C7）：GeckoLib。控制器的自定义模型/动画可选地由它渲染。
+#
+# 与 kubejs/jei 那两条不同，这条有实质作用：MachineControllerGeoRenderer 编译时引用 GeckoLib 的
+# GeoObjectRenderer。没有它时 ClientSetup 不注册渲染器，模组照常启动（机器用普通方块模型）。
+# ordering=AFTER：渲染器要引用 GeckoLib 的类型，先让它构造。
+[[dependencies.${mod_id}]]
+    modId="geckolib"
+    mandatory=false
+    versionRange="[4,)"
+    ordering="AFTER"
+    side="BOTH"
+

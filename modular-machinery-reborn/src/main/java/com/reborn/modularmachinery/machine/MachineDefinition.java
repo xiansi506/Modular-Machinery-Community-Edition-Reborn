@@ -6,6 +6,7 @@ import com.reborn.modularmachinery.recipe.RecipeModifiers;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -119,6 +120,13 @@ public final class MachineDefinition {
      */
     private final int color;
 
+    /**
+     * 控制器的 GeckoLib 自定义模型（{@code geo-model}）；{@code null} 表示用普通方块模型。
+     * 与 {@link #color} 一样，定义建好后不可变，设置通过 {@link #withGeoModel} 返回副本。
+     */
+    @Nullable
+    private final GeoModelSpec geoModel;
+
     public MachineDefinition(ResourceLocation id, String localizedName, MachinePattern pattern,
                              FailureAction failureAction, boolean requiresBlueprint) {
         this(id, localizedName, pattern, failureAction, requiresBlueprint,
@@ -208,7 +216,7 @@ public final class MachineDefinition {
                              List<DynamicPattern> dynamicPatterns) {
         this(id, localizedName, pattern, failureAction, requiresBlueprint, maxParallelism, internalParallelism,
                 parallelizable, modifiers, maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces,
-                dynamicPatterns, DEFAULT_COLOR);
+                dynamicPatterns, DEFAULT_COLOR, null);
     }
 
     /** 规范构造器：**唯一**给所有字段赋值的那一个，包括 {@code color}。 */
@@ -219,7 +227,8 @@ public final class MachineDefinition {
                               int maxThreads, boolean hasFactory, boolean factoryOnly,
                               List<FactoryThreadModel.CoreThreadSpec> coreThreads,
                               List<SmartInterfaceType> smartInterfaces,
-                              List<DynamicPattern> dynamicPatterns, int color) {
+                              List<DynamicPattern> dynamicPatterns, int color,
+                              @Nullable GeoModelSpec geoModel) {
         this.id = id;
         this.localizedName = localizedName;
         this.pattern = pattern;
@@ -236,6 +245,7 @@ public final class MachineDefinition {
         this.smartInterfaces = List.copyOf(smartInterfaces);
         this.dynamicPatterns = List.copyOf(dynamicPatterns);
         this.color = color;
+        this.geoModel = geoModel;
     }
 
     /**
@@ -254,7 +264,26 @@ public final class MachineDefinition {
         return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
-                this.smartInterfaces, this.dynamicPatterns, color);
+                this.smartInterfaces, this.dynamicPatterns, color, this.geoModel);
+    }
+
+    /**
+     * 控制器的 GeckoLib 自定义模型，{@code null} 表示没有（用普通方块模型）。
+     *
+     * <p>旧版把这个状态放在 {@code DynamicMachineModelRegistry} 的按机器名映射里；本版照 {@link #color}
+     * 的做法直接挂在定义上，因为模型和颜色一样是这份定义自己的属性。
+     */
+    @Nullable
+    public GeoModelSpec geoModel() {
+        return this.geoModel;
+    }
+
+    /** 带指定模型（可 {@code null}）的副本；解析器用它，而不是去改一个已经建好的定义。 */
+    public MachineDefinition withGeoModel(@Nullable GeoModelSpec geoModel) {
+        return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
+                this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
+                this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
+                this.smartInterfaces, this.dynamicPatterns, this.color, geoModel);
     }
 
     /** Registry name of the machine, e.g. {@code modular_machinery_reborn:transformer}. */

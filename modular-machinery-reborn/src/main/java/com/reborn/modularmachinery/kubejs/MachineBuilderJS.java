@@ -208,6 +208,7 @@ public final class MachineBuilderJS extends EventJS {
     private static final String KEY_MODIFIERS = "modifiers";
     private static final String KEY_SMART_INTERFACES = "smart-interfaces";
     private static final String KEY_CORE_THREADS = "core-threads";
+    private static final String KEY_GEO_MODEL = "geo-model";
 
     /**
      * {@code failure-action}: what a craft's progress does on a tick it cannot pay for.
@@ -388,6 +389,39 @@ public final class MachineBuilderJS extends EventJS {
             entry.add("recipes", names);
         }
         array(KEY_CORE_THREADS).add(entry);
+        return this;
+    }
+
+    /**
+     * {@code geo-model}: a GeckoLib model for this machine's controller, with just the two required resources.
+     *
+     * <p>Same field a definition file writes; the schema does the validation, including the old
+     * {@code modularmachinery} namespace rewrite. Passing {@code null} for an optional argument omits that key,
+     * which is how a minimal model is written.
+     */
+    public MachineBuilderJS geoModel(Object model, Object texture) {
+        return geoModel(model, texture, null, null, null);
+    }
+
+    /**
+     * The full {@code geo-model}: model, texture and optionally the animation file plus its idle/working clip
+     * names. Idle and working name clips inside the animation file, so the schema refuses either without an
+     * animation file.
+     */
+    public MachineBuilderJS geoModel(Object model, Object texture, Object animation, Object idle, Object working) {
+        JsonObject entry = new JsonObject();
+        entry.addProperty("model", requireText(model, "model"));
+        entry.addProperty("texture", requireText(texture, "texture"));
+        if (animation != null) {
+            entry.addProperty("animation", requireText(animation, "animation"));
+        }
+        if (idle != null) {
+            entry.addProperty("idle", requireText(idle, "idle"));
+        }
+        if (working != null) {
+            entry.addProperty("working", requireText(working, "working"));
+        }
+        this.json.add(KEY_GEO_MODEL, entry);
         return this;
     }
 

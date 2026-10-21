@@ -5,11 +5,13 @@ import com.reborn.modularmachinery.menu.ModMenus;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 
 public final class ClientSetup {
     private ClientSetup() {}
     public static void onClientSetup(FMLClientSetupEvent event) {
+        onRegisterRenderers(event);
         event.enqueueWork(() -> {
             MenuScreens.register(ModMenus.MACHINE_CONTROLLER.get(), MachineControllerScreen::new);
             MenuScreens.register(ModMenus.MACHINE_HATCH.get(), MachineHatchScreen::new);
@@ -38,5 +40,19 @@ public final class ClientSetup {
                     SelectionHighlight::onRenderLevelStage);
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(SelectionHighlight::onLoggingOut);
         });
+    }
+
+    /**
+     * C7：控制器自定义模型的渲染器注册。
+     *
+     * <p>geckolib 是**可选**依赖（mods.toml 里 mandatory=false）。没有它时这里直接返回，
+     * {@link com.reborn.modularmachinery.client.geo.GeoRenderers} 不会被加载，因此它里面的
+     * GeckoLib 类型不会触发 NoClassDefFoundError；机器照常显示普通方块模型。
+     */
+    public static void onRegisterRenderers(FMLClientSetupEvent event) {
+        if (!ModList.get().isLoaded("geckolib")) {
+            return;
+        }
+        event.enqueueWork(com.reborn.modularmachinery.client.geo.GeoRenderers::register);
     }
 }

@@ -351,6 +351,9 @@ public final class ParallelCraftCheck {
         // 0.69.0：A11——旧版 general.enable-security-system（默认关）与控制器 owner。owner 总是记录，
         // 开关只拦「非 owner 破坏」和「非 owner 放置带别人 owner 标签的控制器物品」。
         SecurityCheck.security();
+        // 0.70.0：C7——机器定义新增 geo-model（GeckoLib 控制器模型）。数据层与可选渲染器接线在这里钉住；
+        // 红跑时生产类还不存在，测试全走反射与 class 文件扫描。
+        GeoModelCheck.geoModels();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");

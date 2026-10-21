@@ -94,7 +94,10 @@ public final class MachineSchema {
             // 理由不是对称好看，而是「认识」这件事只能有一个答案——作者读到的警告要么是「我懂但不做」，
             // 要么是「我不认识，你大概拼错了」，两者不能同时成立。
             // 复现器的 RootFieldListCheck 用反射钉住这条恒等式（不为断言放宽 private：内部结构不该变成接口）。
-            "prefix", "hide-components-when-formed", "controller-bounding-box");
+            "prefix", "hide-components-when-formed", "controller-bounding-box",
+            // 0.70.0（C7）：`geo-model`。旧版没有这个根字段——它走 CraftTweaker 注册表，
+            // 本版没有脚本面，所以把同一组资源放进定义里（解析见 GeoModelSpec）。
+            "geo-model");
     /**
      * Root fields the loader evaluates but the script API cannot yet write — <b>empty as of 0.31.0</b>, and kept
      * as an empty list on purpose.
@@ -295,7 +298,8 @@ public final class MachineSchema {
         return new MachineDefinition(id, localizedName, builder.build(), failureAction, requiresBlueprint,
                 maxParallelism, internalParallelism, parallelizable, modifiers,
                 maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces, dynamicPatterns)
-                .withColor(MachineRootFields.color(root, String.valueOf(where)));
+                .withColor(MachineRootFields.color(root, String.valueOf(where)))
+                .withGeoModel(MachineRootFields.geoModel(root, String.valueOf(where)));
     }
 
     // 0.31.0 removed rejectDeferred(JsonObject, Object, boolean) and its call above read()'s body. It existed to

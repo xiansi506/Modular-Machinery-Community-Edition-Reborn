@@ -42,4 +42,18 @@ public final class MachineRootFields {
         }
         return MachineDefinition.parseColor(root, where);
     }
+
+    /**
+     * 定义里的 {@code geo-model}：GeckoLib 自定义控制器模型的五个资源。
+     *
+     * <p>没有这个字段时返回 {@code null}（这台机器用普通方块模型），与旧版
+     * {@code DynamicMachineModelRegistry.getMachineDefaultModel(...) == null} 的「没有自定义模型」是同一状态。
+     * 解析规则与命名空间改写都写在 {@link GeoModelSpec#parse} 上。
+     *
+     * @throws com.google.gson.JsonParseException 字段存在但内容不合法
+     */
+    @javax.annotation.Nullable
+    public static GeoModelSpec geoModel(JsonObject root, String where) {
+        return GeoModelSpec.parse(root, where);
+    }
 }
