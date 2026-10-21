@@ -79,6 +79,16 @@ public final class MachineRecipeJS extends RecipeJS {
         return this;
     }
 
+    public MachineRecipeJS cancelIfPerTickFails(boolean cancel) {
+        this.builder.cancelIfPerTickFails(cancel);
+        return this;
+    }
+
+    /** Shorthand for {@code cancelIfPerTickFails(true)}. */
+    public MachineRecipeJS cancelIfPerTickFails() {
+        return cancelIfPerTickFails(true);
+    }
+
     public MachineRecipeJS registryName(String name) {
         this.builder.registryName(name);
         return this;

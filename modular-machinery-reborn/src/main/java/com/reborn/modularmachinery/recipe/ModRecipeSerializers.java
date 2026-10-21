@@ -74,7 +74,7 @@ public final class ModRecipeSerializers {
                 requirements.add(MachineRequirementParser.parse(element.getAsJsonObject(), id));
             }
             return new MachineRecipe(id, machine, registryName, recipeTime, requirements,
-                    parseMaxParallelism(json, id));
+                    parseMaxParallelism(json, id), MachineRecipe.parseCancelIfPerTickFails(json, id));
         }
 
         /**
@@ -110,12 +110,14 @@ public final class ModRecipeSerializers {
             String registryName = buf.readUtf();
             int recipeTime = buf.readVarInt();
             int maxParallelism = buf.readVarInt();
+            boolean cancelIfPerTickFails = buf.readBoolean();
             int count = buf.readVarInt();
             List<MachineRequirement> requirements = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
                 requirements.add(MachineRequirementParser.read(buf));
             }
-            return new MachineRecipe(id, machine, registryName, recipeTime, requirements, maxParallelism);
+            return new MachineRecipe(id, machine, registryName, recipeTime, requirements, maxParallelism,
+                    cancelIfPerTickFails);
         }
 
         @Override
@@ -124,6 +126,7 @@ public final class ModRecipeSerializers {
             buf.writeUtf(recipe.registryName());
             buf.writeVarInt(recipe.recipeTime());
             buf.writeVarInt(recipe.maxParallelism());
+            buf.writeBoolean(recipe.cancelIfPerTickFails());
             buf.writeVarInt(recipe.requirements().size());
             for (MachineRequirement requirement : recipe.requirements()) {
                 MachineRequirementParser.write(buf, requirement);

@@ -396,16 +396,23 @@ public final class FactoryEngine {
             return;
         }
         if (!craft.recipe().canTick(ports, modifiers)) {
-            // A per-tick requirement cannot be served: the thread stops advancing but keeps its inputs, which
-            // is the original's `isNotWorking` -> wait-for-finish reading. The original could additionally
-            // *destruct* the recipe through FactoryRecipeFailureEvent; that event only existed for the
-            // CraftTweaker bridge, so nothing here can cancel a craft mid-flight. Recorded as a deviation.
-            //
-            // What it does do here is apply the machine's failure-action — the original's failed ioTick
+            // A per-tick requirement cannot be served. The original's FactoryRecipeFailureEvent carried
+            // `recipe.doesCancelRecipeOnPerTickFailure()` as its destructRecipe default, and
+            // TileFactoryController.java:286-299 cleared the thread when it was true — inputs paid at start
+            // were not refunded. This port has no failure-event layer yet (C2), so the recipe field is read
+            // directly. Clearing the thread returns the slot to idle; the next engine tick may start a fresh
+            // craft, which is the same consequence the original's destruct path had.
+            if (craft.recipe().cancelIfPerTickFails()) {
+                thread.clear();
+                this.dirty = true;
+                this.host.onThreadIdle(thread);
+                return;
+            }
+            // Otherwise apply the machine's failure-action — the original's failed ioTick
             // (RecipeCraftingContext:238-298) is exactly where ActiveMachineRecipe#doFailureAction:106-115
-            // ran, and a factory thread ticks the same object. The thread keeps the craft in all three cases
-            // (it is armed by its slot, not by its progress), so even `reset` costs time and never a second
-            // set of one-shot inputs — the original's behaviour.
+            // ran, and a factory thread ticks the same object. The thread keeps the craft (it is armed by its
+            // slot, not by its progress), so even `reset` costs time and never a second set of one-shot
+            // inputs — the original's behaviour.
             int kept = this.host.failureAction().afterFailedTick(craft.progress());
             if (kept != craft.progress()) {
                 craft.setProgress(kept);

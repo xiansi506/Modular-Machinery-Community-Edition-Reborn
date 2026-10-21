@@ -9,6 +9,7 @@ import com.reborn.modularmachinery.recipe.FluidRequirement;
 import com.reborn.modularmachinery.recipe.ItemRequirement;
 import com.reborn.modularmachinery.recipe.MachineRequirement;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
+import com.reborn.modularmachinery.recipe.MachineRecipeJsonBuilder;
 import com.reborn.modularmachinery.recipe.RecipeModifier;
 import com.reborn.modularmachinery.recipe.RecipeModifiers;
 import net.minecraft.SharedConstants;
@@ -365,6 +366,9 @@ public final class ParallelCraftCheck {
         // 0.74.0：B6——输入侧 chance。旧版是「按概率消耗」，未命中不扣料但配方仍跑；
         // 此前解析/网络/求值三层都把输入 chance 丢了。
         InputChanceCheck.inputChances();
+        // 0.75.0：B7——旧版配方级 cancelIfPerTickFails。canTick 失败时取消整条合成、吞掉已付材料，
+        // 而不是按 failure-action 只改进度。单机与工厂两条路径都要到；红跑时方法还不存在，全走反射。
+        cancelIfPerTickFailsSection();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -6286,9 +6290,14 @@ public final class ParallelCraftCheck {
         // behaves" and "the method is reached" are asserted separately, out of the built classes' own bytes.
         int controllerCalls = countInvocations(
                 "com/reborn/modularmachinery/block/MachineControllerBlockEntity", "tick",
-                "MachineControllerBlockEntity", "applyFailureAction", "()V");
+                "MachineControllerBlockEntity", "applyFailureAction", "()V")
+                + countInvocations(
+                "com/reborn/modularmachinery/block/MachineControllerBlockEntity", "tick",
+                "MachineControllerBlockEntity", "applyFailureAction",
+                "(Lcom/reborn/modularmachinery/recipe/MachineRecipe;)V");
         report("MachineControllerBlockEntity.tick reaches the failure-action at all (" + controllerCalls
-                        + " call(s) to applyFailureAction) -- the 0.24.5 lesson: a correct method nothing calls",
+                        + " call(s) to applyFailureAction, either overload) -- the 0.24.5 lesson: a correct "
+                        + "method nothing calls",
                 controllerCalls > 0);
         int engineAsks = countInvocations("com/reborn/modularmachinery/factory/FactoryEngine", "tickThread",
                 "FactoryHost", "failureAction", "()Lcom/reborn/modularmachinery/machine/FailureAction;");
@@ -6366,6 +6375,234 @@ public final class ParallelCraftCheck {
                             + ") -- the finish hold is not a failed tick, in the original either",
                     rig.activeProgress() == 9 && rig.workingThreads() == 1);
         }
+    }
+
+    // =================================================================== 0.75.0: cancelIfPerTickFails
+
+    /**
+     * B7 — the original's recipe-level {@code cancelIfPerTickFails} ({@code MachineRecipe.java:381-388}).
+     *
+     * <p>The original consumed it in two places: a single craft's failed per-tick check
+     * ({@code TileMachineController.java:211-217} → {@code :282-294}, through
+     * {@code RecipeFailureEvent#isDestructRecipe()}) and a factory thread's equivalent
+     * ({@code TileFactoryController.java:286-299}). A true value meant: drop the whole active craft, keeping
+     * the inputs already paid at start, instead of applying the machine's {@code failure-action} and waiting.
+     *
+     * <p>This project has no failure-event layer (C2 is still unported), so the field is consumed directly. The
+     * section proves three separate things, in the order they can break:
+     *
+     * <ol>
+     *   <li><b>Reading</b>: the strict boolean parser, including the original's rejection sentence, and the
+     *       typed builder writing the same key;</li>
+     *   <li><b>Reaching</b>: the controller's tick calls the recipe-aware failure method, and the factory's
+     *       tickThread asks the recipe and then clears the thread and reports it idle — bytecode, because a
+     *       method nothing calls is the 0.24.5 failure mode;</li>
+     *   <li><b>Behaving</b>: a cancelled single craft loses progress and every frozen modifier; a cancelled
+     *       factory craft leaves its thread idle, with the one-shot input consumed and no output produced.</li>
+     * </ol>
+     *
+     * <p><b>What this cannot see.</b> The recipe serializer's nested class sits behind the outer
+     * {@code DeferredRegister}, which cannot initialise offline; the JSON reader is therefore reached through
+     * the helper it delegates to, and the network write/read of the header is not driven here. No in-game run
+     * exists for this field yet.
+     */
+    private static void cancelIfPerTickFailsSection() {
+        section("B7. cancelIfPerTickFails: a failed tick ends the craft instead of holding it");
+
+        ResourceLocation recipeId = new ResourceLocation("mmverify", "cancel_if_tick_fails");
+        Method parser = null;
+        try {
+            parser = MachineRecipe.class.getMethod("parseCancelIfPerTickFails", JsonObject.class,
+                    ResourceLocation.class);
+        } catch (ReflectiveOperationException exception) {
+            report("MachineRecipe parses the recipe-level cancelIfPerTickFails field (" + exception + ")", false);
+        }
+        if (parser != null) {
+            report("...absent means false (the original's default)",
+                    !invokeCancelParser(parser, "{}", recipeId));
+            report("...true stays true",
+                    invokeCancelParser(parser, "{\"cancelIfPerTickFails\":true}", recipeId));
+            report("...false stays false",
+                    !invokeCancelParser(parser, "{\"cancelIfPerTickFails\":false}", recipeId));
+            for (String bad : new String[] {
+                    "{\"cancelIfPerTickFails\":\"true\"}",
+                    "{\"cancelIfPerTickFails\":1}",
+                    "{\"cancelIfPerTickFails\":null}",
+                    "{\"cancelIfPerTickFails\":[]}",
+                    "{\"cancelIfPerTickFails\":{}}"}) {
+                try {
+                    Object accepted = parser.invoke(null, JsonParser.parseString(bad).getAsJsonObject(), recipeId);
+                    report("rejected " + bad + " (got " + accepted + ")", false);
+                } catch (java.lang.reflect.InvocationTargetException exception) {
+                    String message = String.valueOf(exception.getCause());
+                    report("rejected " + bad + " with the original's sentence",
+                            message.contains("'cancelIfPerTickFails' has to be a boolean! (if specified)"));
+                } catch (ReflectiveOperationException exception) {
+                    report("rejected " + bad + " — could not call the parser: " + exception, false);
+                }
+            }
+        }
+
+        MachineRecipeJsonBuilder builder = new MachineRecipeJsonBuilder();
+        report("the typed builder omits the field by default",
+                !builder.build("alloy_furnace").has("cancelIfPerTickFails"));
+        try {
+            Method setter = MachineRecipeJsonBuilder.class.getMethod("cancelIfPerTickFails", boolean.class);
+            Object returned = setter.invoke(builder, true);
+            JsonObject built = builder.build("alloy_furnace");
+            report("the typed builder writes cancelIfPerTickFails:true and stays fluent",
+                    returned == builder && built.has("cancelIfPerTickFails")
+                            && built.get("cancelIfPerTickFails").getAsBoolean());
+        } catch (ReflectiveOperationException exception) {
+            report("the typed builder has cancelIfPerTickFails(boolean) (" + exception + ")", false);
+        }
+
+        // ---- the wiring, out of the built bytes -------------------------------------------------------
+        int controllerCalls = countInvocations(
+                "com/reborn/modularmachinery/block/MachineControllerBlockEntity", "tick",
+                "MachineControllerBlockEntity", "applyFailureAction",
+                "(Lcom/reborn/modularmachinery/recipe/MachineRecipe;)V");
+        report("MachineControllerBlockEntity.tick tells the failure handler which recipe failed ("
+                + controllerCalls + " call(s))", controllerCalls > 0);
+        int engineAsks = countInvocations("com/reborn/modularmachinery/factory/FactoryEngine", "tickThread",
+                "MachineRecipe", "cancelIfPerTickFails", "()Z");
+        report("FactoryEngine.tickThread asks the recipe whether a failed tick cancels it ("
+                + engineAsks + " call(s))", engineAsks > 0);
+        int engineClears = countInvocations("com/reborn/modularmachinery/factory/FactoryEngine", "tickThread",
+                "FactoryThread", "clear", "()V");
+        report("...and clears the thread when it does (" + engineClears + " call(s))", engineClears > 0);
+        int engineIdles = countInvocations("com/reborn/modularmachinery/factory/FactoryEngine", "tickThread",
+                "FactoryHost", "onThreadIdle",
+                "(Lcom/reborn/modularmachinery/factory/FactoryThread;)V");
+        report("...and tells the host the slot is idle (" + engineIdles + " call(s))", engineIdles > 0);
+
+        // ---- the controller: cancelled means progress and frozen modifiers all gone --------------------
+        MachineRecipe cancelling = flaggedRecipe(recipeId, true);
+        MachineRecipe holding = flaggedRecipe(recipeId, false);
+        if (cancelling == null || holding == null) {
+            report("a MachineRecipe can carry the cancelIfPerTickFails flag", false);
+            return;
+        }
+        boolean sixDefaultsFalse = false;
+        boolean sevenKeepsTrue = false;
+        try {
+            Method flag = MachineRecipe.class.getMethod("cancelIfPerTickFails");
+            sixDefaultsFalse = !(Boolean) flag.invoke(
+                    new MachineRecipe(recipeId, "t", "t", 10, List.of()));
+            sevenKeepsTrue = (Boolean) flag.invoke(cancelling);
+        } catch (ReflectiveOperationException exception) {
+            report("MachineRecipe exposes the cancelIfPerTickFails flag (" + exception + ")", false);
+        }
+        report("a six-argument MachineRecipe still defaults the flag to false", sixDefaultsFalse);
+        report("a seven-argument MachineRecipe exposes the flag", sevenKeepsTrue);
+
+        try {
+            Class<?> controllerClass = Class.forName(
+                    "com.reborn.modularmachinery.block.MachineControllerBlockEntity");
+            Object cancelled = newClientController(controllerClass);
+            setField(controllerClass, cancelled, "progress", 5);
+            setField(controllerClass, cancelled, "activeRecipeId", recipeId);
+            setField(controllerClass, cancelled, "activeGroupId", 3);
+            setField(controllerClass, cancelled, "activeParallelism", 4);
+            setField(controllerClass, cancelled, "activeCraftModifiers", RecipeModifiers.EMPTY);
+            invokeFailureForRecipe(controllerClass, cancelled, cancelling);
+            report("the controller cancels the craft: progress 0, recipe/group/parallelism/modifiers cleared",
+                    ((Integer) controllerClass.getMethod("progress").invoke(cancelled)) == 0
+                            && getField(controllerClass, cancelled, "activeRecipeId") == null
+                            && getField(controllerClass, cancelled, "activeGroupId") == null
+                            && ((Integer) getField(controllerClass, cancelled, "activeParallelism")) == 1
+                            && getField(controllerClass, cancelled, "activeCraftModifiers") == null);
+
+            Object held = newClientController(controllerClass);
+            setField(controllerClass, held, "progress", 5);
+            setField(controllerClass, held, "activeRecipeId", recipeId);
+            setField(controllerClass, held, "activeGroupId", 3);
+            invokeFailureForRecipe(controllerClass, held, holding);
+            report("a recipe without the flag still holds its craft (default still keeps progress 5 and the "
+                            + "active recipe)",
+                    ((Integer) controllerClass.getMethod("progress").invoke(held)) == 5
+                            && recipeId.equals(getField(controllerClass, held, "activeRecipeId")));
+        } catch (Throwable throwable) {
+            report("the controller's recipe-aware failure path could not be driven: " + throwable, false);
+        }
+
+        // ---- the factory: the same failure leaves the thread idle and the input paid -------------------
+        try {
+            FactoryRig cancelRig = new FactoryRig(List.of(cancelling), 2, 2, List.of())
+                    .parallelCeiling(1).reset();
+            cancelRig.tick(3);
+            int before = cancelRig.activeProgress();
+            cancelRig.starveEnergy();
+            cancelRig.tick(1);
+            report("a factory craft at progress " + before + " with cancelIfPerTickFails ends after one failed "
+                            + "tick: no thread, no progress, one cobblestone consumed, no stone",
+                    before == 3 && cancelRig.workingThreads() == 0 && cancelRig.activeProgress() == -1
+                            && 2 - cancelRig.cobblestoneLeft() == 1
+                            && cancelRig.outputCount(Items.STONE) == 0);
+
+            FactoryRig holdRig = new FactoryRig(List.of(holding), 2, 2, List.of())
+                    .parallelCeiling(1).reset();
+            holdRig.tick(3);
+            holdRig.starveEnergy();
+            holdRig.tick(1);
+            report("the same failed tick without the flag keeps the thread and progress, then finishes when "
+                            + "the requirement can be paid again",
+                    holdRig.workingThreads() == 1 && holdRig.activeProgress() == 3
+                            && 2 - holdRig.cobblestoneLeft() == 1);
+            holdRig.restoreEnergy().tick(12);
+            check("...and produces its stone once", 1, holdRig.outputCount(Items.STONE));
+        } catch (Throwable throwable) {
+            report("the factory's cancel path could not be driven: " + throwable, false);
+        }
+    }
+
+    /** Calls the recipe-level parser by name, so the red run fails on the assertion rather than javac. */
+    private static boolean invokeCancelParser(Method parser, String json, ResourceLocation recipeId) {
+        try {
+            return (Boolean) parser.invoke(null, JsonParser.parseString(json).getAsJsonObject(), recipeId);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("cannot call MachineRecipe.parseCancelIfPerTickFails", exception);
+        }
+    }
+
+    /**
+     * A recipe whose flag is set, through the seven-argument constructor by name. A compile-time call would make
+     * the pre-fix run fail to compile, which is not evidence.
+     */
+    private static MachineRecipe flaggedRecipe(ResourceLocation id, boolean cancel) {
+        try {
+            java.lang.reflect.Constructor<MachineRecipe> constructor = MachineRecipe.class.getConstructor(
+                    ResourceLocation.class, String.class, String.class, int.class, List.class, int.class,
+                    boolean.class);
+            return constructor.newInstance(id, "example_factory", id.getPath(), 10, List.of(
+                    ItemRequirement.input(ingredient(Items.COBBLESTONE), 1),
+                    ItemRequirement.output(new ItemStack(Items.STONE), 1, 1, 1.0F),
+                    new EnergyRequirement(IOType.INPUT, 100L)), 0, cancel);
+        } catch (ReflectiveOperationException exception) {
+            return null;
+        }
+    }
+
+    /** Invokes {@code applyFailureAction(MachineRecipe)}; missing on the pre-fix build by design. */
+    private static void invokeFailureForRecipe(Class<?> controllerClass, Object blockEntity,
+            MachineRecipe recipe) throws ReflectiveOperationException {
+        Method method = controllerClass.getDeclaredMethod("applyFailureAction", MachineRecipe.class);
+        method.setAccessible(true);
+        method.invoke(blockEntity, recipe);
+    }
+
+    /** Reads a field the controller declares (walking up, like {@link #setField}). */
+    private static Object getField(Class<?> type, Object target, String name) throws ReflectiveOperationException {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            try {
+                Field field = current.getDeclaredField(name);
+                field.setAccessible(true);
+                return field.get(target);
+            } catch (NoSuchFieldException ignored) {
+                // keep walking
+            }
+        }
+        throw new NoSuchFieldException(name);
     }
 
     /**

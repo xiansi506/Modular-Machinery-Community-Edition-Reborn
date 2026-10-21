@@ -32,6 +32,7 @@ public final class MachineRecipeJsonBuilder {
     private final JsonArray requirements = new JsonArray();
     private int recipeTime = DEFAULT_RECIPE_TIME;
     private int maxParallelism;
+    private boolean cancelIfPerTickFails;
     private String registryName;
     private JsonObject lastCatalyst;
 
@@ -49,6 +50,21 @@ public final class MachineRecipeJsonBuilder {
         }
         this.maxParallelism = max;
         return this;
+    }
+
+    /**
+     * The original's {@code cancelIfPerTickFails}: a failed per-tick check drops this craft instead of applying
+     * the machine's failure-action. Only the {@code true} value is written — omitting the field already means
+     * {@code false}.
+     */
+    public MachineRecipeJsonBuilder cancelIfPerTickFails(boolean cancel) {
+        this.cancelIfPerTickFails = cancel;
+        return this;
+    }
+
+    /** Shorthand for {@code cancelIfPerTickFails(true)}. */
+    public MachineRecipeJsonBuilder cancelIfPerTickFails() {
+        return cancelIfPerTickFails(true);
     }
 
     /**
@@ -232,6 +248,9 @@ public final class MachineRecipeJsonBuilder {
         json.addProperty("recipeTime", this.recipeTime);
         if (this.maxParallelism > 0) {
             json.addProperty("max-parallelism", this.maxParallelism);
+        }
+        if (this.cancelIfPerTickFails) {
+            json.addProperty("cancelIfPerTickFails", true);
         }
         json.add("requirements", this.requirements.deepCopy());
         return json;

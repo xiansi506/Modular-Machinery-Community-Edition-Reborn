@@ -721,7 +721,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (!recipe.canTick(scope, effective)) {
             // A per-tick requirement cannot be served right now: the original's failed ioTick
             // (RecipeCraftingContext:238-298) and the one place failure-action acts.
-            be.applyFailureAction();
+            be.applyFailureAction(recipe);
             be.status = ControllerStatus.IDLE;
             be.recordTiming(tickStart, searchNanos);
             return;
@@ -1220,6 +1220,28 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             this.progress = kept;
             this.setChanged();
         }
+    }
+
+    /**
+     * The recipe-aware form of {@link #applyFailureAction()}: a recipe that sets the original's
+     * {@code cancelIfPerTickFails} drops this craft outright on a failed per-tick check.
+     *
+     * <p>The original's {@code onFailure} passed the flag into {@code RecipeFailureEvent} and acted on
+     * {@code isDestructRecipe()} by clearing the active recipe and its context
+     * ({@code TileMachineController.java:207-217,282-294}); the inputs paid at start were not refunded. This port
+     * has no failure-event layer yet (C2), so the flag is consumed directly. {@link #abortCraft()} is the same
+     * state reset the event produced: progress, active recipe, group and frozen modifiers all go.
+     *
+     * <p>No NBT key is added. A cancel can only happen while a craft is in flight, and after a reload the
+     * controller re-resolves the recipe by id; the flag lives on that recipe, so the next failed tick reaches
+     * this method with the same answer.
+     */
+    private void applyFailureAction(@Nullable MachineRecipe recipe) {
+        if (recipe != null && recipe.cancelIfPerTickFails()) {
+            this.abortCraft();
+            return;
+        }
+        this.applyFailureAction();
     }
 
     /**

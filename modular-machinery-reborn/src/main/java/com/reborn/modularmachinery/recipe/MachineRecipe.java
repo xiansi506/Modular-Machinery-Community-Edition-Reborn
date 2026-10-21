@@ -1,5 +1,8 @@
 package com.reborn.modularmachinery.recipe;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.reborn.modularmachinery.ModularMachineryReborn;
 import com.reborn.modularmachinery.machine.HatchCollection;
 import net.minecraft.core.NonNullList;
@@ -80,6 +83,12 @@ public final class MachineRecipe implements Recipe<Container> {
     /** This recipe's own parallelism ceiling, or {@link #MACHINE_LIMIT} to defer to the machine's. */
     private final int maxParallelism;
 
+    /**
+     * The original's {@code cancelIfPerTickFails}: when a per-tick requirement cannot be served, drop this
+     * craft (keeping the inputs already paid at start) instead of applying the machine's failure-action.
+     */
+    private final boolean cancelIfPerTickFails;
+
     private ResourceLocation machineId;
 
     public MachineRecipe(ResourceLocation id, String machine, String registryName, int recipeTime,
@@ -89,12 +98,19 @@ public final class MachineRecipe implements Recipe<Container> {
 
     public MachineRecipe(ResourceLocation id, String machine, String registryName, int recipeTime,
                          List<MachineRequirement> requirements, int maxParallelism) {
+        this(id, machine, registryName, recipeTime, requirements, maxParallelism, false);
+    }
+
+    public MachineRecipe(ResourceLocation id, String machine, String registryName, int recipeTime,
+                         List<MachineRequirement> requirements, int maxParallelism,
+                         boolean cancelIfPerTickFails) {
         this.id = id;
         this.machine = machine;
         this.registryName = registryName;
         this.recipeTime = Math.max(1, recipeTime);
         this.requirements = List.copyOf(requirements);
         this.maxParallelism = Math.max(0, maxParallelism);
+        this.cancelIfPerTickFails = cancelIfPerTickFails;
     }
 
     public String machine() {
@@ -134,6 +150,37 @@ public final class MachineRecipe implements Recipe<Container> {
     /** This recipe's own parallelism ceiling, or {@code 0} when it defers to the machine's. */
     public int maxParallelism() {
         return this.maxParallelism;
+    }
+
+    /**
+     * Whether a failed per-tick check cancels the whole craft rather than applying the failure-action.
+     *
+     * <p>This is the original's {@code MachineRecipe#doesCancelRecipeOnPerTickFailure} (1.12.2
+     * {@code MachineRecipe.java:227-229}), read from {@code RecipeFailureEvent#isDestructRecipe}. The original
+     * allowed that event to overwrite the value; this port has no failure-event layer yet, so the field is
+     * consumed directly (registered as a deviation in {@code 迁移日志}).
+     */
+    public boolean cancelIfPerTickFails() {
+        return this.cancelIfPerTickFails;
+    }
+
+    /**
+     * Reads the optional {@code cancelIfPerTickFails} field, with the original's strict boolean rule.
+     *
+     * <p>It lives here rather than in the serializer's nested class so the offline verifier can exercise it:
+     * {@code ModRecipeSerializers} holds a {@code DeferredRegister} and cannot initialise outside the game. The
+     * original accepted only a JSON boolean and rejected everything else at parse time
+     * ({@code MachineRecipe.java:381-388}); like the other recipe fields, omitting it means {@code false}.
+     */
+    public static boolean parseCancelIfPerTickFails(JsonObject json, ResourceLocation id) {
+        if (!json.has("cancelIfPerTickFails")) {
+            return false;
+        }
+        JsonElement element = json.get("cancelIfPerTickFails");
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isBoolean()) {
+            throw new JsonParseException("'cancelIfPerTickFails' has to be a boolean! (if specified) in " + id);
+        }
+        return element.getAsBoolean();
     }
 
     public List<MachineRequirement> requirements(IOType ioType) {
