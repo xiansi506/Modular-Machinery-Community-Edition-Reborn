@@ -2,6 +2,7 @@ package com.reborn.modularmachinery.config;
 
 import com.reborn.modularmachinery.block.ParallelControllerTier;
 import com.reborn.modularmachinery.block.UpgradeBusTier;
+import com.reborn.modularmachinery.machine.StructureCheckScheduler;
 import net.minecraftforge.common.ForgeConfigSpec;
 
 import java.util.Arrays;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The mod's <b>single</b> Forge config, published as {@code config/modular_machinery_reborn-common.toml}.
@@ -113,6 +115,9 @@ public final class ModConfig {
     private static final String GENERAL_ROOT = "general";
     private static final String MOC_COMPATIBLE = "modular-controller-compatible-mode";
     private static final String MOC_DEPRECATED_TIP = "disable-moc-deprecated-tip";
+    private static final String STRUCTURE_CHECK_DELAY = "structure-check-delay";
+    private static final String DELAYED_STRUCTURE_CHECK = "delayed-structure-check";
+    private static final String MAX_STRUCTURE_CHECK_DELAY = "max-structure-check-delay";
     /** The original's own category and key spelling: {@code display.energy.Display_Energy_Type}. */
     private static final String DISPLAY_ENERGY_ROOT = "display.energy";
     private static final String DISPLAY_ENERGY_KEY = "Display_Energy_Type";
@@ -163,6 +168,18 @@ public final class ModConfig {
      * {@code general.disable-moc-deprecated-tip}. Same reasoning as {@link #FACTORY_MAX_THREADS}.
      */
     private static ForgeConfigSpec.BooleanValue DISABLE_MOC_DEPRECATED_TIP;
+    /** general.structure-check-delay. Assigned in build(), hence not final. */
+    private static ForgeConfigSpec.IntValue STRUCTURE_CHECK_DELAY_VALUE;
+    /** general.delayed-structure-check. Assigned in build(). */
+    private static ForgeConfigSpec.BooleanValue DELAYED_STRUCTURE_CHECK_VALUE;
+    /** general.max-structure-check-delay. Assigned in build(). */
+    private static ForgeConfigSpec.IntValue MAX_STRUCTURE_CHECK_DELAY_VALUE;
+    /**
+     * The original warned when structure-check-delay >= max-structure-check-delay and then reset both values
+     * (TileMultiblockMachineController.java:184-188). The normalized scheduler applies the same reset; this
+     * flag keeps the log line to one occurrence rather than one per controller tick.
+     */
+    private static final AtomicBoolean WARNED_ABOUT_STRUCTURE_CHECK = new AtomicBoolean(false);
 
     static {
         SPEC = build();
@@ -243,6 +260,33 @@ public final class ModConfig {
         builder.comment("Disable the ModularController is deprecated tooltip (the original's",
                 "`disable-moc-deprecated-tip`). Live: a tooltip is built long after the config has been read.");
         DISABLE_MOC_DEPRECATED_TIP = builder.define(List.of(GENERAL_ROOT, MOC_DEPRECATED_TIP), false);
+
+        // ---- general.*: the original's structure-check schedule (A10) ---------------------------------
+        // The original read these three in loadFromConfig (TileMultiblockMachineController.java:171-189), in
+        // the "general" category, with exactly these names. The defaults and bounds are the original's own:
+        // 30 (1..1200), true, and 100 (2..1200). The numbers were hard-wired to STRUCTURE_CHECK_INTERVAL = 10
+        // in 0.66.0 and earlier; this is the config surface the survey (A10) named as missing.
+        //
+        // The interaction rule is also the original's: structure-check-delay must be smaller than
+        // max-structure-check-delay, or both are reset to 30/100 and the reset is logged once. The scheduler
+        // applies the same rule so a value pasted from a 1.12.2 config cannot stall every check.
+        builder.comment("Ticks between structure checks once a controller has formed (the original's",
+                "structure-check-delay). Default 30, range 1..1200. Must be smaller than",
+                "max-structure-check-delay; otherwise both fall back to 30/100.");
+        STRUCTURE_CHECK_DELAY_VALUE = builder.defineInRange(
+                List.of(GENERAL_ROOT, STRUCTURE_CHECK_DELAY),
+                StructureCheckScheduler.DEFAULT_DELAY, 1, 1200);
+        builder.comment("Keep the original's adaptive delay (the original's delayed-structure-check).",
+                "When false, a controller checks every structure-check-delay ticks exactly, with no",
+                "area-change shortcut and no backoff. Default true.");
+        DELAYED_STRUCTURE_CHECK_VALUE = builder.define(
+                List.of(GENERAL_ROOT, DELAYED_STRUCTURE_CHECK),
+                StructureCheckScheduler.DEFAULT_DELAYED);
+        builder.comment("Ceiling for the adaptive delay (the original's max-structure-check-delay).",
+                "Default 100, range 2..1200. Must be greater than structure-check-delay.");
+        MAX_STRUCTURE_CHECK_DELAY_VALUE = builder.defineInRange(
+                List.of(GENERAL_ROOT, MAX_STRUCTURE_CHECK_DELAY),
+                StructureCheckScheduler.DEFAULT_MAX_DELAY, 2, 1200);
 
         // ---- Section 6 of 6: display.energy.Display_Energy_Type ---------------------------------------
         // The original's key, in the original's own category and with the original's own spelling and casing
@@ -434,6 +478,68 @@ public final class ModConfig {
             return false;
         }
         return DISABLE_MOC_DEPRECATED_TIP.get();
+    }
+
+    /**
+     * {@code general.structure-check-delay} — the original's base structure-check delay
+     * ({@code TileMultiblockMachineController.java:122}, read at {@code :171-179}). Default 30, range 1..1200.
+     *
+     * <p>Falls back to the original's config default while the file has not been read yet, so a controller built
+     * before {@code CONFIG_LOAD} still checks on a sane cadence.
+     */
+    public static int structureCheckDelay() {
+        if (STRUCTURE_CHECK_DELAY_VALUE == null || !SPEC.isLoaded()) {
+            return StructureCheckScheduler.DEFAULT_DELAY;
+        }
+        return STRUCTURE_CHECK_DELAY_VALUE.get();
+    }
+
+    /**
+     * {@code general.delayed-structure-check} — whether the original's adaptive schedule is used
+     * ({@code TileMultiblockMachineController.java:123}, read at {@code :176}). Default true.
+     *
+     * <p>When false the original checked every {@code structure-check-delay} ticks exactly and never consulted
+     * {@code MMWorldEventListener}; the same is true here, because {@link StructureCheckScheduler#shouldCheck}
+     * returns before reading its {@code areaChanged} argument.
+     */
+    public static boolean delayedStructureCheck() {
+        if (DELAYED_STRUCTURE_CHECK_VALUE == null || !SPEC.isLoaded()) {
+            return StructureCheckScheduler.DEFAULT_DELAYED;
+        }
+        return DELAYED_STRUCTURE_CHECK_VALUE.get();
+    }
+
+    /**
+     * {@code general.max-structure-check-delay} — the ceiling on the adaptive interval
+     * ({@code TileMultiblockMachineController.java:123}, read at {@code :180}). Default 100, range 2..1200.
+     */
+    public static int maxStructureCheckDelay() {
+        if (MAX_STRUCTURE_CHECK_DELAY_VALUE == null || !SPEC.isLoaded()) {
+            return StructureCheckScheduler.DEFAULT_MAX_DELAY;
+        }
+        return MAX_STRUCTURE_CHECK_DELAY_VALUE.get();
+    }
+
+    /**
+     * The three structure-check keys as one normalized schedule.
+     *
+     * <p>This is the method the controller calls. It exists separately from the three accessors so the original's
+     * "delay must be smaller than max" rule is applied in exactly one place: the scheduler's record constructor
+     * resets both numbers to 30/100, and this method logs the original's warning once when that reset happens
+     * ({@code TileMultiblockMachineController.java:184-188}). Before the config file is read, the three accessors
+     * return 30/true/100, so no warning is produced for a controller that checks during startup.
+     */
+    public static StructureCheckScheduler.Settings structureCheckSettings() {
+        int delay = structureCheckDelay();
+        boolean delayed = delayedStructureCheck();
+        int maxDelay = maxStructureCheckDelay();
+        if (delay >= maxDelay && WARNED_ABOUT_STRUCTURE_CHECK.compareAndSet(false, true)) {
+            com.reborn.modularmachinery.ModularMachineryReborn.LOGGER.warn(
+                    "[{}] structure-check-delay ({}) is bigger than or equal max-structure-check-delay ({});"
+                            + " using the original's fallback 30/100.",
+                    com.reborn.modularmachinery.ModularMachineryReborn.MOD_ID, delay, maxDelay);
+        }
+        return StructureCheckScheduler.of(delay, delayed, maxDelay);
     }
 
     private ModConfig() {

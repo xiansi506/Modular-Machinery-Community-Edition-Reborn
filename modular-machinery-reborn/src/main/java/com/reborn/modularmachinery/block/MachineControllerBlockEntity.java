@@ -1,5 +1,6 @@
 package com.reborn.modularmachinery.block;
 
+import com.reborn.modularmachinery.config.ModConfig;
 import com.reborn.modularmachinery.factory.FactoryEngine;
 import com.reborn.modularmachinery.factory.FactoryHost;
 import com.reborn.modularmachinery.factory.FactoryThread;
@@ -20,6 +21,8 @@ import com.reborn.modularmachinery.machine.SmartInterfaceStore;
 import com.reborn.modularmachinery.machine.SmartInterfaceType;
 import com.reborn.modularmachinery.machine.SmartInterfaceValueSource;
 import com.reborn.modularmachinery.machine.SmartInterfaceValues;
+import com.reborn.modularmachinery.machine.StructureChangeTracker;
+import com.reborn.modularmachinery.machine.StructureCheckScheduler;
 import com.reborn.modularmachinery.menu.FactoryControllerMenu;
 import com.reborn.modularmachinery.menu.MachineControllerMenu;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
@@ -135,9 +138,6 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** The original controller had exactly one slot, at {@code TileMultiblockMachineController.BLUEPRINT_SLOT}. */
     public static final int BLUEPRINT_SLOT = 0;
 
-    /** Structure checks are retried on this interval instead of every tick. */
-    private static final int STRUCTURE_CHECK_INTERVAL = 10;
-
     private final ItemStackHandler items = newBlueprintHandler(this::setChanged);
 
     /**
@@ -178,7 +178,29 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     private boolean formed;
     private boolean redstoneStopped;
     private ControllerStatus status = ControllerStatus.MISSING_STRUCTURE;
-    private int structureCheckCountdown;
+
+    /**
+     * The original's scheduling state ({@code TileMultiblockMachineController.java:122-123}, {@code :351-370}).
+     *
+     * <p>{@code ticksExisted} is the controller's age, which the original inherited from {@code TileEntity}
+     * and this projection has to count itself. {@code lastStructureCheckTick} starts at {@code -1} so the very
+     * first tick always checks; the original used the same sentinel. The two failure counters are the
+     * original's {@code structureCheckCounter} and {@code recipeResearchRetryCounter}.
+     */
+    private long ticksExisted;
+    private int lastStructureCheckTick = -1;
+    private int structureCheckFailures;
+    private int recipeResearchRetryCounter;
+
+    /**
+     * The last formed structure's bounds, relative to the controller. They are the arguments the original
+     * passed to {@code MMWorldEventListener.isAreaChanged(world, pos.add(min), pos.add(max))}. Cleared when no
+     * structure matches so a stale box cannot keep a broken machine's area flag alive.
+     */
+    @Nullable
+    private BlockPos structureMinOffset;
+    @Nullable
+    private BlockPos structureMaxOffset;
 
     /** Registry name of the machine currently formed here, or {@code null} when nothing matches. */
     @Nullable
@@ -416,8 +438,20 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // powered. getDirectSignalTo is the 1.20.1 counterpart of 1.12.2's World#getStrongPower.
         be.redstoneStopped = level.getDirectSignalTo(pos) > 0;
 
-        if (be.structureCheckCountdown-- <= 0) {
-            be.structureCheckCountdown = STRUCTURE_CHECK_INTERVAL;
+        // A10: the original's canCheckStructure() (TileMultiblockMachineController.java:351-370). The area test
+        // uses the bounds of the last successful match, exactly as the original used foundPattern.min/max; a
+        // machine that is not formed has no bounds and therefore cannot take the shortcut.
+        be.ticksExisted++;
+        StructureCheckScheduler.Settings structureSchedule = ModConfig.structureCheckSettings();
+        boolean structureAreaChanged = be.formed
+                && be.structureMinOffset != null
+                && be.structureMaxOffset != null
+                && StructureChangeTracker.isAreaChanged(level.dimension(),
+                        pos.offset(be.structureMinOffset), pos.offset(be.structureMaxOffset));
+        int structureFailures = be.formed ? be.recipeResearchRetryCounter : be.structureCheckFailures;
+        if (StructureCheckScheduler.shouldCheck(be.ticksExisted, be.lastStructureCheckTick, be.formed,
+                structureAreaChanged, structureFailures, structureSchedule)) {
+            be.lastStructureCheckTick = (int) Math.min(be.ticksExisted, Integer.MAX_VALUE);
             long searchStart = System.nanoTime();
             Direction facing = state.getValue(MachineControllerBlock.FACING);
             MachineRegistry.Match match = MachineRegistry.findMatch(level, pos, facing,
@@ -432,6 +466,20 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // 波 3b：动态机器要用**有效结构**（基座 + 量出来的各段）来收集端口与控制器，而不是定义里的基座。
             // 没有动态结构的机器，match.pattern() 就是基座本身，所以这段改动对它们没有任何影响。
             MachinePattern effectivePattern = match == null ? null : match.pattern();
+            if (match == null) {
+                // The original incremented structureCheckCounter and cleared the recipe retry counter when a
+                // check failed (TileMultiblockMachineController.java:414 and :409-411, through resetMachine).
+                be.structureCheckFailures++;
+                be.recipeResearchRetryCounter = 0;
+                be.structureMinOffset = null;
+                be.structureMaxOffset = null;
+            } else {
+                be.structureCheckFailures = 0;
+                // match.pattern() is already rotated to the world's facing (MachineRegistry.findMatch builds
+                // it from the rotated variant), so these offsets can be added to the controller pos directly.
+                be.structureMinOffset = effectivePattern.min();
+                be.structureMaxOffset = effectivePattern.max();
+            }
             be.dynamicPatterns = match == null ? List.of() : match.dynamicPatterns();
             be.hatches = be.collectHatches(level, pos, match == null ? null : match.machine(), effectivePattern);
             be.parallelControllers = be.collectParallelControllers(level, pos,
@@ -507,6 +555,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         }
 
         MachineRecipe recipe = be.resolveRecipe(level);
+        if (recipe != null) {
+            // The original's recipeResearchRetryCounter only grew while the asynchronous search returned no
+            // context; a successful search left it alone. This projection's search is synchronous and runs every
+            // tick, so it resets on success instead of leaving a stale ceiling behind. The deviation is recorded
+            // in the A10 section of the migration log.
+            be.recipeResearchRetryCounter = 0;
+        }
         if (recipe == null) {
             // 「没有配方」与「有配方但付不起」是**两件完全不同的事**，而这个分支曾经把后者也吞成前者：
             // `findRecipe` 只返回能开工的配方，于是「配方在、只是料不够或料放错了段」也会走到这里，
@@ -518,6 +573,17 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             //
             // 现在：如果这台机器**确实**有配方、只是此刻付不起，就把那条配方给出的原因显示出来。
             String blockedReason = be.unaffordableStartFailure(level);
+            if (blockedReason == null) {
+                // The old asynchronous recipe search retried on currentRecipeSearchDelay() ticks and incremented
+                // its failure counter only when a search found nothing. Mirror that cadence instead of counting
+                // every tick: a per-tick counter would reach the 100-tick ceiling in two seconds.
+                int recipeDelay = StructureCheckScheduler.recipeSearchDelay(be.recipeResearchRetryCounter);
+                if (be.ticksExisted % recipeDelay == 0) {
+                    be.recipeResearchRetryCounter = Math.min(be.recipeResearchRetryCounter + 1, 1000);
+                }
+            } else {
+                be.recipeResearchRetryCounter = 0;
+            }
             be.status = blockedReason == null ? ControllerStatus.NO_RECIPE : ControllerStatus.IDLE;
             // **必须走 recordStartFailureKey，不能直接写字段。** 那个方法除了赋值还负责
             // `clientStartFailure` 的镜像与 `sendBlockUpdated`——失败文案是同步到客户端才显示得出来的。

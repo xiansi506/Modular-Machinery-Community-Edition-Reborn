@@ -342,6 +342,9 @@ public final class ParallelCraftCheck {
         // 0.66.0：B10——外部模组把自己的 CompatModule 交给主模组。此前模块清单硬编码，
         // 外部需求类型只能绕开框架直接注册，requiresModid 兜底、端口与能力钩子都跑不到。
         ExternalModuleCheck.externalModuleRegistration();
+        // 0.67.0：A10——固定 10 tick 的结构检查改成旧版三键可配的调度；调度公式与变更区域
+        // 跟踪都先在这里钉住（红跑时生产类还不存在，测试走反射）。
+        StructureCheckScheduleCheck.structureCheckSchedule();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -857,8 +860,9 @@ public final class ParallelCraftCheck {
         }
         // 13 through 0.26.0; 0.27.0's MOC namespace adds general.modular-controller-compatible-mode and
         // general.disable-moc-deprecated-tip; the display.energy unit key is the sixteenth.
-        // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit).
-        check("the config spec defines this many keys", 40, rendered.size());
+        // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit);
+        // 43 = that plus A10's three structure-check keys (delay, delayed, max-delay).
+        check("the config spec defines this many keys", 43, rendered.size());
 
         String[][] expected = {
                 {"parallel-controller.normal.max-parallelism", "4"},

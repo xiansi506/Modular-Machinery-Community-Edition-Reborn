@@ -91,6 +91,9 @@ public final class ModularMachineryReborn {
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> () -> MinecraftForge.EVENT_BUS.addListener(
                         com.reborn.modularmachinery.client.ClientMachines::onLoggingOut));
+        // A10: the original's MMWorldEventListener, rebuilt on the four Forge block events 1.20.1 has. It only
+        // records positions; the controller decides whether any of them fall inside its formed bounds.
+        com.reborn.modularmachinery.machine.StructureChangeTracker.register();
 
 
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> bus.addListener(com.reborn.modularmachinery.client.ClientSetup::onClientSetup));

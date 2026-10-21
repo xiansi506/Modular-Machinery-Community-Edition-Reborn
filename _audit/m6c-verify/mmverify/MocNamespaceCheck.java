@@ -608,8 +608,9 @@ final class MocNamespaceCheck {
         }
         // 13 before this release, 15 with the two MOC keys, 16 once display.energy.Display_Energy_Type landed
         // (the same fact ParallelCraftCheck's section R asserts from its own angle).
-        // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit).
-        check("the config spec defines this many keys", 40, rendered.size());
+        // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit);
+        // 43 = that plus A10's three structure-check keys (delay, delayed, max-delay).
+        check("the config spec defines this many keys", 43, rendered.size());
 
         String[][] expected = {
                 {"general.modular-controller-compatible-mode", "false"},
