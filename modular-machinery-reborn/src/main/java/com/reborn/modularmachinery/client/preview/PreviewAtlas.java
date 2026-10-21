@@ -31,6 +31,17 @@ public final class PreviewAtlas {
 
     // ----- 13x13 toggles and buttons, rows taken from MachineStructurePreviewPanel -------------------------
 
+    /**
+     * {@code toggleFormed}（旧版 {@code rightTopMenu} 的第一行，:167-176）：切换“成型后”预览。
+     *
+     * <p>这是同一张 {@code guiblueprint_new.png} 上 {@code (184, 0)} 起的一行，四个状态按 15 像素递进；
+     * 旧版确实把它画成 toggle（未成型时点它会隐藏组件），所以这里四态齐全。
+     */
+    public static final Sprite FORMED = new Sprite(184, 0, 13, 13);
+    public static final Sprite FORMED_HOVERED = new Sprite(199, 0, 13, 13);
+    public static final Sprite FORMED_PRESSED = new Sprite(214, 0, 13, 13);
+    public static final Sprite FORMED_ACTIVE = new Sprite(229, 0, 13, 13);
+
     /** {@code machineExtraInfo} (:155-159). The original had no "clicked" art because it was not a toggle. */
     public static final Sprite MACHINE_INFO = new Sprite(184, 214, 13, 13);
     public static final Sprite MACHINE_INFO_HOVERED = new Sprite(199, 214, 13, 13);

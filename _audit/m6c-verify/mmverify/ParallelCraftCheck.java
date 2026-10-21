@@ -354,6 +354,9 @@ public final class ParallelCraftCheck {
         // 0.70.0：C7——机器定义新增 geo-model（GeckoLib 控制器模型）。数据层与可选渲染器接线在这里钉住；
         // 红跑时生产类还不存在，测试全走反射与 class 文件扫描。
         GeoModelCheck.geoModels();
+        // 0.71.0：E5/E4——求值 hide-components-when-formed，并给蓝图预览加成型开关。
+        // 世界隐藏仍依赖外接 hider（Multiblocked/component_model_hider），本版不做。
+        HideComponentsCheck.hideComponentsWhenFormed();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -1483,7 +1486,8 @@ public final class ParallelCraftCheck {
             // (title / tooltip / value / enable / close), 191 plus 5.
             // 198 from 0.65.0: Q6-B's catalyst JEI tooltip adds the original's two
             // tooltip.modular_machinery_reborn.catalyst[.effect] lines, 196 plus 2.
-            check("the language files' key count", 198, zhMap.size());
+            // 200 from 0.71.0: E5 adds the formed/unformed preview toggle tips, 198 plus 2.
+            check("the language files' key count", 200, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to

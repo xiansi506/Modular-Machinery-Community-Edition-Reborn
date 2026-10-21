@@ -95,8 +95,16 @@ public final class PreviewButton {
                                        PreviewAtlas.Sprite hovered, PreviewAtlas.Sprite pressed,
                                        PreviewAtlas.Sprite active, Supplier<List<Component>> tooltip,
                                        Consumer<Boolean> action) {
+        return toggle(name, x, y, size, normal, hovered, pressed, active, tooltip, action, () -> true);
+    }
+
+    /** A toggle that is only drawn and only clickable while {@code visible} says so. */
+    public static PreviewButton toggle(String name, int x, int y, int size, PreviewAtlas.Sprite normal,
+                                       PreviewAtlas.Sprite hovered, PreviewAtlas.Sprite pressed,
+                                       PreviewAtlas.Sprite active, Supplier<List<Component>> tooltip,
+                                       Consumer<Boolean> action, BooleanSupplier visible) {
         return new PreviewButton(name, true, x, y, size, size, normal, hovered, pressed, active, tooltip, action,
-                () -> true);
+                visible);
     }
 
     /**

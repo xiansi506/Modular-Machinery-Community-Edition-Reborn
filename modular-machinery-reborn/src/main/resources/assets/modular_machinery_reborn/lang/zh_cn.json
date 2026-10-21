@@ -107,6 +107,8 @@
   "gui.preview.button.disable_cycle_replaceable_blocks.tip": "点击禁用定时循环替换方块。",
   "gui.preview.button.toggle_layer_render.tip": "点击切换至片式预览模式。",
   "gui.preview.button.toggle_3d_render.tip": "点击切换至 3D 预览模式。",
+  "gui.preview.button.toggle_formed.tip": "点击预览机器成型后的样子（隐藏组件）。",
+  "gui.preview.button.toggle_unformed.tip": "点击回到未成型预览（显示全部组件）。",
   "gui.preview.button.layer_render_scrollbar.tip": "按住并拖动来快速调整想要预览的方块层。",
   "gui.preview.button.layer_render_scrollbar.up.tip": "点击预览结构上一层的方块。",
   "gui.preview.button.layer_render_scrollbar.down.tip": "点击预览结构下一层的方块。",

@@ -743,8 +743,9 @@ final class MocNamespaceCheck {
         // fluidhatch.blocked_by_gas ("空（气体占着这个仓）") were removed -- 193 minus 2.
         // 196 from 0.64.0: A2's group screen adds five gui.…groupinputconfig keys, 191 plus 5.
         // 198 from 0.65.0: Q6-B's catalyst JEI tooltip adds the original's two catalyst lines, 196 plus 2.
-        check("en_us.json key count", 198, en.size());
-        check("zh_cn.json key count", 198, zh.size());
+        // 200 from 0.71.0: E5 adds the formed/unformed preview toggle tips, 198 plus 2.
+        check("en_us.json key count", 200, en.size());
+        check("zh_cn.json key count", 200, zh.size());
         Set<String> enKeys = new TreeSet<>(en.keySet());
         Set<String> zhKeys = new TreeSet<>(zh.keySet());
         report("the two files carry identical key sets (" + enKeys.size() + " keys each)", enKeys.equals(zhKeys));

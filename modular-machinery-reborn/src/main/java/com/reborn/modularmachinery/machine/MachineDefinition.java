@@ -93,6 +93,14 @@ public final class MachineDefinition {
     private final MachinePattern pattern;
     private final FailureAction failureAction;
     private final boolean requiresBlueprint;
+    /**
+     * 结构成型后是否隐藏组件（{@code hide-components-when-formed}）。默认 {@code false}。
+     *
+     * <p>旧版把这个开关放在 {@code DynamicMachine.hideComponentsWhenFormed} 上（默认 false），
+     * 由预览和可选的 {@code BlockModelHider} 读取。本版按 {@link #color} 的做法挂在不可变定义上，
+     * 设置走 {@link #withHideComponentsWhenFormed(boolean)}。
+     */
+    private final boolean hideComponentsWhenFormed;
     private final int maxParallelism;
     private final int internalParallelism;
     private final boolean parallelizable;
@@ -216,7 +224,7 @@ public final class MachineDefinition {
                              List<DynamicPattern> dynamicPatterns) {
         this(id, localizedName, pattern, failureAction, requiresBlueprint, maxParallelism, internalParallelism,
                 parallelizable, modifiers, maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces,
-                dynamicPatterns, DEFAULT_COLOR, null);
+                dynamicPatterns, DEFAULT_COLOR, null, false);
     }
 
     /** 规范构造器：**唯一**给所有字段赋值的那一个，包括 {@code color}。 */
@@ -228,7 +236,7 @@ public final class MachineDefinition {
                               List<FactoryThreadModel.CoreThreadSpec> coreThreads,
                               List<SmartInterfaceType> smartInterfaces,
                               List<DynamicPattern> dynamicPatterns, int color,
-                              @Nullable GeoModelSpec geoModel) {
+                              @Nullable GeoModelSpec geoModel, boolean hideComponentsWhenFormed) {
         this.id = id;
         this.localizedName = localizedName;
         this.pattern = pattern;
@@ -237,6 +245,7 @@ public final class MachineDefinition {
         this.maxParallelism = maxParallelism;
         this.internalParallelism = internalParallelism;
         this.parallelizable = parallelizable;
+        this.hideComponentsWhenFormed = hideComponentsWhenFormed;
         this.modifiers = List.copyOf(modifiers);
         this.maxThreads = Math.max(0, maxThreads);
         this.hasFactory = hasFactory;
@@ -264,7 +273,8 @@ public final class MachineDefinition {
         return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
-                this.smartInterfaces, this.dynamicPatterns, color, this.geoModel);
+                this.smartInterfaces, this.dynamicPatterns, color, this.geoModel,
+                this.hideComponentsWhenFormed);
     }
 
     /**
@@ -283,7 +293,27 @@ public final class MachineDefinition {
         return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
-                this.smartInterfaces, this.dynamicPatterns, this.color, geoModel);
+                this.smartInterfaces, this.dynamicPatterns, this.color, geoModel,
+                this.hideComponentsWhenFormed);
+    }
+
+    /**
+     * 结构成型后是否隐藏组件，对应旧版 {@code hide-components-when-formed}。
+     *
+     * <p>只影响预览与（将来）世界渲染；结构匹配本身不看这个字段。旧版默认 false，
+     * 世界隐藏也只在装了 Multiblocked 或 component_model_hider 时才会发生。
+     */
+    public boolean hideComponentsWhenFormed() {
+        return this.hideComponentsWhenFormed;
+    }
+
+    /** 带指定成型隐藏开关的副本；解析器用它，而不是去改一个已经建好的定义。 */
+    public MachineDefinition withHideComponentsWhenFormed(boolean hideComponentsWhenFormed) {
+        return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
+                this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
+                this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
+                this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
+                hideComponentsWhenFormed);
     }
 
     /** Registry name of the machine, e.g. {@code modular_machinery_reborn:transformer}. */

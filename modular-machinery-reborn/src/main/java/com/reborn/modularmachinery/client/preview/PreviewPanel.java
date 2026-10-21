@@ -58,6 +58,8 @@ public final class PreviewPanel {
     private final PreviewButton machineInfoButton;
     private final PreviewButton layerToggleButton;
     private final PreviewButton cycleButton;
+    /** 右上角的成型预览开关；只有机器声明了 {@code hide-components-when-formed} 才可见。 */
+    private final PreviewButton formedButton;
     /**
      * 「额外信息」面板的行。
      *
@@ -87,6 +89,13 @@ public final class PreviewPanel {
 
     private boolean machineInfoVisible;
     private boolean cycleBlocks;
+    /**
+     * 是否按“已成型”的样子预览：组件全部收起，只画控制器。
+     *
+     * <p>这个开关<strong>不改变结构、不改变材料清单</strong>，只改变 {@link #render} 交给渲染器的方块列表，
+     * 所以它永远只是观察角度，不会让玩家以为机器真的已经搭好。
+     */
+    private boolean formedPreview;
     private boolean layerMode;
     private boolean draggingLayer;
     /** True when the press that started the current drag landed on the viewport rather than on a button. */
@@ -166,6 +175,14 @@ public final class PreviewPanel {
         this.buttons.add(this.cycleButton);
         this.buttons.add(resetButton);
         this.buttons.add(this.layerToggleButton);
+        // 旧版把它放在 rightTopMenu（右上角），而不是底部条；补进底部条会改变既有按钮的右对齐位置。
+        this.formedButton = PreviewButton.toggle("formed-preview",
+                PreviewLayout.FORMED_BUTTON_X, PreviewLayout.FORMED_BUTTON_Y, PreviewLayout.BUTTON_SIZE,
+                PreviewAtlas.FORMED, PreviewAtlas.FORMED_HOVERED, PreviewAtlas.FORMED_PRESSED,
+                PreviewAtlas.FORMED_ACTIVE,
+                () -> List.of(Component.translatable(formedTooltipKey(this.formedPreview))),
+                this::onFormedToggled, () -> showsFormedToggle(this.machine));
+        this.buttons.add(this.formedButton);
 
         // The original's layer selector lived in its rightMenu at (184 - w - 6, 44), and only while slicing.
         this.layerUp = PreviewButton.button("up", PreviewLayout.LAYER_STEPPER_X, PreviewLayout.LAYER_STEPPER_Y,
@@ -231,6 +248,10 @@ public final class PreviewPanel {
         this.cycleBlocks = enabled;
     }
 
+    private void onFormedToggled(boolean enabled) {
+        this.formedPreview = enabled;
+    }
+
     // -------------------------------------------------------------------------------------------------------
     // State used by the hosts
     // -------------------------------------------------------------------------------------------------------
@@ -255,6 +276,43 @@ public final class PreviewPanel {
     /** Whether the replaceable-block art is cycling; the cycle button toggles it. */
     public boolean isCyclingBlocks() {
         return this.cycleBlocks;
+    }
+
+    /** 是否正在按“已成型”的样子预览（组件收起）。 */
+    public boolean isFormedPreview() {
+        return this.formedPreview;
+    }
+
+    /**
+     * 这个机器是否显示成型预览开关。
+     *
+     * <p>判据是机器自己声明了 {@code hide-components-when-formed}：没有这个字段的机器，成型与否在预览里
+     * 没有区别，给它一个永远不改变画面的按钮只会让人以为按钮坏了。显式写 {@code false} 的机器同样不显示，
+     * 因为它的行为与没写一样。
+     */
+    public static boolean showsFormedToggle(MachineDefinition machine) {
+        return machine != null && machine.hideComponentsWhenFormed();
+    }
+
+    /** 成型预览开关当前状态对应的提示键：按下去会切到哪一种视图。 */
+    public static String formedTooltipKey(boolean formed) {
+        return formed ? "gui.preview.button.toggle_unformed.tip" : "gui.preview.button.toggle_formed.tip";
+    }
+
+    /**
+     * 选出这一帧要画的方块。
+     *
+     * <p>顺序是固定的：<strong>先按成型状态裁剪，再按层过滤</strong>。反过来会让层模式的层号在裁剪前后指向
+     * 不同的高度，玩家在切片视图里点成型开关就会看到一层「消失」的方块，而不是收起组件后的同一层。
+     *
+     * <p>这是 static 的：它只依赖传入的参数，不依赖面板的鼠标、相机或按钮状态，所以复现器可以离线核对，
+     * 不需要打开界面。
+     */
+    public static List<StructurePreview.Block> selectBlocks(StructurePreview preview, boolean formed,
+                                                            boolean hideComponentsWhenFormed, boolean layerMode,
+                                                            int layer) {
+        StructurePreview shown = formed && hideComponentsWhenFormed ? preview.hidingComponents() : preview;
+        return layerMode ? shown.blocksInLayer(layer) : shown.blocks();
     }
 
     /** The Y level the slice preview is showing, or {@code null} when the structure has no blocks at all. */
@@ -318,10 +376,14 @@ public final class PreviewPanel {
         // drawn after the blocks or the structure would cover it.
         StructurePreviewRenderer.clip(graphics, originX + PreviewLayout.PREVIEW_X, originY + PreviewLayout.PREVIEW_Y,
                 PreviewLayout.PREVIEW_WIDTH, PreviewLayout.PREVIEW_HEIGHT);
-        List<StructurePreview.Block> blocks = this.preview.blocks();
+        boolean hideComponents = this.machine.hideComponentsWhenFormed();
+        List<StructurePreview.Block> blocks;
         if (this.layerMode) {
             Integer layer = selectedLayerY();
-            blocks = layer == null ? List.of() : this.preview.blocksInLayer(layer);
+            blocks = layer == null ? List.of()
+                    : selectBlocks(this.preview, this.formedPreview, hideComponents, true, layer);
+        } else {
+            blocks = selectBlocks(this.preview, this.formedPreview, hideComponents, false, 0);
         }
         int variant = this.cycleBlocks ? (int) (Util.getMillis() / CYCLE_PERIOD_MILLIS) : 0;
         StructurePreviewRenderer.render(graphics, this.preview, blocks, variant,

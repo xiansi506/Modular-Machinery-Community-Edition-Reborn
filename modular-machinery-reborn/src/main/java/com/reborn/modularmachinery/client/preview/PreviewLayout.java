@@ -72,10 +72,21 @@ public final class PreviewLayout {
 
     public static final int BUTTON_SIZE = 13;
     public static final int BUTTON_STRIP_Y = 161;
+
     /** The original's {@code setMarginRight(2)} between buttons. */
     public static final int BUTTON_SPACING = 2;
     /** The original's {@code PANEL_WIDTH - (row.getWidth() + 6)}. */
     public static final int BUTTON_RIGHT_MARGIN = 6;
+
+    /**
+     * 成型 / 未成型预览开关，放在面板右上角。
+     *
+     * <p>旧版的 {@code toggleFormed} 在 {@code rightTopMenu} 里，位置是 {@code (184 - 13 - 6, 28)}
+     * （{@code MachineStructurePreviewPanel.java:167-176}），与底部按钮条不是同一个容器。这里保留原坐标，
+     * 而不是把它塞进底部条：底部条的行宽是按下方的按钮数量右对齐算出来的，多一个按钮会把既有按钮整体左移。
+     */
+    public static final int FORMED_BUTTON_X = PANEL_WIDTH - BUTTON_SIZE - BUTTON_RIGHT_MARGIN;
+    public static final int FORMED_BUTTON_Y = 28;
 
     // ----- layer selector: the original's rightMenu at (184 - w - 6, 44) -----------------------------------
 

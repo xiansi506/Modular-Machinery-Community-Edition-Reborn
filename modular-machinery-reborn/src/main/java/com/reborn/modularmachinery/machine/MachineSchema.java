@@ -167,6 +167,11 @@ public final class MachineSchema {
         boolean requiresBlueprint = root.has("requires-blueprint")
                 && root.get("requires-blueprint").getAsBoolean();
 
+        // 0.71.0（E5）：`hide-components-when-formed` 以前在 UNIMPLEMENTED_ROOT_FIELDS 里「认得但不求值」。
+        // 现在求值：类型错误直接拒绝（与 1.12.2 旧版一致；0.70.0 未求值时曾照单全收），
+        // 因为一件作者以为打开了的事悄悄关着，比一句明确的报错更贵。
+        boolean hideComponentsWhenFormed = MachineRootFields.hideComponentsWhenFormed(root, String.valueOf(where));
+
         int maxParallelism = MachineDefinition.DEFAULT_MAX_PARALLELISM;
         if (root.has("max-parallelism")) {
             maxParallelism = readParallelism(root, "max-parallelism", where);
@@ -299,7 +304,8 @@ public final class MachineSchema {
                 maxParallelism, internalParallelism, parallelizable, modifiers,
                 maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces, dynamicPatterns)
                 .withColor(MachineRootFields.color(root, String.valueOf(where)))
-                .withGeoModel(MachineRootFields.geoModel(root, String.valueOf(where)));
+                .withGeoModel(MachineRootFields.geoModel(root, String.valueOf(where)))
+                .withHideComponentsWhenFormed(hideComponentsWhenFormed);
     }
 
     // 0.31.0 removed rejectDeferred(JsonObject, Object, boolean) and its call above read()'s body. It existed to
@@ -658,8 +664,10 @@ public final class MachineSchema {
      * {@code has-factory} / {@code factory-only} 在 0.22.0（M6e）连同两个新线程字段一起离开。
      * {@code failure-action} 在 0.25.0（D17）离开。{@code dynamic-patterns} 在 0.32.0（波 3b）离开：
      * 动态结构的长度现在是<strong>真的会被量出来</strong>的。
-     * 剩下这些<strong>完全还没有消费者</strong>：{@code prefix} /
-     * {@code hide-components-when-formed} / {@code controller-bounding-box} 属于尚未排期的批次。
+     * {@code hide-components-when-formed} 在 0.71.0（E5）离开：预览现在会读它（成型后隐藏组件），
+     * 见 {@link MachineDefinition#hideComponentsWhenFormed()} 与 {@code StructurePreview#hidingComponents()}。
+     * 剩下这些<strong>完全还没有消费者</strong>：{@code prefix} / {@code controller-bounding-box}
+     * 属于尚未排期的批次。
      *
      * <p><b>这份名单点名的每个字段，同时必须出现在 {@link #KNOWN_ROOT_FIELDS} 里。</b>这不是排版上的对称，
      * 而是一条会被作者读到的语义：不在那份名单里，加载器会在「认得但不求值」的警告之后紧接着再报一句
@@ -667,7 +675,7 @@ public final class MachineSchema {
      * 会据此拒收整份合法定义。0.63.0 修的就是这件事（勘测 X1）：上面三个字段当时只在这份名单里。
      */
     private static final String[] UNIMPLEMENTED_ROOT_FIELDS = {
-            "prefix", "hide-components-when-formed", "controller-bounding-box"
+            "prefix", "controller-bounding-box"
     };
 
     /**

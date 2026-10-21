@@ -107,6 +107,8 @@
   "gui.preview.button.disable_cycle_replaceable_blocks.tip": "Click to disable timed cycle replacement of blocks.",
   "gui.preview.button.toggle_layer_render.tip": "Click to switch to slice preview mode.",
   "gui.preview.button.toggle_3d_render.tip": "Click to switch to 3D preview mode.",
+  "gui.preview.button.toggle_formed.tip": "Click to preview the machine as formed (components hidden).",
+  "gui.preview.button.toggle_unformed.tip": "Click to return to the unformed preview (all components shown).",
   "gui.preview.button.layer_render_scrollbar.tip": "Hold and drag to quickly adjust the layer of blocks you want to preview.",
   "gui.preview.button.layer_render_scrollbar.up.tip": "Click to preview the blocks one layer above.",
   "gui.preview.button.layer_render_scrollbar.down.tip": "Click to preview the blocks one layer below.",

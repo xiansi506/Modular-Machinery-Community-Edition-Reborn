@@ -56,4 +56,27 @@ public final class MachineRootFields {
     public static GeoModelSpec geoModel(JsonObject root, String where) {
         return GeoModelSpec.parse(root, where);
     }
+
+    /**
+     * 定义里的 {@code hide-components-when-formed}：结构成型后是否隐藏组件。
+     *
+     * <p>旧版 {@code DynamicMachinePreDeserializer#getHideComponentsWhenFormed} 的默认值是 false，
+     * 且**只接受 JSON 布尔**，写成字符串 {@code "true"} 会抛同一条错误。0.62.9–0.70.0 因为不求值而照单全收，
+     * 于是同一份定义在旧版被拒、在本版被接受。这里恢复旧版的拒绝，而不是「宽容地读懂」：
+     * 一个写错的布尔值不该悄悄变成 false，那会让作者以为开关生效了。错误文案照旧版原文。
+     *
+     * @return 字段缺省时为 {@code false}
+     * @throws com.google.gson.JsonParseException 字段存在但不是 JSON 布尔
+     */
+    public static boolean hideComponentsWhenFormed(JsonObject root, String where) {
+        JsonElement element = root.get("hide-components-when-formed");
+        if (element == null) {
+            return false;
+        }
+        if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isBoolean()) {
+            return element.getAsBoolean();
+        }
+        throw new com.google.gson.JsonParseException(
+                "'hide-components-when-formed' has to be either 'true' or 'false'!");
+    }
 }

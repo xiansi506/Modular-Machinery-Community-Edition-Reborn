@@ -185,6 +185,32 @@ public final class StructurePreview {
         return this.size;
     }
 
+    /**
+     * 成型后的预览：只保留控制器自己，组件全部收起。
+     *
+     * <p>对应旧版 {@code hide-components-when-formed} 的预览含义：机器成型后，玩家看到的是控制器，而不再是
+     * 一堆待放置的外壳。这里做的是<strong>数据裁剪</strong>而不是渲染开关，所以「成型隐藏」可以离线断言，
+     * 也保证层模式先看到的是同一份裁剪结果。
+     *
+     * <p>幂等：对已经裁剪过的预览再隐藏一次，结果不变。空预览（没有控制器、也没有部件）原样返回一个空预览，
+     * 不会造出一个凭空出现的方块。
+     */
+    public StructurePreview hidingComponents() {
+        List<Block> kept = new ArrayList<>();
+        for (Block block : this.blocks) {
+            if (BlockPos.ZERO.equals(block.pos())) {
+                kept.add(block);
+            }
+        }
+        if (kept.size() == this.blocks.size()) {
+            return this;
+        }
+        if (kept.isEmpty()) {
+            return new StructurePreview(List.of(), BlockPos.ZERO, BlockPos.ZERO);
+        }
+        return new StructurePreview(kept, BlockPos.ZERO, BlockPos.ZERO);
+    }
+
     public boolean isEmpty() {
         return this.blocks.isEmpty();
     }
