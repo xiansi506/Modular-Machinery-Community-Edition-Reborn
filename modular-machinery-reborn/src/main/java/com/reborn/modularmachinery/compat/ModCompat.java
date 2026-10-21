@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Predicate;
 
 /**
@@ -42,6 +43,17 @@ import java.util.function.Predicate;
  *
  * <p>第二道门存在的意义正是「第一道门可能判断错」。只有第一道门时，一次时机错误就会在注册表里留下一种
  * 永远不可用的需求；有第二道门，最坏情况只是它被晚一点摘掉。
+ *
+ * <h2>其它模组怎么把模块交进来</h2>
+ *
+ * <p>在对方自己的 {@code @Mod} 构造器里调用 {@link #registerModule(CompatModule)}。不能等到
+ * {@code FMLCommonSetupEvent} 再用事件发现：模块的 {@link CompatModule#registerCapabilities} 要在
+ * {@code RegisterCapabilitiesEvent} 之前进入清单，而那个事件更早；本模组构造期又无法可靠地问
+ * {@code ModList}。所以入口是**对方主动调用**，而不是本模组扫描。
+ *
+ * <p>两个拒绝是刻意的：同一个 id 第二次加入会抛 {@link IllegalStateException}（内置模块也算），
+ * 清单封口后再加入同样会抛。后者尤其重要——晚加入的模块会静默漏掉能力注册，那种缺口只在特定加载
+ * 顺序下出现，日志里没有、游戏里却少了端口。
  */
 public final class ModCompat {
 
@@ -55,7 +67,27 @@ public final class ModCompat {
     private static final Map<ResourceLocation, CompatModule> REGISTERED = new LinkedHashMap<>();
 
     /**
-     * 本模组**已知**的兼容模块清单。
+     * 其它模组通过 {@link #registerModule(CompatModule)} 交进来的模块，按加入顺序。
+     *
+     * <p>{@code CopyOnWriteArrayList}：加入发生在模组构造期，读取发生在能力事件与
+     * {@code FMLCommonSetupEvent}，两个阶段不保证同一线程；而且加入后清单只会被整体读取，
+     * 不需要随机写。
+     */
+    private static final List<CompatModule> EXTERNAL_MODULES = new CopyOnWriteArrayList<>();
+
+    /**
+     * 清单是否已经封口。封口之后再加模块会抛 {@link IllegalStateException}。
+     *
+     * <p>为什么必须封口：{@link CompatModule#registerCapabilities} 只在
+     * {@code RegisterCapabilitiesEvent} 里跑一次，而那个事件比 {@code FMLCommonSetupEvent} 早。
+     * 晚加入的模块不会漏注册需求类型（那一步在 common setup），却会**静默地**漏掉自己的能力注册，
+     * 后果是它的端口永远问不到。宁可让调用方立刻看见异常，也不要留下这种只在特定加载顺序下出现的缺口。
+     */
+    private static volatile boolean SEALED = false;
+
+    /**
+     * 本模组**已知**的兼容模块清单：编译期写死的模块，加上其它模组通过
+     * {@link #registerModule(CompatModule)} 交进来的模块。
      *
      * <p>波 5.3 起有第一个真模块：{@code compat/mekanism/MekanismModule}（Mekanism 化学，旧版的「气体」）。
      * 它的 {@code requiresModid()} 是 {@code "mekanism"}，所以没装那个模组时它不会被注册——
@@ -64,18 +96,71 @@ public final class ModCompat {
      * 后来者加模块时必须同样满足，否则没装该模组的玩家会在**注册判断之前**就
      * {@code NoClassDefFoundError}。
      *
-     * <p>写成 {@code List.of(...)} 而不是反射扫描：反射能省掉这一行，代价是「哪些模块在」变成运行时
+     * <p>内置模块写成 {@code new ...} 而不是反射扫描：反射能省掉这一行，代价是「哪些模块在」变成运行时
      * 才知道的事情，构建期没有任何东西能检查它。而这里的模块都是编译期就存在的类（它们要引用该模组的 API）。
+     * 外部模块不适用这条——它们本来就不在本模组的编译单元里，只能由对方自己交进来。
      */
     private static List<CompatModule> modules() {
-        return List.of(new com.reborn.modularmachinery.compat.mekanism.MekanismModule());
+        List<CompatModule> all = new ArrayList<>(1 + EXTERNAL_MODULES.size());
+        all.add(new com.reborn.modularmachinery.compat.mekanism.MekanismModule());
+        all.addAll(EXTERNAL_MODULES);
+        return all;
     }
 
     private ModCompat() {
     }
 
+    /**
+     * 让**其它模组**把它的兼容模块交给本模组。在对方自己的 {@code @Mod} 构造器里调用。
+     *
+     * <p><b>为什么是静态方法而不是 Forge 事件。</b>模块的 {@code registerCapabilities} 必须在
+     * {@code RegisterCapabilitiesEvent} 之前进入清单；那个事件按定义早于 {@code FMLCommonSetupEvent}，
+     * 而本模组在构造期又无法可靠地问 {@code ModList}（见类注释）。让外部模组在构造器里主动调用，
+     * 是唯一不依赖加载顺序的可靠时机。
+     *
+     * @param module 要加入的模块；它的 {@link CompatModule#requiresModid()} 可以指向一个没装的模组，
+     *               那种模块会在注册阶段被跳过，而不是被拒绝加入
+     * @throws NullPointerException  {@code module} 或它的 {@code id()} 为 {@code null}
+     * @throws IllegalStateException 清单已经封口（能力事件或 common setup 已经开始），
+     *                               或已有同 id 的模块（内置的或外部加入的都算）
+     */
+    public static void registerModule(CompatModule module) {
+        if (module == null) {
+            throw new NullPointerException("Cannot register a null compat module");
+        }
+        ResourceLocation id = module.id();
+        if (id == null) {
+            throw new NullPointerException("Cannot register a compat module with a null id");
+        }
+        synchronized (EXTERNAL_MODULES) {
+            if (SEALED) {
+                throw new IllegalStateException("Compat module " + id + " was registered after the module list "
+                        + "was sealed; register it from the owning mod's constructor, before "
+                        + "RegisterCapabilitiesEvent.");
+            }
+            for (CompatModule known : modules()) {
+                if (id.equals(known.id())) {
+                    throw new IllegalStateException("A compat module with id " + id + " is already known: "
+                            + known.getClass().getName());
+                }
+            }
+            EXTERNAL_MODULES.add(module);
+        }
+    }
+
+    /**
+     * 封口清单。{@code RegisterCapabilitiesEvent} 与 {@code FMLCommonSetupEvent} 都从这里进；
+     * 两个事件谁先到都安全——先到的那一个把门关上，后到的只会看到同一份清单。
+     */
+    private static void sealModules() {
+        synchronized (EXTERNAL_MODULES) {
+            SEALED = true;
+        }
+    }
+
     /** Forge 事件入口；注册在 {@code ModularMachineryReborn} 里。 */
     public static void onCommonSetup(FMLCommonSetupEvent event) {
+        sealModules();
         register(modules(), ModList.get()::isLoaded);
     }
 
@@ -142,7 +227,7 @@ public final class ModCompat {
 
     /** 把「已知模块清单」暴露给断言，免得断言自己抄一份（抄一份就迟早与实现不一致）。 */
     public static List<CompatModule> knownModules() {
-        return modules();
+        return List.copyOf(modules());
     }
 
     // ------------------------------------------------------------------ 端口映射器
@@ -308,6 +393,7 @@ public final class ModCompat {
      * 而不是让整个模组构造失败。
      */
     public static void onRegisterCapabilities(net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent event) {
+        sealModules();
         for (CompatModule module : modules()) {
             try {
                 module.registerCapabilities(event);

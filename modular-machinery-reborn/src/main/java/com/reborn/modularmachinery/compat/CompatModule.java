@@ -11,7 +11,9 @@ import javax.annotation.Nullable;
  * <p><b>形状照抄旧版，一处不同。</b>旧版的兼容扩展是一个 {@code @Mod} 加若干
  * {@code @ZenExpansion}/{@code RequirementType} 注册，靠 Forge 的注册表把东西塞进来；
  * 本版把它收成一个接口：模块实现这个接口，由 {@link ModCompat} 在
- * {@code FMLCommonSetupEvent} 里调用一次。
+ * {@code FMLCommonSetupEvent} 里调用一次。**外部模组**（不在本模组源码里的模块）还要在自己的
+ * {@code @Mod} 构造器里先调用 {@link ModCompat#registerModule(CompatModule)}；不调用的话，它根本不在
+ * {@link ModCompat#knownModules()} 里，后面什么都不会发生。
  *
  * <p><b>为什么不靠 Forge 注册表。</b>需求类型**不是** Forge 注册表内容：它是配方 JSON 的解析器，
  * 只有本模组自己在读。旧版把它塞进 Forge 注册表，代价是必须处理「注册表冻结后还能不能改」
@@ -31,9 +33,11 @@ public interface CompatModule {
      * 这个模块是谁，全限定，形如 {@code modular_machinery_reborn:ae2}。
      *
      * <p>它出现在日志里（哪几个模块注册了、哪个依赖没装），也是 {@link #requiresModid()} 缺失时的身份。
-     * **不以模块自己的 modid 当命名空间**：注册键的命名空间在本版没有区分力
-     * （配方文件里写的命名空间会被丢弃，见 {@link com.reborn.modularmachinery.recipe.RequirementTypes#byName}），
-     * 所以用一个命名空间只会让人以为它有意义。
+     * **建议用模块自己的 modid 当命名空间**（例如 {@code externalmod:foo}）：显式写全限定 id 时，
+     * {@link com.reborn.modularmachinery.recipe.RequirementTypes#byName} 的第二步会按原样匹配；
+     * 只写 path 时第一步会先按本模组的命名空间查，所以裸 {@code foo} 找不到外部模块的种类。
+     * 本模组内置的六个种类仍用 {@code modular_machinery_reborn} 命名空间，旧版兼容模块也沿用了旧命名空间，
+     * 那些不受这条建议影响。
      */
     ResourceLocation id();
 

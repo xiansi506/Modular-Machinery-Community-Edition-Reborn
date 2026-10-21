@@ -339,6 +339,9 @@ public final class ParallelCraftCheck {
         // 开工闸门、只消耗一组、modifier 折进结算，以及控制器/工厂的接线。
         CatalystCheck.catalysts();
         TypedRecipeCheck.typedRecipes();
+        // 0.66.0：B10——外部模组把自己的 CompatModule 交给主模组。此前模块清单硬编码，
+        // 外部需求类型只能绕开框架直接注册，requiresModid 兜底、端口与能力钩子都跑不到。
+        ExternalModuleCheck.externalModuleRegistration();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
