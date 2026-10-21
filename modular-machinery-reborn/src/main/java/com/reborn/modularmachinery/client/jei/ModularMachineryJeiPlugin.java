@@ -183,7 +183,10 @@ public final class ModularMachineryJeiPlugin implements IModPlugin {
 
         Map<ResourceLocation, List<MachineRecipe>> byMachine = new LinkedHashMap<>();
         for (MachineRecipe recipe : machineRecipes()) {
-            byMachine.computeIfAbsent(recipe.machineId(), id -> new ArrayList<>()).add(recipe);
+            // A recipe may belong to several machines; each owner gets its own JEI category entry.
+            for (ResourceLocation machineId : recipe.machineIds()) {
+                byMachine.computeIfAbsent(machineId, id -> new ArrayList<>()).add(recipe);
+            }
         }
 
         List<MachineGroup> groups = new ArrayList<>(definitions.size() + byMachine.size());

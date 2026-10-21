@@ -351,6 +351,8 @@ public final class FactoryEngine {
         // The original fired FactoryRecipeStartEvent and called activeRecipe.start(context) here; the start is
         // already done (it is what makes begin() succeed), so only the controller's bookkeeping is left.
         this.host.onThreadStarted(thread);
+        // B8: startCommands run once the craft is really armed for this thread.
+        this.host.runRecipeCommands(thread, craft.recipe(), FactoryHost.PHASE_START, 0);
         return true;
     }
 
@@ -421,6 +423,9 @@ public final class FactoryEngine {
             return;
         }
         craft.recipe().tick(ports, this.host.random(), modifiers);
+        // B8: same ordering as the single-craft path -- processingCommands see the progress before this
+        // successful tick was counted.
+        this.host.runRecipeCommands(thread, craft.recipe(), FactoryHost.PHASE_PROCESSING, craft.progress());
         craft.advance();
         this.dirty = true;
 
@@ -428,6 +433,8 @@ public final class FactoryEngine {
             return;
         }
         craft.recipe().finish(ports, this.host.random(), modifiers);
+        // B8: finishCommands run after the outputs have been settled.
+        this.host.runRecipeCommands(thread, craft.recipe(), FactoryHost.PHASE_FINISH, 0);
         this.host.onThreadFinished(thread);
         tryRestart(thread, craft);
     }
@@ -455,6 +462,8 @@ public final class FactoryEngine {
         if (thread.begin(again, groupPorts, this.host.random())) {
             this.dirty = true;
             this.host.onThreadStarted(thread);
+            // B8: the re-armed craft counts as a fresh start, so its startCommands run again.
+            this.host.runRecipeCommands(thread, again.recipe(), FactoryHost.PHASE_START, 0);
             return;
         }
         thread.clear();

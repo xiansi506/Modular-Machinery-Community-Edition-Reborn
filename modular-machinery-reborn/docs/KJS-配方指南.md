@@ -61,10 +61,11 @@ modular_machinery_reborn:item     modularmachinery:item     item
 
 | 用途 | 字段 |
 |---|---|
-| 指定机器 | `machine`（**必填**） |
+| 指定机器 | `machine`（**必填**；单字符串，或非空字符串数组——数组表示一份配方归多台机器） |
 | 配方 id | `registryName`（可选） |
 | 耗时 | `recipeTime`（可选，默认 100，**≥1**） |
 | 逐 tick 失败是否放弃 | `cancelIfPerTickFails`（可选布尔，默认 `false`；true 时失败即中止本次合成，已付的一次性输入不返还） |
+| 命令 | `startCommands` / `processingCommands` / `finishCommands`（可选数组；每项是命令字符串或 `{ command, interval }`） |
 | 需求列表 | `requirements`（**必填非空**） |
 | 物品 | `item`（支持 `minecraft:xxx`、`#forge:...` 标签、旧版 `ore:ingotIron`）+ `amount`；输入/输出都可用 `chance` |
 | 流体 | `fluid` + `amount`；可按 tick 消耗用 `perTick` |
@@ -77,6 +78,19 @@ modular_machinery_reborn:item     modularmachinery:item     item
 
 ```js
 { type: 'modular_machinery_reborn:item', 'io-type': 'input', item: 'minecraft:coal', amount: 1, chance: 0.25 }
+```
+
+**一份配方可以归多台机器，还能带命令（0.76.0 起）**：`machine` 写成非空字符串数组时，数组里每台机器都会在控制器配方列表、工厂候选、`/mm-diagnose` 与 JEI 的每机器类别里看到这份配方。`startCommands` / `processingCommands` / `finishCommands` 是可选数组，每项是命令字符串，或 `{ "command": "say hi", "interval": 20 }`；不写 `interval` 表示每次触发都跑，写了 `N` 则只在 `tick % N == 0` 时跑（`0` 本版按每次都跑处理，旧版会除零崩溃）。命令只在服务端执行，权限等级 2，位置是控制器所在格；`start` / `finish` 拿到 tick 0，`processing` 拿到本次成功结算前的进度（第一次是 0）。命令的返回值不会改变合成状态。
+
+```json
+{
+  "machine": ["alloy_furnace", "other:press"],
+  "recipeTime": 100,
+  "startCommands": ["say start"],
+  "processingCommands": [{ "command": "say tick", "interval": 20 }],
+  "finishCommands": ["say done"],
+  "requirements": [ /* … */ ]
+}
 ```
 
 **配方只在对应机器成型时生效**——机器没搭好就不会跑。
@@ -128,9 +142,13 @@ modular_machinery_reborn:item     modularmachinery:item     item
 ```js
 ServerEvents.recipes(event => {
   event.recipes.modular_machinery_reborn.machine('alloy_furnace')
+    .machines('alloy_furnace', 'other:press')   // 可选：覆盖第一参数，归多台机器
     .time(200)                                  // 可选，默认 100
     .parallelism(64)                            // 可选
     .cancelIfPerTickFails()                     // 可选：失败即中止（无参置 true）
+    .startCommand('say start')                  // 可选：开工时
+    .processingCommand('say every 20 ticks', 20)// 可选：每 20 个成功 tick
+    .finishCommand('say done')                  // 可选：完工时
     .registryName('alloy_furnace_demo')         // 可选
     .itemInput('minecraft:copper_ingot', 2)
     .itemOutput('minecraft:iron_ingot', 1, 3, 0.75) // 数量 1..3，概率 0.75
@@ -146,7 +164,9 @@ ServerEvents.recipes(event => {
 | 方法 | 作用 |
 |---|---|
 | `.time(ticks)` / `.parallelism(max)` / `.registryName(name)` | 配方级字段 |
+| `.machines(id...)` | 覆盖第一参数指定的机器，把配方归给多台（至少一台） |
 | `.cancelIfPerTickFails()` / `.cancelIfPerTickFails(boolean)` | 逐 tick 失败是否放弃本次合成（默认 `false`） |
+| `.startCommand(cmd[, interval])` / `.processingCommand(cmd[, interval])` / `.finishCommand(cmd[, interval])` | 追加一条命令；不写 `interval` 表示每次触发都跑，否则只在 `tick % interval == 0` 时跑 |
 | `.itemInput(id, amount)` / `.itemOutput(id, amount)` | 物品需求；输出另有 `(id, min, max, chance)` |
 | `.fluidInput(id, amount[, perTick])` / `.fluidOutput(...)` | 流体需求 |
 | `.energyInput(perTick)` / `.energyOutput(perTick)` | 能量需求 |

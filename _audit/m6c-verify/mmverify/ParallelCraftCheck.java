@@ -369,6 +369,9 @@ public final class ParallelCraftCheck {
         // 0.75.0：B7——旧版配方级 cancelIfPerTickFails。canTick 失败时取消整条合成、吞掉已付材料，
         // 而不是按 failure-action 只改进度。单机与工厂两条路径都要到；红跑时方法还不存在，全走反射。
         cancelIfPerTickFailsSection();
+        // 0.76.0：B8——旧版配方的 machine 字段可写成非空数组，并可带 startCommands /
+        // processingCommands / finishCommands 三条命令数组。红跑时这些 API 还不存在，全部走反射。
+        recipeShapeSection();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -2926,6 +2929,7 @@ public final class ParallelCraftCheck {
         private int peakOrdinaryThreads;
         private final List<String> progressLog = new ArrayList<>();
         private final List<String> concurrentTicks = new ArrayList<>();
+        private final List<String> commandLog = new ArrayList<>();
 
         /**
          * The machine's declared {@code failure-action}, reported through {@link #failureAction()}.
@@ -2962,6 +2966,7 @@ public final class ParallelCraftCheck {
             this.peakOrdinaryThreads = 0;
             this.progressLog.clear();
             this.concurrentTicks.clear();
+            this.commandLog.clear();
             return this;
         }
 
@@ -3184,6 +3189,23 @@ public final class ParallelCraftCheck {
 
         @Override
         public void onThreadStarted(FactoryThread thread) {
+        }
+
+        /**
+         * B8's host callback. It records the phase and tick instead of executing anything: this package has no
+         * {@code Level} and therefore no command dispatcher. The real execution is asserted separately through
+         * {@code RecipeCommands}' sink and through the controller's {@code commandSource()} shape.
+         *
+         * <p>No {@code @Override}: this method does not exist on the 0.75.0 {@code FactoryHost} the red run
+         * compiles against, and the red run must fail on assertions, not on javac.
+         */
+        public void runRecipeCommands(FactoryThread thread, MachineRecipe recipe, int phase, int tick) {
+            this.commandLog.add(phase + "@" + tick + " " + recipe.getId());
+        }
+
+        /** The phases the engine announced, in order, as {@code phase@tick recipeId}. */
+        List<String> commandLog() {
+            return List.copyOf(this.commandLog);
         }
 
         @Override
@@ -5713,6 +5735,40 @@ public final class ParallelCraftCheck {
     }
 
     /**
+     * Like {@link #countInvocations}, but also counts the synthetic {@code lambda$methodName$N} bodies javac
+     * generates for lambdas inside that method. A call written in a {@code CommandSink} lambda is still a call the
+     * method makes; scanning only the named method would report 0 and look like missing wiring.
+     */
+    private static int countInvocationsIncludingLambdas(String classResource, String methodName, String ownerSuffix,
+            String invokedName, String invokedDesc) {
+        org.objectweb.asm.tree.ClassNode node = readClassNode(classResource);
+        if (node == null) {
+            return -1;
+        }
+        String lambdaPrefix = "lambda$" + methodName + "$";
+        int found = 0;
+        boolean matched = false;
+        for (org.objectweb.asm.tree.MethodNode method : node.methods) {
+            if (!method.name.equals(methodName) && !method.name.startsWith(lambdaPrefix)) {
+                continue;
+            }
+            matched = true;
+            for (org.objectweb.asm.tree.AbstractInsnNode insn : method.instructions) {
+                if (!(insn instanceof org.objectweb.asm.tree.MethodInsnNode)) {
+                    continue;
+                }
+                org.objectweb.asm.tree.MethodInsnNode call = (org.objectweb.asm.tree.MethodInsnNode) insn;
+                if (call.name.equals(invokedName) && call.desc.equals(invokedDesc)
+                        && (ownerSuffix.isEmpty() || call.owner.equals(ownerSuffix)
+                                || call.owner.endsWith("/" + ownerSuffix))) {
+                    found++;
+                }
+            }
+        }
+        return matched ? found : -1;
+    }
+
+    /**
      * How many times {@code methodName} of {@code classResource} invokes any overload of
      * {@code GuiGraphics#drawString}; {@code -1} when the class or the method is not on the classpath.
      *
@@ -6377,6 +6433,350 @@ public final class ParallelCraftCheck {
         }
     }
 
+    // =================================================================== 0.76.0: B8
+    /**
+     * Section B8 — the original's recipe shape: {@code machine} may be a non-empty array, and a recipe may carry
+     * {@code startCommands} / {@code processingCommands} / {@code finishCommands}.
+     *
+     * <p>Everything here is reflection on purpose: the red run compiles against 0.75.0, where neither
+     * {@code RecipeCommands} nor {@code MachineRecipe.parseMachines} exists yet. A statically typed reference
+     * would turn the intended red into a {@code javac} failure.
+     */
+    private static void recipeShapeSection() {
+        section("B8. a recipe may own several machines and carry three command lists");
+
+        Class<?> commandsClass;
+        try {
+            commandsClass = Class.forName("com.reborn.modularmachinery.recipe.RecipeCommands");
+        } catch (ClassNotFoundException exception) {
+            report("the recipe command layer exists (" + exception + ")", false);
+            return;
+        }
+        Object emptyCommands;
+        try {
+            emptyCommands = commandsClass.getField("EMPTY").get(null);
+        } catch (ReflectiveOperationException exception) {
+            report("RecipeCommands.EMPTY exists (" + exception + ")", false);
+            return;
+        }
+
+        // ---- (1) the machine field: one string or a non-empty array of strings ------------------------
+        ResourceLocation recipeId = new ResourceLocation("mmverify", "b8_shape");
+        try {
+            Method parser = MachineRecipe.class.getMethod("parseMachines", JsonObject.class, ResourceLocation.class);
+
+            List<?> single = (List<?>) parser.invoke(null, JsonParser.parseString(
+                    "{\"machine\":\"alloy_furnace\"}").getAsJsonObject(), recipeId);
+            check("a string machine parses to one owning machine", 1, single.size());
+            check("...keeping the bare name", "alloy_furnace", String.valueOf(single.get(0)));
+
+            List<?> several = (List<?>) parser.invoke(null, JsonParser.parseString(
+                    "{\"machine\":[\"alloy_furnace\",\"other:press\"]}").getAsJsonObject(), recipeId);
+            check("an array machine parses to every owning machine", 2, several.size());
+            check("...in declaration order", "alloy_furnace|other:press",
+                    several.get(0) + "|" + several.get(1));
+
+            check("an absent machine is rejected with the original sentence",
+                    "No 'machine'-entry specified!", rejectedMachineMessage(parser, "{}", recipeId));
+            check("an empty machine array is rejected with the original sentence",
+                    "'machine' is an array, but it's empty! Provide at least 1 owning-machine name!",
+                    rejectedMachineMessage(parser, "{\"machine\":[]}", recipeId));
+            check("a non-string array element is rejected with the original sentence",
+                    "Found an element in the array specified in 'machine' that is not a string! 1",
+                    rejectedMachineMessage(parser, "{\"machine\":[1]}", recipeId));
+            check("a number machine is rejected with the original sentence",
+                    "'machine' has to be either an array of strings or just a string! - Found 5 instead!",
+                    rejectedMachineMessage(parser, "{\"machine\":5}", recipeId));
+            check("an object machine is rejected with the original sentence",
+                    "'machine' has to be either an array of strings or just a string! - Found {} instead!",
+                    rejectedMachineMessage(parser, "{\"machine\":{}}", recipeId));
+        } catch (ReflectiveOperationException exception) {
+            report("MachineRecipe parses a machine array (" + exception + ")", false);
+        }
+
+        // ---- (2) the canonical constructor keeps every owner and the commands -------------------------
+        Object multi = null;
+        try {
+            java.lang.reflect.Constructor<?> canonical = MachineRecipe.class.getConstructor(
+                    ResourceLocation.class, List.class, String.class, int.class, List.class, int.class,
+                    boolean.class, commandsClass);
+            multi = canonical.newInstance(new ResourceLocation("mmverify", "b8_multi"),
+                    List.of("modular_machinery_reborn:alloy_furnace", "other:press"), "b8_multi", 5,
+                    List.of(), 0, false, emptyCommands);
+            check("a recipe with two machines reports both names", 2,
+                    ((List<?>) MachineRecipe.class.getMethod("machines").invoke(multi)).size());
+            check("...two resolved ids", 2,
+                    ((List<?>) MachineRecipe.class.getMethod("machineIds").invoke(multi)).size());
+            Method belongsTo = MachineRecipe.class.getMethod("belongsTo", ResourceLocation.class);
+            report("...belongs to the first machine", (Boolean)
+                    belongsTo.invoke(multi, new ResourceLocation("modular_machinery_reborn:alloy_furnace")));
+            report("...belongs to the second machine", (Boolean)
+                    belongsTo.invoke(multi, new ResourceLocation("other:press")));
+            report("...does not belong to an unrelated machine", !(Boolean)
+                    belongsTo.invoke(multi, new ResourceLocation("modular_machinery_reborn:not_this_one")));
+            report("...and carries the commands it was built with", (Boolean)
+                    commandsClass.getMethod("isEmpty").invoke(
+                            MachineRecipe.class.getMethod("commands").invoke(multi)));
+            try {
+                canonical.newInstance(new ResourceLocation("mmverify", "b8_empty"), List.of(), "b8_empty", 5,
+                        List.of(), 0, false, emptyCommands);
+                report("a recipe with an empty machine list is rejected", false);
+            } catch (java.lang.reflect.InvocationTargetException exception) {
+                report("a recipe with an empty machine list is rejected",
+                        exception.getCause() instanceof IllegalArgumentException);
+            }
+        } catch (ReflectiveOperationException exception) {
+            report("MachineRecipe has the multi-machine constructor (" + exception + ")", false);
+        }
+
+        MachineRecipe legacy = new MachineRecipe(new ResourceLocation("mmverify", "b8_legacy"), "alloy_furnace",
+                "b8_legacy", 5, List.of(), 0, true);
+        check("the seven-argument constructor still means one machine", "alloy_furnace", legacy.machine());
+        try {
+            report("...and empty commands", (Boolean) commandsClass.getMethod("isEmpty")
+                    .invoke(MachineRecipe.class.getMethod("commands").invoke(legacy)));
+        } catch (ReflectiveOperationException exception) {
+            report("...and empty commands (" + exception + ")", false);
+        }
+
+        // ---- (3) RecipeCommands: parsing, interval timing, errors, network ----------------------------
+        Object parsed = null;
+        Class<?> commandClass = null;
+        try {
+            Method parse = commandsClass.getMethod("parse", JsonObject.class);
+            parsed = parse.invoke(null, JsonParser.parseString("{" +
+                    "\"startCommands\":[\"say start\",{\"command\":\"say every\",\"interval\":1}]," +
+                    "\"processingCommands\":[\"say tick\",{\"command\":\"say every3\",\"interval\":3}]," +
+                    "\"finishCommands\":[{\"command\":\"say done\"}]}").getAsJsonObject());
+            List<?> starts = (List<?>) commandsClass.getMethod("startCommands").invoke(parsed);
+            List<?> ticks = (List<?>) commandsClass.getMethod("processingCommands").invoke(parsed);
+            List<?> finishes = (List<?>) commandsClass.getMethod("finishCommands").invoke(parsed);
+            check("the three command lists are parsed", "2|2|1",
+                    starts.size() + "|" + ticks.size() + "|" + finishes.size());
+
+            Object plain = starts.get(0);
+            commandClass = plain.getClass();
+            check("a plain command is 'say start'", "say start",
+                    String.valueOf(commandClass.getMethod("command").invoke(plain)));
+            report("a plain command has no interval",
+                    !(Boolean) commandClass.getMethod("hasInterval").invoke(plain));
+
+            Object every = starts.get(1);
+            check("an object command keeps its interval", 1,
+                    (Integer) commandClass.getMethod("interval").invoke(every));
+            Method shouldRun = commandClass.getMethod("shouldRun", int.class);
+            report("an interval command runs on tick 0", (Boolean) shouldRun.invoke(every, 0));
+            report("...not on tick 1 when the interval is 1", (Boolean) shouldRun.invoke(every, 1));
+
+            Object every3 = ticks.get(1);
+            report("an interval of 3 skips tick 1", !(Boolean) shouldRun.invoke(every3, 1));
+            report("an interval of 3 skips tick 2", !(Boolean) shouldRun.invoke(every3, 2));
+            report("an interval of 3 runs on tick 3", (Boolean) shouldRun.invoke(every3, 3));
+            report("an interval of 3 runs on tick 6", (Boolean) shouldRun.invoke(every3, 6));
+
+            Object zero = ((List<?>) commandsClass.getMethod("startCommands").invoke(
+                    parse.invoke(null, JsonParser.parseString(
+                            "{\"startCommands\":[{\"command\":\"say always\",\"interval\":0}]}"
+                    ).getAsJsonObject()))).get(0);
+            report("an interval of 0 runs every tick (deliberate deviation: the old divide by zero)",
+                    (Boolean) shouldRun.invoke(zero, 7));
+
+            check("a non-array command list is rejected", "startCommands should be an array of commands!",
+                    rejectedCommandMessage(parse, "{\"startCommands\":{}}"));
+            check("an object without command is rejected",
+                    "Tried to deserialize recipe command, found no 'command' string in command object!",
+                    rejectedCommandMessage(parse, "{\"startCommands\":[{\"interval\":2}]}"));
+            check("a non-numeric interval is rejected",
+                    "Interval specified in 'interval' of recipe command object is not an int!",
+                    rejectedCommandMessage(parse, "{\"startCommands\":[{\"command\":\"x\",\"interval\":\"2\"}]}"));
+            check("neither a primitive nor an object is rejected",
+                    "Tried to deserialize recipe command, found neither command nor object describing command "
+                            + "and optional interval!",
+                    rejectedCommandMessage(parse, "{\"startCommands\":[[]]}"));
+
+            check("the start phase runs both commands",
+                    "say start|say every", String.join("|", runCommandPhase(parsed, commandsClass, "START", 0)));
+            check("the processing phase at tick 0 runs both commands",
+                    "say tick|say every3", String.join("|", runCommandPhase(parsed, commandsClass, "PROCESSING", 0)));
+            check("the processing phase at tick 1 runs only the un-intervaled command",
+                    "say tick", String.join("|", runCommandPhase(parsed, commandsClass, "PROCESSING", 1)));
+            check("the processing phase at tick 3 runs both again",
+                    "say tick|say every3", String.join("|", runCommandPhase(parsed, commandsClass, "PROCESSING", 3)));
+            check("the finish phase runs its command",
+                    "say done", String.join("|", runCommandPhase(parsed, commandsClass, "FINISH", 0)));
+            report("a parsed command set is not empty",
+                    !(Boolean) commandsClass.getMethod("isEmpty").invoke(parsed));
+            report("RecipeCommands.EMPTY is empty",
+                    (Boolean) commandsClass.getMethod("isEmpty").invoke(emptyCommands));
+
+            FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+            commandsClass.getMethod("write", FriendlyByteBuf.class).invoke(parsed, buffer);
+            Object read = commandsClass.getMethod("read", FriendlyByteBuf.class).invoke(null, buffer);
+            List<?> readStarts = (List<?>) commandsClass.getMethod("startCommands").invoke(read);
+            check("the command lists survive the network round trip", 2, readStarts.size());
+            check("...with the command text intact", "say every",
+                    String.valueOf(readStarts.get(1).getClass().getMethod("command").invoke(readStarts.get(1))));
+            check("...and the interval intact", 1,
+                    (Integer) readStarts.get(1).getClass().getMethod("interval").invoke(readStarts.get(1)));
+        } catch (ReflectiveOperationException exception) {
+            report("RecipeCommands parses and runs the three command lists (" + exception + ")", false);
+        }
+
+        // ---- (4) the typed builder writes the array and the three lists -------------------------------
+        MachineRecipeJsonBuilder builder = new MachineRecipeJsonBuilder();
+        try {
+            Method machines = MachineRecipeJsonBuilder.class.getMethod("machines", String[].class);
+            Object returned = machines.invoke(builder, (Object) new String[] {
+                    "modular_machinery_reborn:alloy_furnace", "other:press"});
+            report("MachineRecipeJsonBuilder.machines stays fluent", returned == builder);
+            JsonObject built = builder.build("ignored");
+            report("...and build writes a machine array", built.get("machine").isJsonArray());
+            check("...with both entries", 2, built.getAsJsonArray("machine").size());
+            check("...in order", "modular_machinery_reborn:alloy_furnace|other:press",
+                    built.getAsJsonArray("machine").get(0).getAsString() + "|"
+                            + built.getAsJsonArray("machine").get(1).getAsString());
+
+            Method startCommand = MachineRecipeJsonBuilder.class.getMethod("startCommand", String.class);
+            Method processingCommand = MachineRecipeJsonBuilder.class.getMethod("processingCommand", String.class,
+                    int.class);
+            Method finishCommand = MachineRecipeJsonBuilder.class.getMethod("finishCommand", String.class);
+            startCommand.invoke(builder, "say start");
+            processingCommand.invoke(builder, "say every", 2);
+            finishCommand.invoke(builder, "say done");
+            JsonObject withCommands = builder.build("ignored");
+            check("the builder writes startCommands", "say start",
+                    withCommands.getAsJsonArray("startCommands").get(0).getAsString());
+            check("the builder writes the processing interval", 2,
+                    withCommands.getAsJsonArray("processingCommands").get(0).getAsJsonObject()
+                            .get("interval").getAsInt());
+            check("the builder writes finishCommands", "say done",
+                    withCommands.getAsJsonArray("finishCommands").get(0).getAsString());
+
+            JsonObject legacyShape = new MachineRecipeJsonBuilder().build("alloy_furnace");
+            report("a builder without machines still writes the single string form",
+                    legacyShape.get("machine").isJsonPrimitive());
+        } catch (ReflectiveOperationException exception) {
+            report("MachineRecipeJsonBuilder has machines/startCommand/processingCommand/finishCommand ("
+                    + exception + ")", false);
+        }
+
+        // ---- (5) the wiring, out of the built bytes --------------------------------------------------
+        String controller = "com/reborn/modularmachinery/block/MachineControllerBlockEntity";
+        String engine = "com/reborn/modularmachinery/factory/FactoryEngine";
+        String hostCallback = "(Lcom/reborn/modularmachinery/factory/FactoryThread;"
+                + "Lcom/reborn/modularmachinery/recipe/MachineRecipe;II)V";
+        check("MachineControllerBlockEntity announces all three command phases",
+                3, countInvocations(controller, "tick", "MachineControllerBlockEntity", "runRecipeCommands",
+                        "(Lcom/reborn/modularmachinery/recipe/MachineRecipe;"
+                                + "Lcom/reborn/modularmachinery/recipe/RecipeCommands$Phase;I)V"));
+        check("FactoryEngine.begin announces a start",
+                1, countInvocations(engine, "begin", "FactoryHost", "runRecipeCommands", hostCallback));
+        check("FactoryEngine.tickThread announces the processing phase and the finish",
+                2, countInvocations(engine, "tickThread", "FactoryHost", "runRecipeCommands", hostCallback));
+        check("FactoryEngine.tryRestart announces the re-armed start",
+                1, countInvocations(engine, "tryRestart", "FactoryHost", "runRecipeCommands", hostCallback));
+        report("the controller's command runner asks the recipe for its commands",
+                countInvocationsIncludingLambdas(controller, "runRecipeCommands", "MachineRecipe", "commands",
+                        "()Lcom/reborn/modularmachinery/recipe/RecipeCommands;") > 0);
+        report("...runs the phase through RecipeCommands",
+                countInvocationsIncludingLambdas(controller, "runRecipeCommands", "RecipeCommands", "run",
+                        "(Lcom/reborn/modularmachinery/recipe/RecipeCommands$Phase;I"
+                                + "Lcom/reborn/modularmachinery/recipe/RecipeCommands$CommandSink;)V") > 0);
+        report("...and executes through the server command dispatcher",
+                countInvocationsIncludingLambdas(controller, "runRecipeCommands", "net/minecraft/commands/Commands",
+                        "performPrefixedCommand",
+                        "(Lnet/minecraft/commands/CommandSourceStack;Ljava/lang/String;)I") > 0);
+        try {
+            FactoryHost.class.getMethod("runRecipeCommands", FactoryThread.class, MachineRecipe.class,
+                    int.class, int.class);
+            report("FactoryHost declares runRecipeCommands for the engine", true);
+        } catch (NoSuchMethodException exception) {
+            report("FactoryHost declares runRecipeCommands for the engine (" + exception + ")", false);
+        }
+
+        // ---- (6) the engine really announces start, every tick, finish, and the restart ---------------
+        if (multi == null) {
+            report("the engine can run a command-carrying recipe", false);
+            return;
+        }
+        try {
+            java.lang.reflect.Constructor<?> canonical = MachineRecipe.class.getConstructor(
+                    ResourceLocation.class, List.class, String.class, int.class, List.class, int.class,
+                    boolean.class, commandsClass);
+            Object carried = canonical.newInstance(new ResourceLocation("mmverify", "b8_commands"),
+                    List.of("example_factory"), "b8_commands", 5,
+                    List.of(ItemRequirement.input(ingredient(Items.COBBLESTONE), 1),
+                            ItemRequirement.output(new ItemStack(Items.STONE), 1, 1, 1.0F)),
+                    0, false, parsed);
+            MachineRecipe typed = (MachineRecipe) carried;
+            FactoryRig rig = new FactoryRig(List.of(typed), 1, 4, List.of());
+            rig.parallelCeiling = 1;
+            rig.reset().tick(5);
+            String id = "mmverify:b8_commands";
+            check("the engine announces START@0, PROCESSING@0..4, FINISH@0 and the re-armed START@0",
+                    String.join("|", List.of("0@0 " + id, "1@0 " + id, "1@1 " + id, "1@2 " + id,
+                            "1@3 " + id, "1@4 " + id, "2@0 " + id, "0@0 " + id)),
+                    String.join("|", rig.commandLog()));
+        } catch (ReflectiveOperationException exception) {
+            report("the engine announces the command phases in order (" + exception + ")", false);
+        }
+    }
+
+    /** The original sentence a rejected machine field produced, or {@code accepted} when it was not rejected. */
+    private static String rejectedMachineMessage(Method parser, String json, ResourceLocation id) {
+        try {
+            parser.invoke(null, JsonParser.parseString(json).getAsJsonObject(), id);
+            return "accepted";
+        } catch (java.lang.reflect.InvocationTargetException exception) {
+            return String.valueOf(exception.getCause().getMessage());
+        } catch (ReflectiveOperationException exception) {
+            return "reflection failure: " + exception;
+        }
+    }
+
+    /** The original sentence a rejected command list produced, or {@code accepted} when it was not rejected. */
+    private static String rejectedCommandMessage(Method parse, String json) {
+        try {
+            parse.invoke(null, JsonParser.parseString(json).getAsJsonObject());
+            return "accepted";
+        } catch (java.lang.reflect.InvocationTargetException exception) {
+            return String.valueOf(exception.getCause().getMessage());
+        } catch (ReflectiveOperationException exception) {
+            return "reflection failure: " + exception;
+        }
+    }
+
+    /** Finds an enum constant by name without naming the type (it does not exist in the red tree). */
+    private static Object commandPhase(Class<?> phaseClass, String name) {
+        for (Object constant : phaseClass.getEnumConstants()) {
+            if (((Enum<?>) constant).name().equals(name)) {
+                return constant;
+            }
+        }
+        throw new IllegalArgumentException("no phase named " + name);
+    }
+
+    /** Runs one phase through a recording {@code CommandSink} and returns the command texts it received. */
+    private static List<String> runCommandPhase(Object commands, Class<?> commandsClass, String phase, int tick) {
+        List<String> seen = new ArrayList<>();
+        try {
+            Class<?> sinkClass = Class.forName(commandsClass.getName() + "$CommandSink");
+            Object sink = java.lang.reflect.Proxy.newProxyInstance(sinkClass.getClassLoader(),
+                    new Class<?>[] {sinkClass}, (proxy, method, args) -> {
+                        if (method.getName().equals("run") && args != null && args.length == 1) {
+                            seen.add(String.valueOf(args[0]));
+                        }
+                        return null;
+                    });
+            Class<?> phaseClass = Class.forName(commandsClass.getName() + "$Phase");
+            commandsClass.getMethod("run", phaseClass, int.class, sinkClass)
+                    .invoke(commands, commandPhase(phaseClass, phase), tick, sink);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("could not run " + phase + ": " + exception, exception);
+        }
+        return seen;
+    }
+
     // =================================================================== 0.75.0: cancelIfPerTickFails
 
     /**
@@ -6406,6 +6806,7 @@ public final class ParallelCraftCheck {
      * the helper it delegates to, and the network write/read of the header is not driven here. No in-game run
      * exists for this field yet.
      */
+
     private static void cancelIfPerTickFailsSection() {
         section("B7. cancelIfPerTickFails: a failed tick ends the craft instead of holding it");
 

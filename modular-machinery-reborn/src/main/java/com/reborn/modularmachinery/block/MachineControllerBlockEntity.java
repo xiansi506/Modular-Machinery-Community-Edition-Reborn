@@ -28,9 +28,12 @@ import com.reborn.modularmachinery.menu.FactoryControllerMenu;
 import com.reborn.modularmachinery.menu.MachineControllerMenu;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
 import com.reborn.modularmachinery.recipe.ModRecipeTypes;
+import com.reborn.modularmachinery.recipe.RecipeCommands;
 import com.reborn.modularmachinery.recipe.RecipeModifiers;
 import com.reborn.modularmachinery.upgrade.UpgradeBusUtility;
 import com.reborn.modularmachinery.upgrade.UpgradeEffects;
+import net.minecraft.commands.CommandSource;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -43,6 +46,8 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
@@ -52,6 +57,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec2;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.network.NetworkHooks;
 
@@ -695,6 +702,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.setChanged();
             // A12: the original's enable-full-data-sync, on the start half (TileMachineController.java:265-275).
             be.syncFullDataIfEnabled();
+            // B8: startCommands run once the craft is really armed and its state is complete.
+            be.runRecipeCommands(recipe, RecipeCommands.Phase.START, 0);
         } else {
             effective = be.activeCraftModifiers;
             if (effective == null) {
@@ -727,11 +736,17 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             return;
         }
         recipe.tick(scope, level.random, effective);
+        // B8: processingCommands see the progress *before* this successful tick was counted, which is what
+        // the original's ioTick/ActiveMachineRecipe ordering produced.
+        be.runRecipeCommands(recipe, RecipeCommands.Phase.PROCESSING, be.progress);
         be.progress = nextProgress;
         be.status = ControllerStatus.CRAFTING;
 
         if (be.progress >= be.maxProgress) {
             recipe.finish(scope, level.random, effective);
+            // B8: finishCommands run after the outputs have been settled, even when one output's chance roll
+            // failed to place anything -- the original's finishCrafting reached its command list regardless.
+            be.runRecipeCommands(recipe, RecipeCommands.Phase.FINISH, 0);
             be.progress = 0;
             be.activeRecipeId = null;
             be.activeGroupId = null;
@@ -931,7 +946,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             }
             List<MachineRecipe> candidates = new ArrayList<>();
             for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
-                if (formed.equals(recipe.machineId())) {
+                if (recipe.belongsTo(formed)) {
                     candidates.add(recipe);
                 }
             }
@@ -982,6 +997,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         @Override
         public void onThreadIdle(FactoryThread thread) {
             MachineControllerBlockEntity.this.factoryTouched();
+        }
+
+        @Override
+        public void runRecipeCommands(FactoryThread thread, MachineRecipe recipe, int phase, int tick) {
+            RecipeCommands.Phase[] phases = RecipeCommands.Phase.values();
+            if (phase < 0 || phase >= phases.length) {
+                return;
+            }
+            MachineControllerBlockEntity.this.runRecipeCommands(recipe, phases[phase], tick);
         }
 
         @Override
@@ -1245,6 +1269,44 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
 
     /**
+     * The command source the original's recipe commands ran with: the controller's position, permission level
+     * 2 and the name {@code @[MM-Controller]} ({@code ControllerCommandSender}).
+     *
+     * <p>It is created per call rather than cached because a controller can be moved by a structure change and
+     * the command source has to report where it really is. {@code null} on the client and before the level is
+     * attached; commands are a server-side effect only.
+     */
+    @Nullable
+    private CommandSourceStack commandSource() {
+        if (!(this.level instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+        MinecraftServer server = serverLevel.getServer();
+        if (server == null) {
+            return null;
+        }
+        return new CommandSourceStack(CommandSource.NULL, Vec3.atLowerCornerOf(this.worldPosition), Vec2.ZERO,
+                serverLevel, 2, "@[MM-Controller]", Component.literal("@[MM-Controller]"), server, null);
+    }
+
+    /**
+     * Runs one of the recipe's three command lists at the given phase. Start and finish commands always pass
+     * tick 0; processing commands pass the craft's progress before this tick was counted, as the original did
+     * ({@code RecipeCraftingContext#ioTick} ran before {@code ActiveMachineRecipe} incremented its tick).
+     */
+    private void runRecipeCommands(MachineRecipe recipe, RecipeCommands.Phase phase, int tick) {
+        if (recipe.commands().isEmpty()) {
+            return;
+        }
+        CommandSourceStack source = commandSource();
+        if (source == null) {
+            return;
+        }
+        recipe.commands().run(phase, tick,
+                command -> source.getServer().getCommands().performPrefixedCommand(source, command));
+    }
+
+    /**
      * The formed machine's {@code failure-action}, or the original's own default when no definition is loaded
      * (a controller between structures, or a data pack whose machine is gone).
      */
@@ -1290,7 +1352,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             return null;
         }
         for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
-            if (!this.machineId.equals(recipe.machineId())) {
+            if (!recipe.belongsTo(this.machineId)) {
                 continue;
             }
             // **条件必须是「开不了工」，不能写成「开得了工」。** 这个方法只在 `findRecipe` 找不到配方时
@@ -1325,7 +1387,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             return null;
         }
         for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
-            if (!this.machineId.equals(recipe.machineId())) {
+            if (!recipe.belongsTo(this.machineId)) {
                 continue;
             }
             // A2：能开工 = 至少有一组能开工。锁定哪一组由 tick 里那次 startableGroup 决定，两步必须

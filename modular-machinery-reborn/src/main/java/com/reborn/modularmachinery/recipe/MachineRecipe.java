@@ -1,5 +1,6 @@
 package com.reborn.modularmachinery.recipe;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -75,7 +76,8 @@ public final class MachineRecipe implements Recipe<Container> {
     public static final int MACHINE_LIMIT = 0;
 
     private final ResourceLocation id;
-    private final String machine;
+    private final List<String> machines;
+    private final List<ResourceLocation> machineIds;
     private final String registryName;
     private final int recipeTime;
     private final List<MachineRequirement> requirements;
@@ -89,32 +91,80 @@ public final class MachineRecipe implements Recipe<Container> {
      */
     private final boolean cancelIfPerTickFails;
 
-    private ResourceLocation machineId;
+    private final RecipeCommands commands;
 
     public MachineRecipe(ResourceLocation id, String machine, String registryName, int recipeTime,
                          List<MachineRequirement> requirements) {
-        this(id, machine, registryName, recipeTime, requirements, MACHINE_LIMIT);
+        this(id, List.of(machine), registryName, recipeTime, requirements, MACHINE_LIMIT, false,
+                RecipeCommands.EMPTY);
     }
 
     public MachineRecipe(ResourceLocation id, String machine, String registryName, int recipeTime,
                          List<MachineRequirement> requirements, int maxParallelism) {
-        this(id, machine, registryName, recipeTime, requirements, maxParallelism, false);
+        this(id, List.of(machine), registryName, recipeTime, requirements, maxParallelism, false,
+                RecipeCommands.EMPTY);
     }
 
     public MachineRecipe(ResourceLocation id, String machine, String registryName, int recipeTime,
                          List<MachineRequirement> requirements, int maxParallelism,
                          boolean cancelIfPerTickFails) {
+        this(id, List.of(machine), registryName, recipeTime, requirements, maxParallelism, cancelIfPerTickFails,
+                RecipeCommands.EMPTY);
+    }
+
+    /**
+     * The canonical constructor. A recipe may name several owning machines (the original's {@code machine}
+     * array); every one of them sees the recipe in its recipe list.
+     */
+    public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
+                         List<MachineRequirement> requirements, int maxParallelism,
+                         boolean cancelIfPerTickFails, RecipeCommands commands) {
+        if (machines.isEmpty()) {
+            throw new IllegalArgumentException("A machine recipe needs at least one owning machine");
+        }
         this.id = id;
-        this.machine = machine;
+        this.machines = List.copyOf(machines);
+        List<ResourceLocation> resolved = new ArrayList<>(machines.size());
+        for (String machine : machines) {
+            resolved.add(resolveMachineId(machine));
+        }
+        this.machineIds = List.copyOf(resolved);
         this.registryName = registryName;
         this.recipeTime = Math.max(1, recipeTime);
         this.requirements = List.copyOf(requirements);
         this.maxParallelism = Math.max(0, maxParallelism);
         this.cancelIfPerTickFails = cancelIfPerTickFails;
+        this.commands = commands == null ? RecipeCommands.EMPTY : commands;
     }
 
+    private static ResourceLocation resolveMachineId(String machine) {
+        ResourceLocation parsed = machine.indexOf(':') >= 0 ? ResourceLocation.tryParse(machine) : null;
+        return parsed != null ? parsed : new ResourceLocation(ModularMachineryReborn.MOD_ID, machine);
+    }
+
+    /** The first owning machine, kept for callers that only need one name. */
     public String machine() {
-        return this.machine;
+        return this.machines.get(0);
+    }
+
+    /** Every owning machine, in the order the recipe file named them. */
+    public List<String> machines() {
+        return this.machines;
+    }
+
+    /** Every owning machine resolved to a registry name. */
+    public List<ResourceLocation> machineIds() {
+        return this.machineIds;
+    }
+
+    /** Whether this recipe belongs to {@code machine}. */
+    public boolean belongsTo(ResourceLocation machine) {
+        return this.machineIds.contains(machine);
+    }
+
+    /** The three command lists carried by this recipe. */
+    public RecipeCommands commands() {
+        return this.commands;
     }
 
     /** The {@code registryName} the original recipe file carried, or the file path when absent. */
@@ -123,20 +173,46 @@ public final class MachineRecipe implements Recipe<Container> {
     }
 
     /**
-     * The {@code machine} field resolved to a registry name.
+     * The first {@code machine} field resolved to a registry name.
      *
      * <p>Accepts either a full resource location ({@code modular_machinery_reborn:transformer}) or a bare path
      * ({@code transformer}), which is prefixed with this mod's namespace. The result is compared against the
      * machines in {@code MachineRegistry}.
      */
     public ResourceLocation machineId() {
-        if (this.machineId == null) {
-            ResourceLocation parsed = this.machine.indexOf(':') >= 0 ? ResourceLocation.tryParse(this.machine) : null;
-            this.machineId = parsed != null
-                    ? parsed
-                    : new ResourceLocation(ModularMachineryReborn.MOD_ID, this.machine);
+        return this.machineIds.get(0);
+    }
+
+    /**
+     * Reads the required {@code machine} field, which the original accepted as one string or a non-empty array
+     * of strings (1.12.2 {@code MachineRecipe.java:338-360}).
+     */
+    public static List<String> parseMachines(JsonObject json, ResourceLocation id) {
+        if (!json.has("machine")) {
+            throw new JsonParseException("No 'machine'-entry specified!");
         }
-        return this.machineId;
+        JsonElement element = json.get("machine");
+        if (element.isJsonArray()) {
+            JsonArray array = element.getAsJsonArray();
+            if (array.isEmpty()) {
+                throw new JsonParseException("'machine' is an array, but it's empty! Provide at least 1 "
+                        + "owning-machine name!");
+            }
+            List<String> names = new ArrayList<>(array.size());
+            for (JsonElement entry : array) {
+                if (!entry.isJsonPrimitive() || !entry.getAsJsonPrimitive().isString()) {
+                    throw new JsonParseException("Found an element in the array specified in 'machine' that "
+                            + "is not a string! " + entry);
+                }
+                names.add(entry.getAsString());
+            }
+            return List.copyOf(names);
+        }
+        if (element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()) {
+            return List.of(element.getAsString());
+        }
+        throw new JsonParseException("'machine' has to be either an array of strings or just a string! - "
+                + "Found " + element + " instead!");
     }
 
     public int recipeTime() {

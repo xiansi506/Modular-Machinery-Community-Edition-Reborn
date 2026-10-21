@@ -4,6 +4,10 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonPrimitive;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Builds the JSON body of a {@code modular_machinery_reborn:machine} recipe.
@@ -30,11 +34,63 @@ public final class MachineRecipeJsonBuilder {
     private static final int DEFAULT_RECIPE_TIME = 100;
 
     private final JsonArray requirements = new JsonArray();
+    private final List<String> machines = new ArrayList<>();
+    private final JsonArray startCommands = new JsonArray();
+    private final JsonArray processingCommands = new JsonArray();
+    private final JsonArray finishCommands = new JsonArray();
     private int recipeTime = DEFAULT_RECIPE_TIME;
     private int maxParallelism;
     private boolean cancelIfPerTickFails;
     private String registryName;
     private JsonObject lastCatalyst;
+
+    /**
+     * Makes this recipe belong to several machines. The original accepted the {@code machine} field as one
+     * string or a non-empty array of strings; this is the typed way to write the array. Calling it replaces any
+     * earlier call.
+     */
+    public MachineRecipeJsonBuilder machines(String... machineIds) {
+        this.machines.clear();
+        if (machineIds != null) {
+            for (String machine : machineIds) {
+                this.machines.add(requireId(machine, "machine"));
+            }
+        }
+        return this;
+    }
+
+    /** Appends a {@code startCommands} entry that runs when the craft starts. */
+    public MachineRecipeJsonBuilder startCommand(String command) {
+        return startCommand(command, -1);
+    }
+
+    /** Appends a {@code startCommands} entry with an optional interval; a negative interval means every time. */
+    public MachineRecipeJsonBuilder startCommand(String command, int interval) {
+        this.startCommands.add(commandJson(command, interval));
+        return this;
+    }
+
+    /** Appends a {@code processingCommands} entry that runs after every successful craft tick. */
+    public MachineRecipeJsonBuilder processingCommand(String command) {
+        return processingCommand(command, -1);
+    }
+
+    /** Appends a {@code processingCommands} entry with an optional interval. */
+    public MachineRecipeJsonBuilder processingCommand(String command, int interval) {
+        this.processingCommands.add(commandJson(command, interval));
+        return this;
+    }
+
+    /** Appends a {@code finishCommands} entry that runs when the craft finishes. */
+    public MachineRecipeJsonBuilder finishCommand(String command) {
+        return finishCommand(command, -1);
+    }
+
+    /** Appends a {@code finishCommands} entry with an optional interval. */
+    public MachineRecipeJsonBuilder finishCommand(String command, int interval) {
+        this.finishCommands.add(commandJson(command, interval));
+        return this;
+    }
 
     public MachineRecipeJsonBuilder time(int ticks) {
         if (ticks < 1) {
@@ -241,7 +297,15 @@ public final class MachineRecipeJsonBuilder {
     /** Builds the recipe body. The returned tree is independent of the builder. */
     public JsonObject build(String machine) {
         JsonObject json = new JsonObject();
-        json.addProperty("machine", requireId(machine, "machine"));
+        if (this.machines.isEmpty()) {
+            json.addProperty("machine", requireId(machine, "machine"));
+        } else {
+            JsonArray array = new JsonArray();
+            for (String id : this.machines) {
+                array.add(id);
+            }
+            json.add("machine", array);
+        }
         if (this.registryName != null) {
             json.addProperty("registryName", this.registryName);
         }
@@ -252,8 +316,32 @@ public final class MachineRecipeJsonBuilder {
         if (this.cancelIfPerTickFails) {
             json.addProperty("cancelIfPerTickFails", true);
         }
+        if (!this.startCommands.isEmpty()) {
+            json.add("startCommands", this.startCommands.deepCopy());
+        }
+        if (!this.processingCommands.isEmpty()) {
+            json.add("processingCommands", this.processingCommands.deepCopy());
+        }
+        if (!this.finishCommands.isEmpty()) {
+            json.add("finishCommands", this.finishCommands.deepCopy());
+        }
         json.add("requirements", this.requirements.deepCopy());
         return json;
+    }
+
+    /** A string for a plain command, or {@code {command, interval}} when an interval was given. */
+    private static JsonElement commandJson(String command, int interval) {
+        if (command == null) {
+            throw new IllegalArgumentException("command must not be null");
+        }
+        String text = command;
+        if (interval < 0) {
+            return new JsonPrimitive(text);
+        }
+        JsonObject object = new JsonObject();
+        object.addProperty("command", text);
+        object.addProperty("interval", interval);
+        return object;
     }
 
     private JsonObject requireCatalyst(String method) {

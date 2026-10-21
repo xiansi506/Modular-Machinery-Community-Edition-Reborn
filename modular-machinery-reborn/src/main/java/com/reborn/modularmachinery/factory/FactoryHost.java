@@ -82,6 +82,29 @@ public interface FactoryHost {
     /** The level's random source, for the same chance rolls the single-craft path uses. */
     RandomSource random();
 
+    /** {@link #runRecipeCommands} phase for the recipe's {@code startCommands}. */
+    int PHASE_START = 0;
+
+    /** {@link #runRecipeCommands} phase for the recipe's {@code processingCommands}. */
+    int PHASE_PROCESSING = 1;
+
+    /** {@link #runRecipeCommands} phase for the recipe's {@code finishCommands}. */
+    int PHASE_FINISH = 2;
+
+    /**
+     * Runs one of the recipe's three command lists for a factory thread.
+     *
+     * <p>The engine deliberately has no {@code Level}, so it cannot build a command source; the host does it
+     * exactly as the single-craft path does. {@code phase} is one of {@link #PHASE_START},
+     * {@link #PHASE_PROCESSING}, {@link #PHASE_FINISH}. The tick is the thread's progress <b>before</b> the
+     * current successful tick was counted, which is what the original's {@code ioTick} ordering produced.
+     *
+     * <p>The phase is an {@code int} rather than the recipe package's enum so that this interface — and every
+     * host implementing it, including the offline harness — keeps compiling against a source tree that does not
+     * yet have the command layer; the red run depends on exactly that.
+     */
+    void runRecipeCommands(FactoryThread thread, MachineRecipe recipe, int phase, int tick);
+
     /**
      * A thread started a recipe: its inputs have just been consumed. The controller marks itself dirty and
      * refreshes what the client sees, which is the original's {@code onThreadRecipeStart}

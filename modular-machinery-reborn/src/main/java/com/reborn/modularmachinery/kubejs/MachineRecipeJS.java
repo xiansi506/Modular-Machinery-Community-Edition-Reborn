@@ -79,6 +79,42 @@ public final class MachineRecipeJS extends RecipeJS {
         return this;
     }
 
+    /** Makes the recipe belong to several machines (the original's {@code machine} array). */
+    public MachineRecipeJS machines(String... machineIds) {
+        this.builder.machines(machineIds);
+        return this;
+    }
+
+    public MachineRecipeJS startCommand(String command) {
+        this.builder.startCommand(command);
+        return this;
+    }
+
+    public MachineRecipeJS startCommand(String command, int interval) {
+        this.builder.startCommand(command, interval);
+        return this;
+    }
+
+    public MachineRecipeJS processingCommand(String command) {
+        this.builder.processingCommand(command);
+        return this;
+    }
+
+    public MachineRecipeJS processingCommand(String command, int interval) {
+        this.builder.processingCommand(command, interval);
+        return this;
+    }
+
+    public MachineRecipeJS finishCommand(String command) {
+        this.builder.finishCommand(command);
+        return this;
+    }
+
+    public MachineRecipeJS finishCommand(String command, int interval) {
+        this.builder.finishCommand(command, interval);
+        return this;
+    }
+
     public MachineRecipeJS cancelIfPerTickFails(boolean cancel) {
         this.builder.cancelIfPerTickFails(cancel);
         return this;

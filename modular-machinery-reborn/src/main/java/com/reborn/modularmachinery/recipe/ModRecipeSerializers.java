@@ -48,7 +48,7 @@ public final class ModRecipeSerializers {
 
         @Override
         public MachineRecipe fromJson(ResourceLocation id, JsonObject json) {
-            String machine = requireString(json, "machine", id);
+            List<String> machines = MachineRecipe.parseMachines(json, id);
             String registryName = json.has("registryName") ? json.get("registryName").getAsString() : id.getPath();
             int recipeTime = json.has("recipeTime") ? json.get("recipeTime").getAsInt() : 100;
             if (recipeTime < 1) {
@@ -73,8 +73,9 @@ public final class ModRecipeSerializers {
                 // 含义完全相同，所以整条路径只有一处。种类分派则交给 RequirementTypes 注册表。
                 requirements.add(MachineRequirementParser.parse(element.getAsJsonObject(), id));
             }
-            return new MachineRecipe(id, machine, registryName, recipeTime, requirements,
-                    parseMaxParallelism(json, id), MachineRecipe.parseCancelIfPerTickFails(json, id));
+            return new MachineRecipe(id, machines, registryName, recipeTime, requirements,
+                    parseMaxParallelism(json, id), MachineRecipe.parseCancelIfPerTickFails(json, id),
+                    RecipeCommands.parse(json));
         }
 
         /**
@@ -106,41 +107,41 @@ public final class ModRecipeSerializers {
 
         @Override
         public MachineRecipe fromNetwork(ResourceLocation id, FriendlyByteBuf buf) {
-            String machine = buf.readUtf();
+            int machineCount = buf.readVarInt();
+            List<String> machines = new ArrayList<>(machineCount);
+            for (int i = 0; i < machineCount; i++) {
+                machines.add(buf.readUtf());
+            }
             String registryName = buf.readUtf();
             int recipeTime = buf.readVarInt();
             int maxParallelism = buf.readVarInt();
             boolean cancelIfPerTickFails = buf.readBoolean();
+            RecipeCommands commands = RecipeCommands.read(buf);
             int count = buf.readVarInt();
             List<MachineRequirement> requirements = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
                 requirements.add(MachineRequirementParser.read(buf));
             }
-            return new MachineRecipe(id, machine, registryName, recipeTime, requirements, maxParallelism,
-                    cancelIfPerTickFails);
+            return new MachineRecipe(id, machines, registryName, recipeTime, requirements, maxParallelism,
+                    cancelIfPerTickFails, commands);
         }
 
         @Override
         public void toNetwork(FriendlyByteBuf buf, MachineRecipe recipe) {
-            buf.writeUtf(recipe.machine());
+            buf.writeVarInt(recipe.machines().size());
+            for (String machine : recipe.machines()) {
+                buf.writeUtf(machine);
+            }
             buf.writeUtf(recipe.registryName());
             buf.writeVarInt(recipe.recipeTime());
             buf.writeVarInt(recipe.maxParallelism());
             buf.writeBoolean(recipe.cancelIfPerTickFails());
+            recipe.commands().write(buf);
             buf.writeVarInt(recipe.requirements().size());
             for (MachineRequirement requirement : recipe.requirements()) {
                 MachineRequirementParser.write(buf, requirement);
             }
         }
-    }
-
-    // ------------------------------------------------------------------ json
-
-    private static String requireString(JsonObject json, String key, Object where) {
-        if (!json.has(key)) {
-            throw new JsonParseException("Missing '" + key + "' in " + where);
-        }
-        return json.get(key).getAsString();
     }
 
     // --------------------------------------------------------------- network

@@ -437,7 +437,7 @@ public final class DiagnoseCommand {
         int total = 0;
         int runnable = 0;
         for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
-            if (!machine.id().equals(recipe.machineId())) {
+            if (!recipe.belongsTo(machine.id())) {
                 continue;
             }
             total++;
