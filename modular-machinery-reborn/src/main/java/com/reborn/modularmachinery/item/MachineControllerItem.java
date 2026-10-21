@@ -1,14 +1,21 @@
 package com.reborn.modularmachinery.item;
 
+import com.reborn.modularmachinery.block.ControllerSecurity;
+import com.reborn.modularmachinery.block.MachineControllerBlockEntity;
+import com.reborn.modularmachinery.config.ModConfig;
 import com.reborn.modularmachinery.machine.MachineDefinition;
 import com.reborn.modularmachinery.machine.MachineRegistry;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.Block;
 
 import javax.annotation.Nullable;
+import java.util.UUID;
 
 /**
  * The item form of a controller.
@@ -42,6 +49,38 @@ public class MachineControllerItem extends BlockItem {
 
     public boolean isGeneric() {
         return this.boundMachine == null;
+    }
+
+    /**
+     * A11: enforce the controller item's owner tag before placing, then record the placer as owner.
+     *
+     * <p>The original did both in {@code ItemBlockController#placeBlockAt} and {@code EventHandler#onBlockPlaced}:
+     * the event cancelled a non-owner placing an item whose tag named another player, and the successful placement
+     * wrote the tag's owner (or the placer, when the item had no tag). Creative placement is exempt from the gate,
+     * but still preserves the item's owner — the original's place event returned early for creative players.
+     */
+    @Override
+    public InteractionResult place(BlockPlaceContext context) {
+        Player player = context.getPlayer();
+        ItemStack stack = context.getItemInHand();
+        UUID taggedOwner = ControllerSecurity.ownerOf(stack);
+        boolean hasOwnerTag = ControllerSecurity.hasOwnerTag(stack);
+        if (!ControllerSecurity.canPlace(ModConfig.enableSecuritySystem(),
+                player != null && player.isCreative(), taggedOwner, player == null ? null : player.getUUID())) {
+            return InteractionResult.FAIL;
+        }
+        InteractionResult result = super.place(context);
+        if (result.consumesAction() && !context.getLevel().isClientSide
+                && context.getLevel().getBlockEntity(context.getClickedPos())
+                        instanceof MachineControllerBlockEntity controller) {
+            if (hasOwnerTag) {
+                // A malformed tag reads as null and leaves the controller unowned, as the original's catch did.
+                controller.setOwner(taggedOwner);
+            } else if (player != null) {
+                controller.setOwner(player.getUUID());
+            }
+        }
+        return result;
     }
 
     @Override

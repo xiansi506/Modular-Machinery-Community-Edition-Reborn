@@ -120,6 +120,8 @@ public final class ModConfig {
     private static final String MAX_STRUCTURE_CHECK_DELAY = "max-structure-check-delay";
     /** The original's full-NBT switch: general.enable-full-data-sync. */
     private static final String ENABLE_FULL_DATA_SYNC = "enable-full-data-sync";
+    /** The original's owner check switch: general.enable-security-system. */
+    private static final String ENABLE_SECURITY_SYSTEM = "enable-security-system";
     /** The original's own category and key spelling: {@code display.energy.Display_Energy_Type}. */
     private static final String DISPLAY_ENERGY_ROOT = "display.energy";
     private static final String DISPLAY_ENERGY_KEY = "Display_Energy_Type";
@@ -178,6 +180,8 @@ public final class ModConfig {
     private static ForgeConfigSpec.IntValue MAX_STRUCTURE_CHECK_DELAY_VALUE;
     /** general.enable-full-data-sync. Assigned in build(). */
     private static ForgeConfigSpec.BooleanValue ENABLE_FULL_DATA_SYNC_VALUE;
+    /** general.enable-security-system. Assigned in build(). */
+    private static ForgeConfigSpec.BooleanValue ENABLE_SECURITY_SYSTEM_VALUE;
     /**
      * The original warned when structure-check-delay >= max-structure-check-delay and then reset both values
      * (TileMultiblockMachineController.java:184-188). The normalized scheduler applies the same reset; this
@@ -303,6 +307,18 @@ public final class ModConfig {
                 "a full block-entity update when its structure, failure text, colour or threads change.");
         ENABLE_FULL_DATA_SYNC_VALUE = builder.define(
                 List.of(GENERAL_ROOT, ENABLE_FULL_DATA_SYNC), false);
+
+        // ---- general.*: the original's owner check (A11) ----------------------------------------------
+        // The original read this in loadFromConfig (TileMultiblockMachineController.java:195-196), in the
+        // "general" category, default false. Despite its comment promising to deny "players using the
+        // controller", the code only enforced it in two places: breaking a controller (EventHandler#onBlockBroken)
+        // and placing one whose item carried another player's owner tag (EventHandler#onBlockPlaced). This port
+        // keeps exactly those two gates; opening the screen and running the machine stay unrestricted.
+        builder.comment("Only the controller's owner may break it, and only an owner may place a controller that",
+                "carries another player's owner tag (the original's enable-security-system). Default false.",
+                "The owner is always recorded on placement, whether this is on or off.");
+        ENABLE_SECURITY_SYSTEM_VALUE = builder.define(
+                List.of(GENERAL_ROOT, ENABLE_SECURITY_SYSTEM), false);
 
         // ---- Section 6 of 6: display.energy.Display_Energy_Type ---------------------------------------
         // The original's key, in the original's own category and with the original's own spelling and casing
@@ -550,6 +566,21 @@ public final class ModConfig {
             return false;
         }
         return ENABLE_FULL_DATA_SYNC_VALUE.get();
+    }
+
+    /**
+     * {@code general.enable-security-system} — the original's opt-in owner check
+     * ({@code TileMultiblockMachineController.java:125}, read at {@code :195-196}). Default false.
+     *
+     * <p>Enforced at the two places the original enforced it: {@code EventHandler#onBlockBroken} cancels a
+     * non-owner breaking a formed controller, and {@code EventHandler#onBlockPlaced} cancels placing an item whose
+     * owner tag names someone else. The controller screen and the machine itself are not gated.
+     */
+    public static boolean enableSecuritySystem() {
+        if (ENABLE_SECURITY_SYSTEM_VALUE == null || !SPEC.isLoaded()) {
+            return false;
+        }
+        return ENABLE_SECURITY_SYSTEM_VALUE.get();
     }
 
     /**

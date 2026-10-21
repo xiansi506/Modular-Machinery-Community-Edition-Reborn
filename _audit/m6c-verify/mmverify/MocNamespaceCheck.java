@@ -610,12 +610,14 @@ final class MocNamespaceCheck {
         // (the same fact ParallelCraftCheck's section R asserts from its own angle).
         // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit);
         // 44 = that plus A10's three structure-check keys and A12's general.enable-full-data-sync.
-        check("the config spec defines this many keys", 44, rendered.size());
+        // 45 = that plus A11's general.enable-security-system.
+        check("the config spec defines this many keys", 45, rendered.size());
 
         String[][] expected = {
                 {"general.modular-controller-compatible-mode", "false"},
                 {"general.disable-moc-deprecated-tip", "false"},
                 {"general.enable-full-data-sync", "false"},
+                {"general.enable-security-system", "false"},
         };
         for (String[] pair : expected) {
             String actual = rendered.get(pair[0]);

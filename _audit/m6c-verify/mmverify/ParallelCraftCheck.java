@@ -348,6 +348,9 @@ public final class ParallelCraftCheck {
         // 0.68.0：A12——旧版 general.enable-full-data-sync（默认关）。开启后配方开始/结束把整份
         // 方块实体 NBT 发给客户端；本版此前连键都没有，开工/完成也没有任何主动发包。
         FullDataSyncCheck.fullDataSync();
+        // 0.69.0：A11——旧版 general.enable-security-system（默认关）与控制器 owner。owner 总是记录，
+        // 开关只拦「非 owner 破坏」和「非 owner 放置带别人 owner 标签的控制器物品」。
+        SecurityCheck.security();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -865,10 +868,12 @@ public final class ParallelCraftCheck {
         // general.disable-moc-deprecated-tip; the display.energy unit key is the sixteenth.
         // 40 = the 16 keys before A4 + 24 hatch keys (8 fluid, 8 energy size, 8 energy limit);
         // 44 = that plus A10's three structure-check keys and A12's general.enable-full-data-sync.
-        check("the config spec defines this many keys", 44, rendered.size());
+        // 45 = that plus A11's general.enable-security-system.
+        check("the config spec defines this many keys", 45, rendered.size());
 
         String[][] expected = {
                 {"general.enable-full-data-sync", "false"},
+                {"general.enable-security-system", "false"},
                 {"parallel-controller.normal.max-parallelism", "4"},
                 {"parallel-controller.reinforced.max-parallelism", "16"},
                 {"parallel-controller.elite.max-parallelism", "64"},
@@ -1023,7 +1028,7 @@ public final class ParallelCraftCheck {
                     }
                 }
                 check("every key with a plain path is readable from that file (missing:" + missing + ")",
-                        14, readable);
+                        15, readable);
                 report("the spec reports itself loaded after setConfig",
                         (Boolean) invokeOn(spec, "isLoaded"));
 
@@ -1053,7 +1058,8 @@ public final class ParallelCraftCheck {
                 report("...and the file grew only by those keys (was " + before.length() + ", now "
                                 + after.length() + " chars)", after.length() > before.length());
                 // The strongest form of "the old file still works": re-read what was just written and find all
-                // fourteen keys with the right values in it.
+                // fifteen keys with the right values in it (display.energy is excluded: its dotted section name is
+                // not reachable through NightConfig's string path, so it is asserted textually above).
                 Object reread = newConfig(copy);
                 int found = 0;
                 for (String[] pair : expected) {
@@ -1063,7 +1069,7 @@ public final class ParallelCraftCheck {
                         found++;
                     }
                 }
-                check("...and re-reading the saved file finds all fourteen keys at their defaults", 14, found);
+                check("...and re-reading the saved file finds all fifteen keys at their defaults", 15, found);
             } catch (Exception exception) {
                 report("round-tripping the user's config failed: " + exception, false);
             } finally {

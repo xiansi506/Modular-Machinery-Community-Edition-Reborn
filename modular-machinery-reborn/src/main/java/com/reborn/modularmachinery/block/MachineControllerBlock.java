@@ -16,10 +16,14 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.storage.loot.LootParams;
+import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
 
 import javax.annotation.Nullable;
+import java.util.List;
 
 /**
  * A machine controller.
@@ -136,6 +140,29 @@ public final class MachineControllerBlock extends Block implements EntityBlock {
             ItemStackDrops.pop(level, pos, controller.items());
         }
         super.onRemove(state, level, pos, newState, moving);
+    }
+
+    /**
+     * A11: the dropped controller keeps its owner, like the original's {@code BlockController#getDrops}
+     * ({@code :145-164}) which put the owner UUID into the item's tag.
+     *
+     * <p>Overriding the instance method (rather than {@code playerDestroy}) covers every drop path, because
+     * {@code Block#dropResources} calls {@code state.getDrops(params)} — player break, explosion and any other
+     * caller of the loot table. The tag is written only onto this block's own item; the blueprint slot is popped
+     * separately in {@link #onRemove}.
+     */
+    @Override
+    public List<ItemStack> getDrops(BlockState state, LootParams.Builder params) {
+        List<ItemStack> drops = super.getDrops(state, params);
+        if (params.getOptionalParameter(LootContextParams.BLOCK_ENTITY)
+                instanceof MachineControllerBlockEntity controller && controller.getOwner() != null) {
+            for (ItemStack drop : drops) {
+                if (drop.is(this.asItem())) {
+                    ControllerSecurity.putOwner(drop.getOrCreateTag(), controller.getOwner());
+                }
+            }
+        }
+        return drops;
     }
 
     /**

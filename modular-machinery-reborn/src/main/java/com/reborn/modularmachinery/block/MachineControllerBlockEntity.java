@@ -57,6 +57,7 @@ import net.minecraftforge.network.NetworkHooks;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * The machine controller.
@@ -205,6 +206,16 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** Registry name of the machine currently formed here, or {@code null} when nothing matches. */
     @Nullable
     private ResourceLocation machineId;
+
+    /**
+     * The player who placed this controller, or the owner copied from the placed item's tag (A11).
+     *
+     * <p>The original always wrote this on placement, independent of {@code enable-security-system}
+     * ({@code ItemBlockController.java:35-63}); the switch only decides whether the owner is enforced. Saves
+     * written before this release have no owner and load as {@code null}, which is deliberately not guessed.
+     */
+    @Nullable
+    private UUID owner;
     /**
      * 这台机器外衣的染色；{@code null} = 没设过（不染色）。来源是定义的 {@code color}。
      *
@@ -424,6 +435,24 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 ? controller.boundMachine() : null;
         this.factoryBlock = state.getBlock() instanceof MachineControllerBlock controller && controller.factory();
         this.factoryEngine = new FactoryEngine(new FactoryHostImpl());
+    }
+
+    /** The player who owns this controller, or {@code null} for a save written before A11 or an invalid tag. */
+    @Nullable
+    public UUID getOwner() {
+        return this.owner;
+    }
+
+    /**
+     * Sets the owner and marks the block entity dirty. Called on placement and on load; the security check itself
+     * reads {@link #getOwner()} through {@link ControllerSecurity}.
+     */
+    public void setOwner(@Nullable UUID owner) {
+        if (java.util.Objects.equals(this.owner, owner)) {
+            return;
+        }
+        this.owner = owner;
+        setChanged();
     }
 
     public static void tick(Level level, BlockPos pos, BlockState state, MachineControllerBlockEntity be) {
@@ -1944,6 +1973,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (machineId != null) {
             tag.putString("machine", machineId.toString());
         }
+        // A11: the original wrote this as a UUID string under "owner" (TileMultiblockMachineController:1415-1417).
+        ControllerSecurity.putOwner(tag, this.owner);
         // 波 6：染色。与 machineId 同路同步到客户端——渲染时的 tint 读的就是它。
         if (machineColor != null) {
             tag.putInt("machineColor", machineColor);
@@ -1984,6 +2015,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // A2：缺这个键的存档（0.63.9 及更早）代表「在途合成没有组」——保持 null，tick 里按全部端口继续。
         activeGroupId = tag.contains("activeGroupId") ? tag.getInt("activeGroupId") : null;
         machineId = tag.contains("machine") ? ResourceLocation.tryParse(tag.getString("machine")) : null;
+        // A11: an absent or malformed owner stays null; the original only warned and left the field unset.
+        this.owner = ControllerSecurity.ownerOf(tag);
         machineColor = tag.contains("machineColor") ? tag.getInt("machineColor") : null;
         this.colorizedPartOffsets.clear();
         if (tag.contains("machineColorParts", Tag.TAG_LONG_ARRAY)) {
