@@ -20,9 +20,14 @@ public final class Ae2ItemBusRegistry {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static RegistryObject<BlockEntityType<?>> register(DeferredRegister<BlockEntityType<?>> register,
-                                                              Block input, Block output) {
+                                                              RegistryObject<Block> input,
+                                                              RegistryObject<Block> output) {
+        // 0.73.1: 这里必须接收 RegistryObject 而不是已经解引用过的 Block。0.73.0 在 ModBlocks 的静态
+        // 初始化里调用 input.get()/output.get()，那时方块注册事件还没跑，Forge 抛
+        // "Registry Object not present: ...:me_item_input_bus"，整个模组构造失败。
+        // get() 只能放在下面的 supplier 里：它在 BLOCK_ENTITIES 注册事件期间才执行，方块已经就位。
         RegistryObject<BlockEntityType<MeItemBusBlockEntity>> registered = register.register("me_item_bus",
-                () -> BlockEntityType.Builder.of(MeItemBusBlockEntity::new, input, output).build(null));
+                () -> BlockEntityType.Builder.of(MeItemBusBlockEntity::new, input.get(), output.get()).build(null));
         return (RegistryObject) registered;
     }
 }

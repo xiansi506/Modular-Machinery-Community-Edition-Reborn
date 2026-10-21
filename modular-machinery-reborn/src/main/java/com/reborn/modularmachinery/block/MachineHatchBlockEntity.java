@@ -112,8 +112,11 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     public MachineHatchBlockEntity(net.minecraft.world.level.block.entity.BlockEntityType<?> type,
                                    BlockPos pos, BlockState state) {
         super(type, pos, state);
-        this.kind = state.getBlock() instanceof MachineHatchBlock hatch ? hatch.kind() : HatchKind.ITEM_INPUT;
-        this.tier = state.getValue(this.kind.sizeProperty());
+        MachineHatchBlock hatch = state.getBlock() instanceof MachineHatchBlock candidate ? candidate : null;
+        this.kind = hatch != null ? hatch.kind() : HatchKind.ITEM_INPUT;
+        // 0.73.2：走方块自己的 tier(BlockState)。普通仓口读 size 属性；ME 总线忽略状态值，
+        // 始终返回家族阶梯里的唯一一项（见 MeItemBusBlock#tier）。
+        this.tier = hatch != null ? hatch.tier(state) : HatchTier.ITEM_LADDER.get(0);
 
         // Locals first: javac's definite-assignment analysis does not treat a statement switch that covers
         // every enum constant as exhaustive when the selector is a method call, so it cannot prove the final

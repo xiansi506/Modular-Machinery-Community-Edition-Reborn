@@ -1,5 +1,6 @@
 {
   "variants": {
-    "size=me_output": { "model": "modular_machinery_reborn:block/me_item_output_bus" }
+    "size=me_output": { "model": "modular_machinery_reborn:block/me_item_output_bus" },
+    "size=me_input": { "model": "modular_machinery_reborn:block/me_item_output_bus" }
   }
 }

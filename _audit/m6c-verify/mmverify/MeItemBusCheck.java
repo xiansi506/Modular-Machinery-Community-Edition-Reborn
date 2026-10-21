@@ -8,6 +8,9 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraftforge.items.ItemStackHandler;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -71,6 +74,7 @@ final class MeItemBusCheck {
                         && !HatchTier.ITEM_LADDER.contains(outputTier));
 
         meBlockProperties(input, output, inputTier, outputTier);
+        registrationIsLazy();
 
         Class<?> logic = classOrNull(LOGIC);
         storageInterface = classOrNull(LOGIC + "$Storage");
@@ -224,15 +228,19 @@ final class MeItemBusCheck {
 
 
     /**
-     * 输入与输出必须各自持有自己的 size 属性。
+     * 输入与输出必须各自持有自己的 size 属性，而且每个属性必须至少有两个可能值。
      *
-     * <p>这条来自实现期抓到的一个真实运行时错误：两个 ME 家族共用一个静态 SIZE 时，输出方块在
-     * 注册期 setValue 会因属性只允许 ME_INPUT 而抛 IllegalArgumentException。编译期看不出来，
-     * 所以这里钉住「属性实例」与「允许值集合」两件事。
+     * <p>这条来自两次真实运行时错误。0.73.0 的第一次是：两个 ME 家族共用一个静态 SIZE 时，
+     * 输出方块在注册期 setValue 会因属性只允许 ME_INPUT 而抛 IllegalArgumentException。
+     * 0.73.1 的第二次是：把属性按家族拆开后，每个属性只剩一个可能值，Minecraft 的
+     * {@code StateDefinition.Builder#add} 直接拒绝，启动时抛
+     * {@code IllegalArgumentException: Block{...} attempted use property size with <= 1 possible values}。
+     * 编译期两次都看不出来，所以这里钉住「属性实例」「至少两个值」「包含两个 ME tier」三件事。
      *
      * <p>默认状态本身没法在离线复现器里断言：{@code new Block(...)} 会给方块建 intrusive holder，
      * 而复现器跑到这里时 Forge 的注册表已经冻结（{@code IllegalStateException: Registry is already
-     * frozen}）。默认值只能靠构造器里的 {@code setValue(SIZE, …)} 与这条属性同一性保证。
+     * frozen}）。默认值只能靠构造器里的 {@code setValue(SIZE, …)}、这条属性同一性，以及
+     * {@code MeItemBusBlock#tier} 对状态值的忽略来保证。
      */
     private static void meBlockProperties(HatchKind input, HatchKind output, HatchTier inputTier, HatchTier outputTier) {
         Class<?> inputBlock = classOrNull("com.reborn.modularmachinery.block.MeItemBusBlock$Input");
@@ -250,10 +258,65 @@ final class MeItemBusCheck {
                 inputSize != null && inputSize == input.sizeProperty());
         report("输出方块的 SIZE 就是 HatchKind.ME_ITEM_OUTPUT.sizeProperty()（同一实例）",
                 outputSize != null && outputSize == output.sizeProperty());
-        report("输入 SIZE 只允许 ME_INPUT", inputSize != null
-                && Set.copyOf(inputSize.getPossibleValues()).equals(Set.of(inputTier)));
-        report("输出 SIZE 只允许 ME_OUTPUT", outputSize != null
-                && Set.copyOf(outputSize.getPossibleValues()).equals(Set.of(outputTier)));
+        report("输入 SIZE 至少有两个可能值（单值属性会被 StateDefinition 拒绝）", inputSize != null
+                && inputSize.getPossibleValues().size() > 1);
+        report("输出 SIZE 至少有两个可能值（单值属性会被 StateDefinition 拒绝）", outputSize != null
+                && outputSize.getPossibleValues().size() > 1);
+        report("输入 SIZE 允许 ME_INPUT 与 ME_OUTPUT", inputSize != null
+                && Set.copyOf(inputSize.getPossibleValues()).equals(Set.of(inputTier, outputTier)));
+        report("输出 SIZE 允许 ME_INPUT 与 ME_OUTPUT", outputSize != null
+                && Set.copyOf(outputSize.getPossibleValues()).equals(Set.of(inputTier, outputTier)));
+    }
+
+    /**
+     * 0.73.1 回归：ME 总线的方块实体注册不能在静态初始化时解引用方块。
+     *
+     * <p>0.73.0 在 {@code ModBlocks} 的静态初始化里把 {@code ME_ITEM_INPUT_BLOCK.get()} 传给
+     * {@code Ae2ItemBusRegistry}，而那时方块注册事件还没跑，Forge 抛
+     * {@code NullPointerException: Registry Object not present: ...:me_item_input_bus}，整个模组构造失败。
+     *
+     * <p>运行时无法在离线复现器里造一个未注册的 {@code RegistryObject}：它的构造器会触发
+     * {@code ObjectHolderRegistry}，而这个类在这里缺少 {@code net.minecraftforge.fml.common.Mod}。
+     * 所以这里钉两件事：入口的参数类型必须是 {@code RegistryObject}，且 {@code get()} 在源码里
+     * 只出现在 supplier 之内。真正「调用时不触碰方块」由这两条共同保证。
+     */
+    private static void registrationIsLazy() {
+        section("C4 回归：ME 总线注册必须延迟解引用方块（0.73.1）");
+        Class<?> registry = classOrNull("com.reborn.modularmachinery.compat.ae2.Ae2ItemBusRegistry");
+        report("存在 Ae2ItemBusRegistry", registry != null);
+
+        Method register = method(registry, "register", net.minecraftforge.registries.DeferredRegister.class,
+                net.minecraftforge.registries.RegistryObject.class, net.minecraftforge.registries.RegistryObject.class);
+        report("Ae2ItemBusRegistry.register 接收 RegistryObject<Block> 而不是已解引用的 Block", register != null);
+
+        try {
+            String registrySource = withoutComments(Files.readString(Path.of(
+                    "C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                            + "compat/ae2/Ae2ItemBusRegistry.java")));
+            int bounded = registrySource.indexOf("register.register(");
+            int firstGet = registrySource.indexOf(".get()");
+            report("Ae2ItemBusRegistry：第一个 .get() 出现在 register.register(...) 的参数里，而不是之前",
+                    bounded >= 0 && firstGet > bounded);
+
+            String blocksSource = withoutComments(Files.readString(Path.of(
+                    "C:/mmwork/modular-machinery-reborn/src/main/java/com/reborn/modularmachinery/"
+                            + "block/ModBlocks.java")));
+            int entityField = blocksSource.indexOf("ME_ITEM_BUS_ENTITY =");
+            int call = blocksSource.indexOf("Ae2ItemBusRegistry.register(", entityField);
+            int semicolon = call < 0 ? -1 : blocksSource.indexOf(';', call);
+            String callText = entityField < 0 || semicolon < 0
+                    ? "" : blocksSource.substring(entityField, semicolon + 1);
+            report("ModBlocks 把两个方块 RegistryObject 原样传给注册入口", callText.contains("ME_ITEM_INPUT_BLOCK")
+                    && callText.contains("ME_ITEM_OUTPUT_BLOCK"));
+            report("ModBlocks 的 ME_ITEM_BUS_ENTITY 初始化里没有 .get()（0.73.0 崩溃的那一行）",
+                    !callText.isEmpty() && !callText.contains(".get()"));
+        } catch (java.io.IOException failure) {
+            report("读源码失败：" + failure, false);
+        }
+    }
+
+    private static String withoutComments(String text) {
+        return text.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("(?m)//.*$", "");
     }
 
     private static EnumProperty<?> sizeProperty(Class<?> blockClass) {

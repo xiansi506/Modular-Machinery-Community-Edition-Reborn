@@ -29,11 +29,19 @@ public enum HatchKind implements StringRepresentable {
      * C4（0.73.0）：AE2 ME 物品输入总线。旧版一个方块、固定 16 个内部槽 + 16 个配置槽，没有 tier
      * 阶梯；这里的 {@link #ladder()} 只有 {@link HatchTier#ME_INPUT} 一项，只为复用仓口的方块状态
      * 与物品模型。只有装了 AE2 才注册这个方块。
+     *
+     * <p>0.73.2：方块状态的 {@code size} 属性必须同时允许两个 ME tier。Minecraft 的
+     * {@code StateDefinition.Builder#add} 会拒绝「可能值只有一个」的属性
+     * （{@code IllegalArgumentException: Block{...} attempted use property size with <= 1 possible values}），
+     * 0.73.1 就是在这里启动崩溃的。{@link #ladder()} 仍然只有一项，物品与容量只看它；
+     * 多出来的那个状态值由 {@code MeItemBusBlock#tier} 忽略。
      */
-    ME_ITEM_INPUT("me_item_input_bus", List.of(HatchTier.ME_INPUT), true, Family.ITEM),
+    ME_ITEM_INPUT("me_item_input_bus", List.of(HatchTier.ME_INPUT),
+            List.of(HatchTier.ME_INPUT, HatchTier.ME_OUTPUT), true, Family.ITEM),
 
-    /** C4（0.73.0）：AE2 ME 物品输出总线，固定 36 个输出槽。 */
-    ME_ITEM_OUTPUT("me_item_output_bus", List.of(HatchTier.ME_OUTPUT), false, Family.ITEM);
+    /** C4（0.73.0）：AE2 ME 物品输出总线，固定 36 个输出槽；0.73.2 起状态属性同样允许两个 ME tier。 */
+    ME_ITEM_OUTPUT("me_item_output_bus", List.of(HatchTier.ME_OUTPUT),
+            List.of(HatchTier.ME_INPUT, HatchTier.ME_OUTPUT), false, Family.ITEM);
 
     /** Which storage a hatch of this family carries. */
     public enum Family {
@@ -49,11 +57,22 @@ public enum HatchKind implements StringRepresentable {
     private final EnumProperty<HatchTier> sizeProperty;
 
     HatchKind(String id, List<HatchTier> ladder, boolean input, Family family) {
+        this(id, ladder, ladder, input, family);
+    }
+
+    /**
+     * @param stateValues the values the blockstate {@code size} property may take. For every family except
+     *                    the ME buses this is the ladder itself. The ME buses have a one-entry ladder but need
+     *                    a two-value property, because a blockstate property with a single possible value is
+     *                    rejected at block construction (see {@link #ME_ITEM_INPUT}).
+     */
+    HatchKind(String id, List<HatchTier> ladder, List<HatchTier> stateValues, boolean input, Family family) {
         this.id = id;
         this.ladder = ladder;
         this.input = input;
         this.family = family;
-        this.sizeProperty = EnumProperty.create("size", HatchTier.class, ladder.toArray(new HatchTier[0]));
+        this.sizeProperty = EnumProperty.create("size", HatchTier.class,
+                stateValues.toArray(new HatchTier[0]));
     }
 
     /** Registry path of the family block, e.g. {@code item_input_hatch}. */

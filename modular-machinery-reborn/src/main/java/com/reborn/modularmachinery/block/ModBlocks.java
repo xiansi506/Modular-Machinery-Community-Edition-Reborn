@@ -405,8 +405,8 @@ public final class ModBlocks {
      * name any {@code appeng} type.
      */
     public static final RegistryObject<BlockEntityType<?>> ME_ITEM_BUS_ENTITY =
-            AE2_LOADED ? Ae2ItemBusRegistry.register(BLOCK_ENTITIES, ME_ITEM_INPUT_BLOCK.get(),
-                    ME_ITEM_OUTPUT_BLOCK.get()) : null;
+            AE2_LOADED ? Ae2ItemBusRegistry.register(BLOCK_ENTITIES, ME_ITEM_INPUT_BLOCK,
+                    ME_ITEM_OUTPUT_BLOCK) : null;
 
     // ------------------------------------------------------- M6d: parallel controller
 

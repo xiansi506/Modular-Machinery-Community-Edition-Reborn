@@ -22,7 +22,13 @@ import javax.annotation.Nullable;
  * <p>为什么是两个嵌套类而不是一个类加一个静态 {@code SIZE}：
  * {@code createBlockStateDefinition} 在 {@link Block} 构造器里执行，早于实例字段赋值，
  * 所以属性必须是具体类的静态常量；而输入/输出两个 {@link HatchKind} 的
- * {@code sizeProperty()} 是**不同实例**、各自只允许一个值，不能共用一个静态属性。
+ * {@code sizeProperty()} 是**不同实例**，各自只该放自己的 tier。
+ *
+ * <p>0.73.2：这两个属性现在都允许 {@link HatchTier#ME_INPUT} 与 {@link HatchTier#ME_OUTPUT}
+ * 两个值。不是语义需要，而是 Minecraft 拒绝「可能值只有一个」的方块状态属性
+ * （{@code StateDefinition.Builder#add} 会抛 {@code IllegalArgumentException}）——0.73.1 的启动崩溃
+ * 正是这个原因。真正的 tier 由 {@link #tier(BlockState)} 固定为家族阶梯里的唯一项，状态值只用于
+ * 让属性合法、让物品放置有状态可写。
  */
 public abstract class MeItemBusBlock extends MachineHatchBlock {
 
@@ -31,6 +37,19 @@ public abstract class MeItemBusBlock extends MachineHatchBlock {
         if (!kind.isMeBus()) {
             throw new IllegalArgumentException("MeItemBusBlock needs a ME bus kind, got " + kind);
         }
+    }
+
+    /**
+     * 0.73.2：ME 总线的 tier 永远是这个家族阶梯里的唯一项，不读方块状态。
+     *
+     * <p>方块状态属性为了通过 {@code StateDefinition.Builder#add} 的「至少两个可能值」检查，
+     * 必须同时列出两个 ME tier（见类注释）。若放任 {@code state.getValue(SIZE)} 决定容量，
+     * 一条 {@code /setblock ... [size=me_output]} 就能让输入总线拿到 36 个槽。这里把状态值降级为
+     * 只用于「属性合法/物品放置写值」，容量仍由 {@link #kind()} 决定。
+     */
+    @Override
+    public HatchTier tier(BlockState state) {
+        return kind().ladder().get(0);
     }
 
     @Nullable
