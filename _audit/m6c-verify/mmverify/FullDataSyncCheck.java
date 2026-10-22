@@ -74,9 +74,10 @@ final class FullDataSyncCheck {
             report("...and sends the block entity's full update tag",
                     helper.contains("sendBlockUpdated") && helper.contains("Block.UPDATE_ALL"));
 
+            String tickServer = methodBody(entity, "private static void tickServer(");
             String tick = methodBody(entity, "public static void tick(");
             check("the single craft calls it once on start and once on finish", 2L,
-                    count(tick, "syncFullDataIfEnabled()"));
+                    count(tickServer, "syncFullDataIfEnabled()") + count(tick, "syncFullDataIfEnabled()"));
 
             String factoryStarted = methodBody(entity, "public void onThreadStarted(");
             String factoryFinished = methodBody(entity, "public void onThreadFinished(");

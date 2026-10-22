@@ -1,5 +1,14 @@
 package com.reborn.modularmachinery.block;
 
+import com.reborn.modularmachinery.api.event.MachineEvents;
+import com.reborn.modularmachinery.api.event.MachineStructureFormedEvent;
+import com.reborn.modularmachinery.api.event.MachineStructureUpdateEvent;
+import com.reborn.modularmachinery.api.event.MachineTickEvent;
+import com.reborn.modularmachinery.api.event.Phase;
+import com.reborn.modularmachinery.api.event.RecipeCheckEvent;
+import com.reborn.modularmachinery.api.event.RecipeFinishEvent;
+import com.reborn.modularmachinery.api.event.RecipeStartEvent;
+import com.reborn.modularmachinery.api.event.RecipeTickEvent;
 import com.reborn.modularmachinery.config.ModConfig;
 import com.reborn.modularmachinery.factory.FactoryEngine;
 import com.reborn.modularmachinery.factory.FactoryHost;
@@ -467,7 +476,28 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         setChanged();
     }
 
+    /**
+     * C2: the controller's server tick, wrapped in the original's paired {@link MachineTickEvent}.
+     *
+     * <p>The original posted {@code MachineTickEvent(Phase.START)} before its restricted tick and
+     * {@code Phase.END} after it, through {@code sendEventToComponents} and the controller's own listeners
+     * ({@code TileMultiblockMachineController:123-136}). The wrapper here covers every early return inside
+     * {@link #tickServer}: the END is in a {@code finally}, so a factory tick, a missing structure or a throwing
+     * listener still sees the pair close. The client never posts either half.
+     */
     public static void tick(Level level, BlockPos pos, BlockState state, MachineControllerBlockEntity be) {
+        if (level.isClientSide) {
+            return;
+        }
+        be.postMachineTick(Phase.START);
+        try {
+            tickServer(level, pos, state, be);
+        } finally {
+            be.postMachineTick(Phase.END);
+        }
+    }
+
+    private static void tickServer(Level level, BlockPos pos, BlockState state, MachineControllerBlockEntity be) {
         if (level.isClientSide) {
             return;
         }
@@ -562,6 +592,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // runs on every successful check exactly as the original's checkAndAddSmartInterface did.
             if (match != null) {
                 be.bindSmartInterfaces(match.machine());
+                // C2: the original's order (TileMultiblockMachineController:556-557): Formed, then Update.
+                // "Formed" means the check made an unformed controller formed; a machine that changed from one
+                // definition to another while staying formed only gets the update.
+                be.postStructureEvents(!wasFormed);
             }
             if (wasFormed != be.formed || !java.util.Objects.equals(previousMachine, be.machineId)) {
                 // The screen reads the machine name from the block entity, so the client needs the new tag.
@@ -680,6 +714,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 parallelism = 1;
             }
             recipe.setParallelism(parallelism);
+            // C2: the original's RecipeCheckEvent, START half, before canStart/canTick. A listener may lower
+            // the parallelism for this start; the event resolves through min(computed, requested) with a floor
+            // of one, so it cannot exceed the structure's ceiling or ask for zero copies.
+            RecipeCheckEvent startCheck = be.postRecipeCheck(Phase.START, recipe, parallelism);
+            int requested = startCheck.resolvedParallelism(parallelism);
+            if (requested != parallelism) {
+                parallelism = requested;
+                recipe.setParallelism(parallelism);
+            }
             if (!recipe.canStart(scope, effective) || !recipe.canTick(scope, effective)) {
                 // M6d-b: say *which* start-phase requirement refused, so an interface_number_input mismatch is
                 // reported as the original's own message rather than as a bare "idle".
@@ -688,12 +731,24 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 be.recordTiming(tickStart, searchNanos);
                 return;
             }
+            // C2: the original's RecipeCheckEvent, END half, after both gates said yes and before the one-shot
+            // inputs are paid. A second override still cannot raise the ceiling; the last write wins.
+            RecipeCheckEvent endCheck = be.postRecipeCheck(Phase.END, recipe, parallelism);
+            int adjusted = endCheck.resolvedParallelism(parallelism);
+            if (adjusted != parallelism) {
+                parallelism = adjusted;
+                recipe.setParallelism(parallelism);
+            }
             if (!recipe.start(scope, level.random, effective)) {
                 be.recordStartFailure(recipe, scope);
                 be.status = ControllerStatus.IDLE;
                 be.recordTiming(tickStart, searchNanos);
                 return;
             }
+            // C2: posted only once start() really succeeded. The original posted its start event before calling
+            // start(), but its start could not fail; here a refused one-shot requirement means no craft began,
+            // and announcing one would be false. The event is read-only either way.
+            be.postRecipeStart(recipe, parallelism);
             be.clearStartFailure();
             be.activeCraftModifiers = effective;
             be.activeRecipeId = recipe.getId();
@@ -720,6 +775,16 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // with every other controller in the level.
         recipe.setParallelism(be.activeParallelism);
 
+        // C2: the original's RecipeTickEvent, START half, before this tick's requirements are paid. Preventing
+        // here means nothing is drawn and the craft stays armed; the status stays CRAFTING because the recipe is
+        // still selected and will be tried again next tick.
+        RecipeTickEvent startTick = be.postRecipeTick(Phase.START, recipe);
+        if (startTick.isPreventProgressing()) {
+            be.status = ControllerStatus.CRAFTING;
+            be.recordTiming(tickStart, searchNanos);
+            return;
+        }
+
         int nextProgress = be.progress + 1;
         if (nextProgress >= be.maxProgress && !recipe.canFinish(scope, effective)) {
             // The craft would complete but the results do not fit. Hold without drawing this tick's resources
@@ -737,6 +802,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             return;
         }
         recipe.tick(scope, level.random, effective);
+        // C2: the original's RecipeTickEvent, END half, after the tick's requirements were paid and before the
+        // controller counts the tick. A listener that prevents here cannot be refunded — the original could not
+        // refund either — so the net effect is one tick of resources for no progress, which the event documents.
+        RecipeTickEvent endTick = be.postRecipeTick(Phase.END, recipe);
+        if (endTick.isPreventProgressing()) {
+            be.status = ControllerStatus.CRAFTING;
+            be.recordTiming(tickStart, searchNanos);
+            return;
+        }
         // B8: processingCommands see the progress *before* this successful tick was counted, which is what
         // the original's ioTick/ActiveMachineRecipe ordering produced.
         be.runRecipeCommands(recipe, RecipeCommands.Phase.PROCESSING, be.progress);
@@ -745,6 +819,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
         if (be.progress >= be.maxProgress) {
             recipe.finish(scope, level.random, effective);
+            // C2: after the outputs were settled and before the craft's state is cleared, so a listener sees the
+            // finished craft's recipe, max progress and parallelism rather than the next idle tick.
+            be.postRecipeFinish(recipe);
             // B8: finishCommands run after the outputs have been settled, even when one output's chance roll
             // failed to place anything -- the original's finishCrafting reached its command list regardless.
             be.runRecipeCommands(recipe, RecipeCommands.Phase.FINISH, 0);
@@ -1263,6 +1340,44 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             return;
         }
         this.applyFailureAction();
+    }
+
+    // ------------------------------------------------------------ C2 lifecycle events
+
+    private void postMachineTick(Phase phase) {
+        MachineEvents.post(new MachineTickEvent(this, this.machineId, phase));
+    }
+
+    /**
+     * Posts the structure pair in the original's order. Both carry the controller's <b>current</b> machine id;
+     * a formed event can therefore never arrive without one, and an update event after a failed check is not
+     * sent at all (the caller only invokes this when a match exists).
+     */
+    private void postStructureEvents(boolean newlyFormed) {
+        if (newlyFormed) {
+            MachineEvents.post(new MachineStructureFormedEvent(this, this.machineId));
+        }
+        MachineEvents.post(new MachineStructureUpdateEvent(this, this.machineId));
+    }
+
+    private RecipeCheckEvent postRecipeCheck(Phase phase, MachineRecipe recipe, int parallelism) {
+        return MachineEvents.post(new RecipeCheckEvent(this, this.machineId, phase, recipe, this.progress,
+                this.maxProgress, parallelism));
+    }
+
+    private void postRecipeStart(MachineRecipe recipe, int parallelism) {
+        MachineEvents.post(new RecipeStartEvent(this, this.machineId, recipe, this.progress, this.maxProgress,
+                parallelism));
+    }
+
+    private RecipeTickEvent postRecipeTick(Phase phase, MachineRecipe recipe) {
+        return MachineEvents.post(new RecipeTickEvent(this, this.machineId, phase, recipe, this.progress,
+                this.maxProgress, this.activeParallelism));
+    }
+
+    private void postRecipeFinish(MachineRecipe recipe) {
+        MachineEvents.post(new RecipeFinishEvent(this, this.machineId, recipe, this.progress, this.maxProgress,
+                this.activeParallelism));
     }
 
     /**

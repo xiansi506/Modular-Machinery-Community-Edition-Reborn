@@ -381,6 +381,9 @@ public final class ParallelCraftCheck {
         // buildWeight（sortId - 所有输入需求的 sortingWeight）升序；此前这两层信息整条丢失。
         // 红跑时 parsePriority/RecipeOrder/serializer 新字段都还不存在，全部走反射。
         RecipePriorityCheck.recipePriority();
+        // 0.79.0：C2——控制器生命周期事件层（首切片）。旧版把 Formed/Update/Tick/RecipeCheck/Start/Tick/Finish
+        // 发给组件与升级处理器；此前本版一条都没有。红跑时整个 api.event 包都不存在，全部走反射。
+        EventLayerCheck.eventLayer();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");
@@ -5747,6 +5750,22 @@ public final class ParallelCraftCheck {
     }
 
     /**
+     * Calls made from the controller's server tick, whether the body still sits in {@code tick} (pre-0.79.0) or
+     * was split out into {@code tickServer} (0.79.0, so the public tick can wrap it with lifecycle events).
+     */
+    private static int countControllerTickInvocations(String ownerSuffix, String invokedName, String invokedDesc) {
+        int total = 0;
+        for (String method : new String[]{"tickServer", "tick"}) {
+            int count = countInvocations("com/reborn/modularmachinery/block/MachineControllerBlockEntity", method,
+                    ownerSuffix, invokedName, invokedDesc);
+            if (count > 0) {
+                total += count;
+            }
+        }
+        return total;
+    }
+
+    /**
      * Like {@link #countInvocations}, but also counts the synthetic {@code lambda$methodName$N} bodies javac
      * generates for lambdas inside that method. A call written in a {@code CommandSink} lambda is still a call the
      * method makes; scanning only the named method would report 0 and look like missing wiring.
@@ -6356,11 +6375,9 @@ public final class ParallelCraftCheck {
         //
         // 0.24.5 shipped a correct method that no render pass reached any more (section V), so "the method
         // behaves" and "the method is reached" are asserted separately, out of the built classes' own bytes.
-        int controllerCalls = countInvocations(
-                "com/reborn/modularmachinery/block/MachineControllerBlockEntity", "tick",
+        int controllerCalls = countControllerTickInvocations(
                 "MachineControllerBlockEntity", "applyFailureAction", "()V")
-                + countInvocations(
-                "com/reborn/modularmachinery/block/MachineControllerBlockEntity", "tick",
+                + countControllerTickInvocations(
                 "MachineControllerBlockEntity", "applyFailureAction",
                 "(Lcom/reborn/modularmachinery/recipe/MachineRecipe;)V");
         report("MachineControllerBlockEntity.tick reaches the failure-action at all (" + controllerCalls
@@ -6678,7 +6695,7 @@ public final class ParallelCraftCheck {
         String hostCallback = "(Lcom/reborn/modularmachinery/factory/FactoryThread;"
                 + "Lcom/reborn/modularmachinery/recipe/MachineRecipe;II)V";
         check("MachineControllerBlockEntity announces all three command phases",
-                3, countInvocations(controller, "tick", "MachineControllerBlockEntity", "runRecipeCommands",
+                3, countControllerTickInvocations("MachineControllerBlockEntity", "runRecipeCommands",
                         "(Lcom/reborn/modularmachinery/recipe/MachineRecipe;"
                                 + "Lcom/reborn/modularmachinery/recipe/RecipeCommands$Phase;I)V"));
         check("FactoryEngine.begin announces a start",
@@ -6871,8 +6888,7 @@ public final class ParallelCraftCheck {
         }
 
         // ---- the wiring, out of the built bytes -------------------------------------------------------
-        int controllerCalls = countInvocations(
-                "com/reborn/modularmachinery/block/MachineControllerBlockEntity", "tick",
+        int controllerCalls = countControllerTickInvocations(
                 "MachineControllerBlockEntity", "applyFailureAction",
                 "(Lcom/reborn/modularmachinery/recipe/MachineRecipe;)V");
         report("MachineControllerBlockEntity.tick tells the failure handler which recipe failed ("
