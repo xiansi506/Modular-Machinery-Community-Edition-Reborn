@@ -21,6 +21,7 @@ import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A machine recipe: a machine name, a duration, and a list of typed requirements.
@@ -94,6 +95,29 @@ public final class MachineRecipe implements Recipe<Container> {
 
     private final RecipeCommands commands;
 
+    /**
+     * 旧版配方级 {@code priority}：数字小的层先被遍历，同层再按 {@link #buildWeight()} 升序。
+     *
+     * <p>它不是"权重越大越优先"——旧版把它当 TreeMap 的键，{@code getRecipesFor} 按升序拼接，
+     * 所以 0 层比 1 层先被看到。缺省 0。
+     */
+    private final int priority;
+
+    /**
+     * 构造顺序号，旧版 {@code MachineRecipe#sortId} 的全局自增计数器。
+     *
+     * <p><b>这一版把它写进网络包</b>，而旧版没有：客户端也要按同一顺序列 JEI 配方，若两端各自自增，
+     * 同一条配方在两端的 {@link #buildWeight()} 会不同。读包时用服务端给的值构造，不推进本端计数器。
+     */
+    private final int sortId;
+
+    /** 旧版每构造一条配方就 {@code counter++}；{@code AtomicInteger} 只为线程安全，语义不变。 */
+    private static final AtomicInteger NEXT_SORT_ID = new AtomicInteger();
+
+    private static int nextSortId() {
+        return NEXT_SORT_ID.getAndIncrement();
+    }
+
     public MachineRecipe(ResourceLocation id, String machine, String registryName, int recipeTime,
                          List<MachineRequirement> requirements) {
         this(id, List.of(machine), registryName, recipeTime, requirements, MACHINE_LIMIT, false,
@@ -120,6 +144,27 @@ public final class MachineRecipe implements Recipe<Container> {
     public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
                          List<MachineRequirement> requirements, int maxParallelism,
                          boolean cancelIfPerTickFails, RecipeCommands commands) {
+        this(id, machines, registryName, recipeTime, requirements, maxParallelism, cancelIfPerTickFails,
+                commands, 0, nextSortId());
+    }
+
+    /** The same recipe at {@code priority}; the sort id still comes from the global construction counter. */
+    public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
+                         List<MachineRequirement> requirements, int maxParallelism,
+                         boolean cancelIfPerTickFails, RecipeCommands commands, int priority) {
+        this(id, machines, registryName, recipeTime, requirements, maxParallelism, cancelIfPerTickFails,
+                commands, priority, nextSortId());
+    }
+
+    /**
+     * The canonical constructor, including the original's ordering fields.
+     *
+     * <p>{@code sortId} is supplied rather than allocated for one caller only: the network reader, which must
+     * reproduce the server's order instead of advancing its own counter (see {@link #sortId()}).
+     */
+    public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
+                         List<MachineRequirement> requirements, int maxParallelism,
+                         boolean cancelIfPerTickFails, RecipeCommands commands, int priority, int sortId) {
         if (machines.isEmpty()) {
             throw new IllegalArgumentException("A machine recipe needs at least one owning machine");
         }
@@ -136,6 +181,8 @@ public final class MachineRecipe implements Recipe<Container> {
         this.maxParallelism = Math.max(0, maxParallelism);
         this.cancelIfPerTickFails = cancelIfPerTickFails;
         this.commands = commands == null ? RecipeCommands.EMPTY : commands;
+        this.priority = priority;
+        this.sortId = sortId;
     }
 
     private static ResourceLocation resolveMachineId(String machine) {
@@ -224,6 +271,44 @@ public final class MachineRecipe implements Recipe<Container> {
         return this.requirements;
     }
 
+    /** The original's {@code priority}: lower layers are visited first. Defaults to {@code 0}. */
+    public int priority() {
+        return this.priority;
+    }
+
+    /**
+     * The construction-order number that breaks ties inside one priority layer.
+     *
+     * <p>On the client this is the value received from the server, not a locally allocated one, so both sides
+     * compute the same {@link #buildWeight()} for the same recipe.
+     */
+    public int sortId() {
+        return this.sortId;
+    }
+
+    /**
+     * The original's {@code buildWeight()}: the sort id minus every <b>input</b> requirement's sorting weight.
+     *
+     * <p>Outputs are skipped exactly as the original comparator skipped them ({@code RecipeRegistry:272-282}).
+     * Smaller sorts first: every input subtracts its weight, so a recipe with more inputs — or with energy
+     * inputs ({@code 50_000_000}) rather than item inputs ({@code 50_000}) — gets a smaller value and is tried
+     * earlier. That is the original's way of preferring the "heavier" recipe inside one priority layer.
+     *
+     * <p>Arithmetic is deliberately plain {@code int}: the original could overflow (a recipe with 43 energy
+     * inputs crosses {@link Integer#MIN_VALUE}), and clamping here would silently invent an order the original
+     * never had. The verifier asserts the ordinary, non-overflowing case.
+     */
+    public int buildWeight() {
+        int weight = this.sortId;
+        for (MachineRequirement requirement : this.requirements) {
+            if (requirement.ioType() == IOType.OUTPUT) {
+                continue;
+            }
+            weight -= requirement.sortingWeight();
+        }
+        return weight;
+    }
+
     /** This recipe's own parallelism ceiling, or {@code 0} when it defers to the machine's. */
     public int maxParallelism() {
         return this.maxParallelism;
@@ -258,6 +343,25 @@ public final class MachineRecipe implements Recipe<Container> {
             throw new JsonParseException("'cancelIfPerTickFails' has to be a boolean! (if specified) in " + id);
         }
         return element.getAsBoolean();
+    }
+
+    /**
+     * Reads the optional {@code priority}, with the original's rule: absent means {@code 0}, anything that is not
+     * a number is rejected at parse time.
+     *
+     * <p>The error keeps the original's sentence verbatim (1.12.2 {@code MachineRecipe.java:372-379}) and only
+     * appends the recipe id, because "which file?" is the first question a pack author asks. Negative values are
+     * accepted as-is: the original used whatever integer was written.
+     */
+    public static int parsePriority(JsonObject json, ResourceLocation id) {
+        if (!json.has("priority")) {
+            return 0;
+        }
+        JsonElement element = json.get("priority");
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+            throw new JsonParseException("'priority' has to be a number! (if specified) in " + id);
+        }
+        return element.getAsInt();
     }
 
     public List<MachineRequirement> requirements(IOType ioType) {

@@ -113,6 +113,11 @@ public final class ItemRequirement extends MachineRequirement {
     }
 
     @Override
+    public int sortingWeight() {
+        return PRIORITY_WEIGHT_ITEM;
+    }
+
+    @Override
     public RequirementType type() {
         return Holder.TYPE;
     }

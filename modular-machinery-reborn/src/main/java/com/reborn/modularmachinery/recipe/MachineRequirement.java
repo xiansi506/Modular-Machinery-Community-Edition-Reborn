@@ -55,6 +55,17 @@ public abstract class MachineRequirement {
      */
     public static final int UNBOUNDED_PARALLELISM = Integer.MAX_VALUE / 4;
 
+    /**
+     * 旧版的排序权重（{@code ComponentRequirement} 的三个常量）：排序器从 {@code sortId} 里减去这些数，
+     * 于是「输入需求越多、越偏能源的配方」在同一 priority 层里越靠前。
+     *
+     * <p>数字照抄旧版 {@code ComponentRequirement.java:33-35}，不要"顺手"调整：它们决定的是配方选取顺序，
+     * 不是界面上的美观。
+     */
+    public static final int PRIORITY_WEIGHT_ENERGY = 50_000_000;
+    public static final int PRIORITY_WEIGHT_FLUID = 100;
+    public static final int PRIORITY_WEIGHT_ITEM = 50_000;
+
     private final IOType ioType;
     private final boolean perTick;
 
@@ -75,6 +86,17 @@ public abstract class MachineRequirement {
 
     public boolean perTick() {
         return this.perTick;
+    }
+
+    /**
+     * 旧版 {@code ComponentRequirement#getSortingWeight}：这条输入需求在配方排序里"值多少钱"。
+     *
+     * <p>只有 {@link IOType#INPUT} 的需求会被 {@link MachineRecipe#buildWeight()} 扣掉；输出不参与，
+     * 因为旧版比较器遇到输出直接 {@code continue}。默认 0 让没有自己权重的需求（催化剂、数字接口）
+     * 不改变顺序，与旧版基类一致。
+     */
+    public int sortingWeight() {
+        return 0;
     }
 
     /** Inputs consumed once, when the craft starts. */

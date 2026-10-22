@@ -44,6 +44,11 @@ public final class FluidRequirement extends MachineRequirement {
     }
 
     @Override
+    public int sortingWeight() {
+        return PRIORITY_WEIGHT_FLUID;
+    }
+
+    @Override
     public RequirementType type() {
         return Holder.TYPE;
     }

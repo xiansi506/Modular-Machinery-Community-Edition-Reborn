@@ -40,6 +40,7 @@ public final class MachineRecipeJsonBuilder {
     private final JsonArray finishCommands = new JsonArray();
     private int recipeTime = DEFAULT_RECIPE_TIME;
     private int maxParallelism;
+    private int priority;
     private boolean cancelIfPerTickFails;
     private String registryName;
     private JsonObject lastCatalyst;
@@ -121,6 +122,18 @@ public final class MachineRecipeJsonBuilder {
     /** Shorthand for {@code cancelIfPerTickFails(true)}. */
     public MachineRecipeJsonBuilder cancelIfPerTickFails() {
         return cancelIfPerTickFails(true);
+    }
+
+    /**
+     * The original's recipe-level {@code priority}; lower layers are tried first.
+     *
+     * <p>Any integer is accepted, including negatives — the original wrote whatever number was in the file
+     * straight into a {@code TreeMap} key. Only non-zero values are written back, because omitting the field
+     * already means {@code 0}.
+     */
+    public MachineRecipeJsonBuilder priority(int priority) {
+        this.priority = priority;
+        return this;
     }
 
     /**
@@ -312,6 +325,9 @@ public final class MachineRecipeJsonBuilder {
         json.addProperty("recipeTime", this.recipeTime);
         if (this.maxParallelism > 0) {
             json.addProperty("max-parallelism", this.maxParallelism);
+        }
+        if (this.priority != 0) {
+            json.addProperty("priority", this.priority);
         }
         if (this.cancelIfPerTickFails) {
             json.addProperty("cancelIfPerTickFails", true);

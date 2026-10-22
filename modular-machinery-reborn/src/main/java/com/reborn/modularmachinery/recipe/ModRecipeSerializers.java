@@ -75,7 +75,7 @@ public final class ModRecipeSerializers {
             }
             return new MachineRecipe(id, machines, registryName, recipeTime, requirements,
                     parseMaxParallelism(json, id), MachineRecipe.parseCancelIfPerTickFails(json, id),
-                    RecipeCommands.parse(json));
+                    RecipeCommands.parse(json), MachineRecipe.parsePriority(json, id));
         }
 
         /**
@@ -116,6 +116,10 @@ public final class ModRecipeSerializers {
             int recipeTime = buf.readVarInt();
             int maxParallelism = buf.readVarInt();
             boolean cancelIfPerTickFails = buf.readBoolean();
+            // 旧版没有把这两个字段发到客户端：客户端从不同步配方。这一版客户端要列 JEI，所以必须发；
+            // 尤其是 sortId——让客户端自己构造会得到不同的 buildWeight，同一台机器的配方顺序就会两端不一致。
+            int priority = buf.readVarInt();
+            int sortId = buf.readVarInt();
             RecipeCommands commands = RecipeCommands.read(buf);
             int count = buf.readVarInt();
             List<MachineRequirement> requirements = new ArrayList<>(count);
@@ -123,7 +127,7 @@ public final class ModRecipeSerializers {
                 requirements.add(MachineRequirementParser.read(buf));
             }
             return new MachineRecipe(id, machines, registryName, recipeTime, requirements, maxParallelism,
-                    cancelIfPerTickFails, commands);
+                    cancelIfPerTickFails, commands, priority, sortId);
         }
 
         @Override
@@ -136,6 +140,8 @@ public final class ModRecipeSerializers {
             buf.writeVarInt(recipe.recipeTime());
             buf.writeVarInt(recipe.maxParallelism());
             buf.writeBoolean(recipe.cancelIfPerTickFails());
+            buf.writeVarInt(recipe.priority());
+            buf.writeVarInt(recipe.sortId());
             recipe.commands().write(buf);
             buf.writeVarInt(recipe.requirements().size());
             for (MachineRequirement requirement : recipe.requirements()) {

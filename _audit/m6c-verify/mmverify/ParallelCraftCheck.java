@@ -377,6 +377,10 @@ public final class ParallelCraftCheck {
         // 0.77.0：B11——旧版 general.enable-duration-multiplier 默认关；关闭时时长修改器只改时长，
         // 不再反向放大每 tick 能量。红跑时配置键/新重载/门控都还不存在，全部走反射。
         DurationMultiplierCheck.durationMultiplierConfig();
+        // 0.78.0：B3/B4——配方级 priority 与同优先级排序权重。旧版按 priority 分层、层内按
+        // buildWeight（sortId - 所有输入需求的 sortingWeight）升序；此前这两层信息整条丢失。
+        // 红跑时 parsePriority/RecipeOrder/serializer 新字段都还不存在，全部走反射。
+        RecipePriorityCheck.recipePriority();
         System.out.println();
         printCounts();
         System.out.println(failures == 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED");

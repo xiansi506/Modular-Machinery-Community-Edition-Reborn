@@ -125,6 +125,17 @@ public final class MachineRecipeJS extends RecipeJS {
         return cancelIfPerTickFails(true);
     }
 
+    /**
+     * The original's recipe-level {@code priority}; lower layers are tried first, ties broken by input weights.
+     *
+     * <p>Exposed by name rather than through a generic {@code set} so KubeJS scripts get the same spelling as the
+     * JSON field.
+     */
+    public MachineRecipeJS priority(int priority) {
+        this.builder.priority(priority);
+        return this;
+    }
+
     public MachineRecipeJS registryName(String name) {
         this.builder.registryName(name);
         return this;

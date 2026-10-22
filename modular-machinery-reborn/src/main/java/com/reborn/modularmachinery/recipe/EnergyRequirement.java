@@ -47,6 +47,11 @@ public final class EnergyRequirement extends MachineRequirement {
     }
 
     @Override
+    public int sortingWeight() {
+        return PRIORITY_WEIGHT_ENERGY;
+    }
+
+    @Override
     public RequirementType type() {
         return Holder.TYPE;
     }

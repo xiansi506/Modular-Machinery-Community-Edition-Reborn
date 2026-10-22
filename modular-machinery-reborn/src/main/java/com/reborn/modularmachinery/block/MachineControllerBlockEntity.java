@@ -30,6 +30,7 @@ import com.reborn.modularmachinery.recipe.MachineRecipe;
 import com.reborn.modularmachinery.recipe.ModRecipeTypes;
 import com.reborn.modularmachinery.recipe.RecipeCommands;
 import com.reborn.modularmachinery.recipe.RecipeModifiers;
+import com.reborn.modularmachinery.recipe.RecipeOrder;
 import com.reborn.modularmachinery.upgrade.UpgradeBusUtility;
 import com.reborn.modularmachinery.upgrade.UpgradeEffects;
 import net.minecraft.commands.CommandSource;
@@ -944,13 +945,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             if (formed == null || level == null) {
                 return List.of();
             }
-            List<MachineRecipe> candidates = new ArrayList<>();
-            for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
-                if (recipe.belongsTo(formed)) {
-                    candidates.add(recipe);
-                }
-            }
-            return candidates;
+            // 工厂线程拿到的候选表必须和单配方控制器同序：否则同一台机器在并行与串行下会选到不同配方。
+            return RecipeOrder.forMachine(
+                    level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get()), formed);
         }
 
         @Override
@@ -1351,10 +1348,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (this.machineId == null) {
             return null;
         }
-        for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
-            if (!recipe.belongsTo(this.machineId)) {
-                continue;
-            }
+        for (MachineRecipe recipe : RecipeOrder.forMachine(
+                level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get()), this.machineId)) {
             // **条件必须是「开不了工」，不能写成「开得了工」。** 这个方法只在 `findRecipe` 找不到配方时
             // 才被调用，所以走到这里就说明「有配方认这台机器、但它此刻过不了」。第一版把条件写反了
             // （`canStart && canTick` 时 return null），于是**能开工时给出原因、开不了工时什么都不给**——
@@ -1386,10 +1381,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (this.machineId == null) {
             return null;
         }
-        for (MachineRecipe recipe : level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get())) {
-            if (!recipe.belongsTo(this.machineId)) {
-                continue;
-            }
+        for (MachineRecipe recipe : RecipeOrder.forMachine(
+                level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get()), this.machineId)) {
             // A2：能开工 = 至少有一组能开工。锁定哪一组由 tick 里那次 startableGroup 决定，两步必须
             // 问同一个问题，否则会出现「选出了配方、开工时却找不到组」。
             if (this.startableGroup(recipe) != null) {

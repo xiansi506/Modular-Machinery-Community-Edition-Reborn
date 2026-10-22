@@ -65,6 +65,7 @@ modular_machinery_reborn:item     modularmachinery:item     item
 | 配方 id | `registryName`（可选） |
 | 耗时 | `recipeTime`（可选，默认 100，**≥1**） |
 | 逐 tick 失败是否放弃 | `cancelIfPerTickFails`（可选布尔，默认 `false`；true 时失败即中止本次合成，已付的一次性输入不返还） |
+| 选取优先级 | `priority`（可选整数，默认 `0`；**越小越先被尝试**，同一层再按输入需求的排序权重） |
 | 命令 | `startCommands` / `processingCommands` / `finishCommands`（可选数组；每项是命令字符串或 `{ command, interval }`） |
 | 需求列表 | `requirements`（**必填非空**） |
 | 物品 | `item`（支持 `minecraft:xxx`、`#forge:...` 标签、旧版 `ore:ingotIron`）+ `amount`；输入/输出都可用 `chance` |
@@ -75,6 +76,8 @@ modular_machinery_reborn:item     modularmachinery:item     item
 **输入也能写 `chance`（0.74.0 起）**：命中才扣料，未命中不扣料、也不让配方失败，配方照常开工与运行。一次掷决定整笔并行消耗，不是每份独立掷。`item`、`fluid`、`gas` 输入都适用；`chance: 0` 仍可开工，但永不消耗。
 
 **`cancelIfPerTickFails`（0.75.0 起）**：写在配方根对象；`true` 时某次逐 tick 需求结算失败会直接放弃这次合成，普通控制器清空进度，工厂线程清空槽位。开工时已付的一次性输入不返还。缺省 `false`，此时仍按机器的 `failure-action` 处理（默认冻结进度）。它只处理逐 tick 需求失败，产物放不下和结构损坏不走这条。
+
+**配方级 `priority`（0.78.0 起）**：同一台机器装了多份配方时，`priority` **小的层先被尝试**；同一层内再按旧版的排序权重决定先后——能源输入每个扣 `50_000_000`、物品输入每个扣 `50_000`、流体/气体输入每个扣 `100`，从全局构造序号 `sortId` 里减掉，**输出需求不参与**。因此输入越「重」的配方越靠前。控制器选配方、工厂候选、`/mm-diagnose` 的「第一条为什么开不了工」、JEI 列表都走这一份顺序。缺省 `0`，允许负数；不写这个字段的旧配方行为与以前一致（都在 0 层，再按权重）。
 
 ```js
 { type: 'modular_machinery_reborn:item', 'io-type': 'input', item: 'minecraft:coal', amount: 1, chance: 0.25 }
@@ -145,6 +148,7 @@ ServerEvents.recipes(event => {
   event.recipes.modular_machinery_reborn.machine('alloy_furnace')
     .machines('alloy_furnace', 'other:press')   // 可选：覆盖第一参数，归多台机器
     .time(200)                                  // 可选，默认 100
+    .priority(1)                                // 可选，默认 0；越小越先尝试
     .parallelism(64)                            // 可选
     .cancelIfPerTickFails()                     // 可选：失败即中止（无参置 true）
     .startCommand('say start')                  // 可选：开工时
@@ -165,6 +169,7 @@ ServerEvents.recipes(event => {
 | 方法 | 作用 |
 |---|---|
 | `.time(ticks)` / `.parallelism(max)` / `.registryName(name)` | 配方级字段 |
+| `.priority(int)` | 选取优先级，默认 `0`；越小越先被尝试，同层再按输入权重 |
 | `.machines(id...)` | 覆盖第一参数指定的机器，把配方归给多台（至少一台） |
 | `.cancelIfPerTickFails()` / `.cancelIfPerTickFails(boolean)` | 逐 tick 失败是否放弃本次合成（默认 `false`） |
 | `.startCommand(cmd[, interval])` / `.processingCommand(cmd[, interval])` / `.finishCommand(cmd[, interval])` | 追加一条命令；不写 `interval` 表示每次触发都跑，否则只在 `tick % interval == 0` 时跑 |

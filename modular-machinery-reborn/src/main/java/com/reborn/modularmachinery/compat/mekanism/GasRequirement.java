@@ -92,6 +92,17 @@ public final class GasRequirement extends MachineRequirement {
     }
 
     /**
+     * 气体复用流体的权重，照旧版 {@code RequirementGas:37-39}。
+     *
+     * <p>注意它与 {@link #modifierTarget()} 是两件事：修改器目标仍是 {@code ALL}（枚举里没有气体项），
+     * 排序权重则是旧版明确的 100。把两者混为一谈会让气体的排序位置也跟着变成 0。
+     */
+    @Override
+    public int sortingWeight() {
+        return PRIORITY_WEIGHT_FLUID;
+    }
+
+    /**
      * JEI 里占**罐格但只给文字**。
      *
      * <p>为什么不是 {@code FLUID}：那条路会让 JEI 去 cast {@code FluidRequirement} 并调它的

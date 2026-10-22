@@ -8,6 +8,7 @@ import com.reborn.modularmachinery.machine.MachineDefinition;
 import com.reborn.modularmachinery.machine.MachineRegistry;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
 import com.reborn.modularmachinery.recipe.ModRecipeTypes;
+import com.reborn.modularmachinery.recipe.RecipeOrder;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.helpers.IGuiHelper;
@@ -207,6 +208,7 @@ public final class ModularMachineryJeiPlugin implements IModPlugin {
         if (level == null) {
             return List.of();
         }
-        return level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get());
+        // JEI 是玩家判断"为什么选了那条配方"的窗口：显示顺序必须等于控制器实际尝试的顺序。
+        return RecipeOrder.sorted(level.getRecipeManager().getAllRecipesFor(ModRecipeTypes.MACHINE.get()));
     }
 }
