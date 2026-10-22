@@ -71,6 +71,26 @@ public final class MachineBuilderJS extends EventJS {
     }
 
     /**
+     * {@code prefix}: the short label drawn in the 36px slot left of the machine name in the preview title.
+     *
+     * <p>The original read this field in {@code DynamicMachinePreDeserializer} and previewed it on the left;
+     * an empty string was refused there and is refused by the schema here too. This method only writes the
+     * field, like every other method on this builder: whether the value is usable is the schema's answer, in
+     * the same sentence a data pack gets.
+     *
+     * <p>The value is written as a JSON string. Anything Rhino hands over that is not a Java {@link String} is
+     * refused here rather than stringified, for the same reason as block descriptors: {@code 123} quietly
+     * becoming the prefix would hide a type mistake until someone reads the preview.
+     */
+    public MachineBuilderJS prefix(Object prefix) {
+        if (!(prefix instanceof String text)) {
+            throw new JsonParseException("'prefix' must be a string, but a " + describe(prefix) + " was given.");
+        }
+        this.json.addProperty(KEY_PREFIX, text);
+        return this;
+    }
+
+    /**
      * One structure position, described by the blocks that may stand there.
      *
      * <pre>{@code
@@ -210,6 +230,7 @@ public final class MachineBuilderJS extends EventJS {
     private static final String KEY_SMART_INTERFACES = "smart-interfaces";
     private static final String KEY_CORE_THREADS = "core-threads";
     private static final String KEY_GEO_MODEL = "geo-model";
+    private static final String KEY_PREFIX = "prefix";
 
     /**
      * {@code failure-action}: what a craft's progress does on a tick it cannot pay for.

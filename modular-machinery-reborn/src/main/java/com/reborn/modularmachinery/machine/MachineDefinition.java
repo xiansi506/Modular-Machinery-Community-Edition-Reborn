@@ -15,9 +15,8 @@ import java.util.List;
  *
  * <p>M1 carries the fields that describe a structure and the machine's identity. Most of the original root
  * fields have since been implemented: {@code color}, {@code has-factory}, {@code factory-only},
- * {@code hide-components-when-formed} and {@code dynamic-patterns}. The remaining two
- * ({@code prefix} and {@code controller-bounding-box}) are deliberately not implemented yet and are still
- * listed as gaps.
+ * {@code hide-components-when-formed}, {@code dynamic-patterns} and (0.80.0, E7) {@code prefix}. The remaining
+ * one ({@code controller-bounding-box}) is deliberately not implemented yet and is still listed as a gap.
  *
  * <h2>M6c: parallelism and modifiers</h2>
  *
@@ -144,6 +143,16 @@ public final class MachineDefinition {
     @Nullable
     private final GeoModelSpec geoModel;
 
+    /**
+     * 机器在预览标题左侧的前缀（{@code prefix}），旧版 {@code AbstractMachine.prefix}。
+     *
+     * <p>{@code null} 表示没有前缀；空串永远不是合法值（旧版解析器也拒绝空串）。旧版没写这个字段时，
+     * 标题左侧会退回显示裸翻译键——那是旧 UI 的缺陷，本版不复刻：没有前缀时机器名直接占满整行，
+     * 见 {@code PreviewPanel} 与 {@link #prefixTranslationKey()}。
+     */
+    @Nullable
+    private final String prefix;
+
     public MachineDefinition(ResourceLocation id, String localizedName, MachinePattern pattern,
                              FailureAction failureAction, boolean requiresBlueprint) {
         this(id, localizedName, pattern, failureAction, requiresBlueprint,
@@ -233,7 +242,7 @@ public final class MachineDefinition {
                              List<DynamicPattern> dynamicPatterns) {
         this(id, localizedName, pattern, failureAction, requiresBlueprint, maxParallelism, internalParallelism,
                 parallelizable, modifiers, maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces,
-                dynamicPatterns, DEFAULT_COLOR, null, false, List.of());
+                dynamicPatterns, DEFAULT_COLOR, null, false, List.of(), null);
     }
 
     /** 规范构造器：**唯一**给所有字段赋值的那一个，包括 {@code color}。 */
@@ -246,7 +255,7 @@ public final class MachineDefinition {
                               List<SmartInterfaceType> smartInterfaces,
                               List<DynamicPattern> dynamicPatterns, int color,
                               @Nullable GeoModelSpec geoModel, boolean hideComponentsWhenFormed,
-                              List<MachineMultiBlockModifier> multiBlockModifiers) {
+                              List<MachineMultiBlockModifier> multiBlockModifiers, @Nullable String prefix) {
         this.id = id;
         this.localizedName = localizedName;
         this.pattern = pattern;
@@ -266,6 +275,7 @@ public final class MachineDefinition {
         this.dynamicPatterns = List.copyOf(dynamicPatterns);
         this.color = color;
         this.geoModel = geoModel;
+        this.prefix = prefix;
     }
 
     /**
@@ -285,7 +295,7 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, color, this.geoModel,
-                this.hideComponentsWhenFormed, this.multiBlockModifiers);
+                this.hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix);
     }
 
     /**
@@ -305,7 +315,7 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, geoModel,
-                this.hideComponentsWhenFormed, this.multiBlockModifiers);
+                this.hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix);
     }
 
     /**
@@ -324,7 +334,7 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
-                this.hideComponentsWhenFormed, multiBlockModifiers);
+                this.hideComponentsWhenFormed, multiBlockModifiers, this.prefix);
     }
 
     /** 带指定成型隐藏开关的副本；解析器用它，而不是去改一个已经建好的定义。 */
@@ -333,7 +343,44 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
-                hideComponentsWhenFormed, this.multiBlockModifiers);
+                hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix);
+    }
+
+    /**
+     * The literal {@code prefix} from the definition, or {@code null} when it has none.
+     *
+     * <p>旧版把前缀存在 {@code AbstractMachine.prefix} 上，由 {@code DynamicMachinePreDeserializer} 严格读取；
+     * 这里照 {@link #color} 的做法挂在不可变定义上，设置走 {@link #withPrefix(String)}。
+     */
+    @Nullable
+    public String prefix() {
+        return this.prefix;
+    }
+
+    /**
+     * 前缀的语言键：{@code <namespace>.<path>.prefix}，与旧版
+     * {@code AbstractMachine#getPrefix()} 的计算方式逐字相同。
+     *
+     * <p>它只给出键，不判断翻译是否存在；预览面板用 {@code Language.has(key)} 决定用翻译还是用 literal。
+     */
+    public String prefixTranslationKey() {
+        return this.id.getNamespace() + "." + this.id.getPath() + ".prefix";
+    }
+
+    /**
+     * 带指定前缀（可 {@code null}）的副本；解析器用它，而不是去改一个已经建好的定义。
+     *
+     * @throws IllegalArgumentException 前缀是空串——旧版解析器同样拒绝空串，公开 API 不该造出这种定义
+     */
+    public MachineDefinition withPrefix(@Nullable String prefix) {
+        if (prefix != null && prefix.isEmpty()) {
+            throw new IllegalArgumentException("prefix must not be empty; use null for 'no prefix'");
+        }
+        return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
+                this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
+                this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
+                this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
+                this.hideComponentsWhenFormed, this.multiBlockModifiers, prefix);
     }
 
     /** Registry name of the machine, e.g. {@code modular_machinery_reborn:transformer}. */

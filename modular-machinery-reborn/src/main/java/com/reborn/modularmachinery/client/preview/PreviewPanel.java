@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
+import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
@@ -36,10 +37,11 @@ import java.util.List;
  * viewport there instead handed this class its mouse positions shifted by {@code (PREVIEW_X, PREVIEW_Y) = (6,
  * 26)}, which moved the whole button strip out from under every click.
  *
- * <p><b>What is not the original's.</b> Three intentional differences are documented at their site: the title is
- * centred across the full 174px row because we have no {@code prefix} field; the ingredient grid shows an
- * overflow marker instead of scrolling; and the "extra info" button is a toggle that pins its list over the
- * viewport, where the original showed the same list as a hover tooltip only.
+ * <p><b>What is not the original's.</b> Two intentional differences are documented at their site: the ingredient
+ * grid shows an overflow marker instead of scrolling, and the "extra info" button is a toggle that pins its list
+ * over the viewport, where the original showed the same list as a hover tooltip only. The title keeps the
+ * original's 36 + 2 + 136 split when a {@code prefix} exists, and deliberately does not fall back to drawing the
+ * bare translation key when it does not.
  */
 public final class PreviewPanel {
 
@@ -397,11 +399,7 @@ public final class PreviewPanel {
         }
         StructurePreviews.drawComponentOverflow(graphics, this.components, originX, originY);
 
-        // The original's title row was a 36px prefix label plus a 136px machine-name label. We have no prefix
-        // field in MachineDefinition, so the name is centred across the whole 174px row instead.
-        graphics.drawCenteredString(font, this.machine.displayName(),
-                originX + PreviewLayout.PANEL_WIDTH / 2, originY + PreviewLayout.TITLE_TEXT_Y,
-                PreviewLayout.LABEL_COLOR);
+        drawTitle(graphics, font, originX, originY);
 
         for (PreviewButton button : this.buttons) {
             button.render(graphics, originX, originY, mouseX, mouseY);
@@ -412,6 +410,48 @@ public final class PreviewPanel {
         if (this.machineInfoVisible) {
             drawMachineInfo(graphics, font, originX, originY);
         }
+    }
+
+    /**
+     * 标题行：旧版把 174px 分成「36px prefix + 2px 间隔 + 136px 机器名」三段。
+     *
+     * <p>前缀的翻译键是 {@code <namespace>.<path>.prefix}（{@link MachineDefinition#prefixTranslationKey()}）。
+     * 旧版先看这个键有没有翻译，没有再用 {@code prefix} 字面量；两样都没有时，旧版会把<strong>裸语言键</strong>
+     * 画在 36px 槽里——那是旧 UI 的缺陷，本版不复刻：没有前缀时机器名直接占满整行 174px。
+     *
+     * <p>两段各自用 scissor 裁到自己的宽度。旧版的 MultiLineLabel 高度固定 18px，超长文本同样只会露出一部分；
+     * 不裁的话，一个长前缀会压到机器名上，那比截断更难读。
+     */
+    private void drawTitle(GuiGraphics graphics, Font font, int originX, int originY) {
+        String prefixKey = this.machine.prefixTranslationKey();
+        String literal = this.machine.prefix();
+        Component prefix = null;
+        if (literal != null) {
+            prefix = Component.translatableWithFallback(prefixKey, literal);
+        } else if (Language.getInstance().has(prefixKey)) {
+            prefix = Component.translatable(prefixKey);
+        }
+
+        Component name = this.machine.displayName();
+        int textY = originY + PreviewLayout.TITLE_TEXT_Y;
+        if (prefix == null) {
+            graphics.drawCenteredString(font, name, originX + PreviewLayout.PANEL_WIDTH / 2, textY,
+                    PreviewLayout.LABEL_COLOR);
+            return;
+        }
+
+        int prefixRight = originX + PreviewLayout.TITLE_X + 36;
+        graphics.enableScissor(originX + PreviewLayout.TITLE_X, originY + PreviewLayout.TITLE_Y,
+                prefixRight, originY + PreviewLayout.TITLE_Y + PreviewLayout.TITLE_HEIGHT);
+        graphics.drawCenteredString(font, prefix, originX + PreviewLayout.TITLE_X + 36 / 2, textY,
+                PreviewLayout.LABEL_COLOR);
+        graphics.disableScissor();
+
+        int nameLeft = prefixRight + 2;
+        graphics.enableScissor(nameLeft, originY + PreviewLayout.TITLE_Y,
+                nameLeft + 136, originY + PreviewLayout.TITLE_Y + PreviewLayout.TITLE_HEIGHT);
+        graphics.drawCenteredString(font, name, nameLeft + 136 / 2, textY, PreviewLayout.LABEL_COLOR);
+        graphics.disableScissor();
     }
 
     private void drawLayerSelector(GuiGraphics graphics, int originX, int originY, double mouseX, double mouseY) {

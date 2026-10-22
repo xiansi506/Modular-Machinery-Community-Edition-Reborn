@@ -172,6 +172,10 @@ public final class MachineSchema {
         // 因为一件作者以为打开了的事悄悄关着，比一句明确的报错更贵。
         boolean hideComponentsWhenFormed = MachineRootFields.hideComponentsWhenFormed(root, String.valueOf(where));
 
+        // 0.80.0（E7）：prefix 也离开 UNIMPLEMENTED_ROOT_FIELDS。与上面同一理由——旧版严格读取
+        // （空串拒绝），本版照做；没有前缀时明确是 null，而不是把裸语言键画到标题上。
+        String prefix = MachineRootFields.prefix(root, String.valueOf(where));
+
         int maxParallelism = MachineDefinition.DEFAULT_MAX_PARALLELISM;
         if (root.has("max-parallelism")) {
             maxParallelism = readParallelism(root, "max-parallelism", where);
@@ -307,7 +311,8 @@ public final class MachineSchema {
                 .withColor(MachineRootFields.color(root, String.valueOf(where)))
                 .withGeoModel(MachineRootFields.geoModel(root, String.valueOf(where)))
                 .withHideComponentsWhenFormed(hideComponentsWhenFormed)
-                .withMultiBlockModifiers(multiBlockModifiers);
+                .withMultiBlockModifiers(multiBlockModifiers)
+                .withPrefix(prefix);
     }
 
     // 0.31.0 removed rejectDeferred(JsonObject, Object, boolean) and its call above read()'s body. It existed to
@@ -723,8 +728,8 @@ public final class MachineSchema {
      * 动态结构的长度现在是<strong>真的会被量出来</strong>的。
      * {@code hide-components-when-formed} 在 0.71.0（E5）离开：预览现在会读它（成型后隐藏组件），
      * 见 {@link MachineDefinition#hideComponentsWhenFormed()} 与 {@code StructurePreview#hidingComponents()}。
-     * 剩下这些<strong>完全还没有消费者</strong>：{@code prefix} / {@code controller-bounding-box}
-     * 属于尚未排期的批次。
+     * {@code prefix} 在 0.80.0（E7）离开：预览标题左侧会显示它，解析也恢复旧版的非空字符串检查。
+     * 剩下 {@code controller-bounding-box} 仍<strong>完全没有消费者</strong>，属于尚未排期的批次。
      *
      * <p><b>这份名单点名的每个字段，同时必须出现在 {@link #KNOWN_ROOT_FIELDS} 里。</b>这不是排版上的对称，
      * 而是一条会被作者读到的语义：不在那份名单里，加载器会在「认得但不求值」的警告之后紧接着再报一句
@@ -732,7 +737,7 @@ public final class MachineSchema {
      * 会据此拒收整份合法定义。0.63.0 修的就是这件事（勘测 X1）：上面三个字段当时只在这份名单里。
      */
     private static final String[] UNIMPLEMENTED_ROOT_FIELDS = {
-            "prefix", "controller-bounding-box"
+            "controller-bounding-box"
     };
 
     /**

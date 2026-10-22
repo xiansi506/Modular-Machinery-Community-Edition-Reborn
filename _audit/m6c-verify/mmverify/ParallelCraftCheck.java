@@ -381,6 +381,10 @@ public final class ParallelCraftCheck {
         // buildWeight（sortId - 所有输入需求的 sortingWeight）升序；此前这两层信息整条丢失。
         // 红跑时 parsePriority/RecipeOrder/serializer 新字段都还不存在，全部走反射。
         RecipePriorityCheck.recipePriority();
+        // 0.80.0：E7——根字段 prefix。旧版解析后按 36 + 2 + 136 分段画在预览标题上；
+        // 此前新机器解析器接受该字段却从不求值，预览也就只能整行显示机器名。
+        // 红跑时 MachineRootFields.prefix/MachineDefinition.prefix/withPrefix 都还不存在，全部走反射。
+        PrefixCheck.prefixField();
         // 0.79.0：C2——控制器生命周期事件层（首切片）。旧版把 Formed/Update/Tick/RecipeCheck/Start/Tick/Finish
         // 发给组件与升级处理器；此前本版一条都没有。红跑时整个 api.event 包都不存在，全部走反射。
         EventLayerCheck.eventLayer();

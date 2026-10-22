@@ -44,6 +44,43 @@ public final class MachineRootFields {
     }
 
     /**
+     * 定义里的 {@code prefix}：预览标题左侧那 36px 的短标签。
+     *
+     * <p>与旧版 {@code DynamicMachinePreDeserializer#getPrefix} 的对应关系：
+     * <ul>
+     *   <li>字段缺省 → {@code null}（没有前缀，机器名占满标题行）；</li>
+     *   <li>字段存在但不是字符串 → 拒绝，并说明必须是字符串；</li>
+     *   <li>字段是空串 → 逐字沿用旧版原文 {@code Invalid/Missing 'prefix' !}。</li>
+     * </ul>
+     *
+     * <p>本版显式要求 JSON 字符串；类型不对就在解析期拒绝，而不是让一个本该写字符串的字段
+     * 带着别的类型进入定义。旧版走 {@code net.minecraft.util.JsonUtils.getString}，本轮没有重新验证
+     * 它对数字/布尔的处理，因此这里不把“更严”写成与旧版的具体差异。
+     *
+     * @param root  定义的根对象
+     * @param where 出错信息里用来指认是哪个文件
+     * @return 前缀字面量；没有该字段时为 {@code null}
+     * @throws com.google.gson.JsonParseException 字段存在但不是 JSON 字符串，或是空串
+     */
+    @javax.annotation.Nullable
+    public static String prefix(JsonObject root, String where) {
+        JsonElement element = root.get("prefix");
+        if (element == null) {
+            return null;
+        }
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+            throw new com.google.gson.JsonParseException(
+                    "'prefix' must be a string, but " + element + " was given in " + where + ".");
+        }
+        String text = element.getAsString();
+        if (text.isEmpty()) {
+            // 旧版原文，不补 where：这条消息本身就是包作者熟悉的句子。
+            throw new com.google.gson.JsonParseException("Invalid/Missing 'prefix' !");
+        }
+        return text;
+    }
+
+    /**
      * 定义里的 {@code geo-model}：GeckoLib 自定义控制器模型的五个资源。
      *
      * <p>没有这个字段时返回 {@code null}（这台机器用普通方块模型），与旧版
