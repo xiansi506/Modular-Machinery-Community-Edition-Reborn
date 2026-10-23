@@ -1,5 +1,7 @@
 # Modular Machinery: Community Edition Reborn
 
+> **状态说明（2026-10-23）**：本 README 的功能叙述停在 0.31.0；当前版本与交接状态见 [docs/交接-2026-10-23.md](docs/交接-2026-10-23.md)。不要用本文的 “Current release” 判断现状。
+
 Forge 1.20.1 / Java 17 migration foundation for the archived Modular Machinery: Community Edition source.
 
 **Current release: 0.31.0** — the first **feature** release after the launch. It closes the item the 0.30.1 notes
