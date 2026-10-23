@@ -325,6 +325,10 @@ public final class ParallelCraftCheck {
         // X1 的两份根字段名单必须是一个契约（否则合法定义会被 strict 路径拒收）；
         // X9 的蓝图槽必须一格只放一张（旧版显式设过上限 1，搬家时漏了）。
         RootFieldListCheck.rootFieldLists();
+        // 0.81.0：E6——最后一个「认得但不求值」的根字段开始求值：控制器形状/碰撞箱来自定义，
+        // generic 控制器始终整块（旧版
+        // parentMachine == null 的分支）。
+        ControllerBoundingBoxCheck.controllerBoundingBox();
         BlueprintSlotCheck.blueprintSlotLimit();
         // 0.63.8：A9——方块没了，槽里的物品不能跟着消失。旧版三个方块都在 breakBlock 里吐库存，
         // 本版只有升级总线记得；物品仓与控制器连蓝图都会一起没。

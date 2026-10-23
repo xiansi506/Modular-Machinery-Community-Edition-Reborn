@@ -148,8 +148,10 @@ final class PrefixCheck {
         } else {
             report("prefix 已离开 UNIMPLEMENTED_ROOT_FIELDS（不再报「accepted but not evaluated」）",
                     !List.of(unimplemented).contains("prefix"));
-            report("controller-bounding-box 仍在 UNIMPLEMENTED_ROOT_FIELDS 里（这一项本轮没做）",
-                    List.of(unimplemented).contains("controller-bounding-box"));
+            // E6（0.81.0）把最后一个字段也求值了，名单因此变空。原来的对照「controller-bounding-box
+            // 仍在这里」随之失效；改成反向断言：如果它回来了，说明 E6 的回退没有被发现。
+            report("controller-bounding-box 已离开 UNIMPLEMENTED_ROOT_FIELDS（0.81.0 E6 求值）",
+                    !List.of(unimplemented).contains("controller-bounding-box"));
         }
         report("prefix 仍在 KNOWN_ROOT_FIELDS 里（strict 拼写检查认得它）",
                 MachineSchema.KNOWN_ROOT_FIELDS.contains("prefix"));

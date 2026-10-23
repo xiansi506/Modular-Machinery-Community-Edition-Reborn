@@ -312,7 +312,9 @@ public final class MachineSchema {
                 .withGeoModel(MachineRootFields.geoModel(root, String.valueOf(where)))
                 .withHideComponentsWhenFormed(hideComponentsWhenFormed)
                 .withMultiBlockModifiers(multiBlockModifiers)
-                .withPrefix(prefix);
+                .withPrefix(prefix)
+                .withControllerBoundingBox(
+                        MachineRootFields.controllerBoundingBox(root, String.valueOf(where)));
     }
 
     // 0.31.0 removed rejectDeferred(JsonObject, Object, boolean) and its call above read()'s body. It existed to
@@ -729,15 +731,21 @@ public final class MachineSchema {
      * {@code hide-components-when-formed} 在 0.71.0（E5）离开：预览现在会读它（成型后隐藏组件），
      * 见 {@link MachineDefinition#hideComponentsWhenFormed()} 与 {@code StructurePreview#hidingComponents()}。
      * {@code prefix} 在 0.80.0（E7）离开：预览标题左侧会显示它，解析也恢复旧版的非空字符串检查。
-     * 剩下 {@code controller-bounding-box} 仍<strong>完全没有消费者</strong>，属于尚未排期的批次。
+     * {@code controller-bounding-box} 在 0.81.0（E6）离开：控制器的选中箱/碰撞箱真的会按这六个数字
+     * 收窄，见 {@link MachineDefinition#controllerBoundingBox()} 与
+     * {@code MachineControllerBlock#getShape}。
+     *
+     * <p>名单现在是<strong>空的</strong>，但结构保留：下一个「认得、还不求值」的字段仍然要先登记在这里，
+     * 让加载日志说真话。空数组不是「这段代码没用」——它让「所有已知根字段都已求值」成为一条可检查的
+     * 事实（复现器断言 {@code length == 0}）。
      *
      * <p><b>这份名单点名的每个字段，同时必须出现在 {@link #KNOWN_ROOT_FIELDS} 里。</b>这不是排版上的对称，
      * 而是一条会被作者读到的语义：不在那份名单里，加载器会在「认得但不求值」的警告之后紧接着再报一句
      * 「this loader does not know」——后者是假话——而 strict 路径（{@code MachineBuilderJS.register()}）
-     * 会据此拒收整份合法定义。0.63.0 修的就是这件事（勘测 X1）：上面三个字段当时只在这份名单里。
+     * 会据此拒收整份合法定义。0.63.0 修的就是这件事（勘测 X1）：当时 prefix / hide-components-when-formed /
+     * controller-bounding-box 只在这份名单里。
      */
     private static final String[] UNIMPLEMENTED_ROOT_FIELDS = {
-            "controller-bounding-box"
     };
 
     /**

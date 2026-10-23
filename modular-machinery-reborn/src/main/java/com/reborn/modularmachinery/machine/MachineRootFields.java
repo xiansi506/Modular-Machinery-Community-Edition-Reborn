@@ -1,7 +1,10 @@
 package com.reborn.modularmachinery.machine;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import net.minecraft.world.phys.AABB;
 
 /**
  * 机器定义里**根字段**的解析，逐条对应旧版的 {@code DynamicMachinePreDeserializer}。
@@ -115,5 +118,51 @@ public final class MachineRootFields {
         }
         throw new com.google.gson.JsonParseException(
                 "'hide-components-when-formed' has to be either 'true' or 'false'!");
+    }
+
+    /**
+     * 定义里的 {@code controller-bounding-box}：控制器选中箱/碰撞箱的六个数字
+     * （{@code minX, minY, minZ, maxX, maxY, maxZ}）。
+     *
+     * <p>与旧版 {@code DynamicMachine.java:595-607 / 660-663} 逐条对应：
+     * <ul>
+     *   <li>缺省 → {@link MachineDefinition#FULL_CONTROLLER_BOUNDING_BOX}（整块）；</li>
+     *   <li>必须是恰好六个元素的数组，否则拒绝，消息以旧版原文 {@code Invalid 'controllerBoundingBox'!} 开头；</li>
+     *   <li>每个元素走 {@code getAsDouble()}，所以数字字符串（如 {@code "0.25"}）与旧版一样被接受；</li>
+     *   <li><b>不检查</b>范围、也不检查 {@code min <= max}——旧版同样只做类型与长度检查。</li>
+     * </ul>
+     *
+     * <p>非法元素的类型错误被包进同一条消息里，而不是让 Gson 的
+     * {@code UnsupportedOperationException} 直接冒到加载日志：包作者需要的是一句能定位字段的话。
+     *
+     * @param root  定义的根对象
+     * @param where 出错信息里用来指认是哪个文件
+     * @return 控制器盒子；没有该字段时为整块
+     * @throws JsonParseException 字段存在但不是六个数字组成的数组
+     */
+    public static AABB controllerBoundingBox(JsonObject root, String where) {
+        JsonElement element = root.get("controller-bounding-box");
+        if (element == null) {
+            return MachineDefinition.FULL_CONTROLLER_BOUNDING_BOX;
+        }
+        if (!element.isJsonArray()) {
+            throw new JsonParseException("Invalid 'controllerBoundingBox'! Expected an array of six numbers in "
+                    + where + ", but found " + element + ".");
+        }
+        JsonArray array = element.getAsJsonArray();
+        if (array.size() != 6) {
+            throw new JsonParseException("Invalid 'controllerBoundingBox'! Expected an array of six numbers in "
+                    + where + ", but found " + array.size() + " element(s).");
+        }
+        double[] values = new double[6];
+        for (int i = 0; i < values.length; i++) {
+            try {
+                values[i] = array.get(i).getAsDouble();
+            } catch (RuntimeException e) {
+                throw new JsonParseException("Invalid 'controllerBoundingBox'! Expected an array of six numbers in "
+                        + where + ", but element " + i + " is " + array.get(i) + ".", e);
+            }
+        }
+        return new AABB(values[0], values[1], values[2], values[3], values[4], values[5]);
     }
 }

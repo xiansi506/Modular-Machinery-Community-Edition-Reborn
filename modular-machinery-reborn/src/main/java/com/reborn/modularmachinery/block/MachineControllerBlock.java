@@ -1,11 +1,14 @@
 package com.reborn.modularmachinery.block;
 
+import com.reborn.modularmachinery.machine.MachineDefinition;
+import com.reborn.modularmachinery.machine.MachineRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
@@ -21,6 +24,9 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -117,6 +123,42 @@ public final class MachineControllerBlock extends Block implements EntityBlock {
             }
         }
         return InteractionResult.sidedSuccess(level.isClientSide);
+    }
+
+    /**
+     * 控制器的选中箱/碰撞箱，来自机器的 {@code controller-bounding-box}（旧版
+     * {@code BlockController.java:309-328}）。
+     *
+     * <p>三种情形与旧版逐条对应：
+     * <ul>
+     *   <li>generic 控制器（{@code boundMachine == null}）→ 整块。旧版此时 {@code parentMachine == null}，
+     *       {@code getBoundingBox()} 返回 {@code FULL_BLOCK_AABB}；</li>
+     *   <li>按机器注册、但定义没写这个字段（或正好等于整块）→ 整块；</li>
+     *   <li>按机器注册、且盒子被收窄 → 用那六个数字（{@code Shapes.create}）。</li>
+     * </ul>
+     *
+     * <p>这里<strong>不</strong>复制旧版的 {@code isFullBlock} 三件套：1.20.1 的形状由
+     * {@link #getShape} / {@link #getCollisionShape} 回答，{@code isFullBlock}/{@code isFullCube} 那套
+     * 1.12 的判定已经没有同名消费者。选中框与碰撞箱同时收窄，否则玩家会「看得见却穿不过去」。
+     */
+    @Override
+    public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        if (this.boundMachine == null) {
+            return Shapes.block();
+        }
+        return MachineRegistry.byId(this.boundMachine)
+                .map(MachineDefinition::controllerBoundingBox)
+                .map(box -> box.equals(MachineDefinition.FULL_CONTROLLER_BOUNDING_BOX)
+                        ? Shapes.block()
+                        : Shapes.create(box))
+                .orElseGet(Shapes::block);
+    }
+
+    @Override
+    public VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos,
+                                        CollisionContext context) {
+        // 选中箱与碰撞箱共用同一个盒子：旧版两个 getter 读的是同一个 parentMachine 字段。
+        return this.getShape(state, level, pos, context);
     }
 
     @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new MachineControllerBlockEntity(pos, state); }

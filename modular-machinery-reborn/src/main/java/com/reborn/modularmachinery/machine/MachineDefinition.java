@@ -5,18 +5,20 @@ import com.reborn.modularmachinery.recipe.RecipeModifier;
 import com.reborn.modularmachinery.recipe.RecipeModifiers;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.phys.AABB;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * A loaded machine definition: the data-driven counterpart of the original {@code DynamicMachine}.
  *
- * <p>M1 carries the fields that describe a structure and the machine's identity. Most of the original root
- * fields have since been implemented: {@code color}, {@code has-factory}, {@code factory-only},
- * {@code hide-components-when-formed}, {@code dynamic-patterns} and (0.80.0, E7) {@code prefix}. The remaining
- * one ({@code controller-bounding-box}) is deliberately not implemented yet and is still listed as a gap.
+ * <p>M1 carries the fields that describe a structure and the machine's identity. Every root field of the
+ * original's machine schema is now implemented, including {@code color}, {@code has-factory},
+ * {@code factory-only}, {@code hide-components-when-formed}, {@code dynamic-patterns}, (0.80.0, E7)
+ * {@code prefix} and (0.81.0, E6) {@code controller-bounding-box}.
  *
  * <h2>M6c: parallelism and modifiers</h2>
  *
@@ -88,6 +90,15 @@ public final class MachineDefinition {
      */
     public static final FailureAction DEFAULT_FAILURE_ACTION = FailureAction.STILL;
 
+    /**
+     * 没有声明 {@code controller-bounding-box} 时的控制器盒子：整块。
+     *
+     * <p>旧版从 {@code Block.FULL_BLOCK_AABB} 起步（{@code DynamicMachine.java:81}），只有字段存在时才覆盖
+     * （:660-663）。本版照抄这个默认值；它是**整块**而不是「没有盒子」，因为控制器的选中箱与碰撞箱
+     * 总要有一个值。
+     */
+    public static final AABB FULL_CONTROLLER_BOUNDING_BOX = new AABB(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+
     private final ResourceLocation id;
     private final String localizedName;
     private final MachinePattern pattern;
@@ -152,6 +163,16 @@ public final class MachineDefinition {
      */
     @Nullable
     private final String prefix;
+
+    /**
+     * 控制器的选中箱/碰撞箱（{@code controller-bounding-box}），旧版
+     * {@code DynamicMachine.controllerBoundingBox}。
+     *
+     * <p>只影响<strong>按机器注册</strong>的控制器；generic 控制器永远整块（旧版的
+     * {@code parentMachine == null} 分支）。见 {@code MachineControllerBlock#getShape}。
+     * 与 {@link #color} 一样，定义建好后不可变，设置走 {@link #withControllerBoundingBox(AABB)}。
+     */
+    private final AABB controllerBoundingBox;
 
     public MachineDefinition(ResourceLocation id, String localizedName, MachinePattern pattern,
                              FailureAction failureAction, boolean requiresBlueprint) {
@@ -242,7 +263,8 @@ public final class MachineDefinition {
                              List<DynamicPattern> dynamicPatterns) {
         this(id, localizedName, pattern, failureAction, requiresBlueprint, maxParallelism, internalParallelism,
                 parallelizable, modifiers, maxThreads, hasFactory, factoryOnly, coreThreads, smartInterfaces,
-                dynamicPatterns, DEFAULT_COLOR, null, false, List.of(), null);
+                dynamicPatterns, DEFAULT_COLOR, null, false, List.of(), null,
+                FULL_CONTROLLER_BOUNDING_BOX);
     }
 
     /** 规范构造器：**唯一**给所有字段赋值的那一个，包括 {@code color}。 */
@@ -255,7 +277,8 @@ public final class MachineDefinition {
                               List<SmartInterfaceType> smartInterfaces,
                               List<DynamicPattern> dynamicPatterns, int color,
                               @Nullable GeoModelSpec geoModel, boolean hideComponentsWhenFormed,
-                              List<MachineMultiBlockModifier> multiBlockModifiers, @Nullable String prefix) {
+                              List<MachineMultiBlockModifier> multiBlockModifiers, @Nullable String prefix,
+                              AABB controllerBoundingBox) {
         this.id = id;
         this.localizedName = localizedName;
         this.pattern = pattern;
@@ -276,6 +299,7 @@ public final class MachineDefinition {
         this.color = color;
         this.geoModel = geoModel;
         this.prefix = prefix;
+        this.controllerBoundingBox = controllerBoundingBox;
     }
 
     /**
@@ -295,7 +319,8 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, color, this.geoModel,
-                this.hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix);
+                this.hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix,
+                this.controllerBoundingBox);
     }
 
     /**
@@ -315,7 +340,8 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, geoModel,
-                this.hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix);
+                this.hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix,
+                this.controllerBoundingBox);
     }
 
     /**
@@ -334,7 +360,8 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
-                this.hideComponentsWhenFormed, multiBlockModifiers, this.prefix);
+                this.hideComponentsWhenFormed, multiBlockModifiers, this.prefix,
+                this.controllerBoundingBox);
     }
 
     /** 带指定成型隐藏开关的副本；解析器用它，而不是去改一个已经建好的定义。 */
@@ -343,7 +370,8 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
-                hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix);
+                hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix,
+                this.controllerBoundingBox);
     }
 
     /**
@@ -380,7 +408,34 @@ public final class MachineDefinition {
                 this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
                 this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
                 this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
-                this.hideComponentsWhenFormed, this.multiBlockModifiers, prefix);
+                this.hideComponentsWhenFormed, this.multiBlockModifiers, prefix,
+                this.controllerBoundingBox);
+    }
+
+    /**
+     * 控制器的选中箱/碰撞箱，来自 {@code controller-bounding-box}；没写时为
+     * {@link #FULL_CONTROLLER_BOUNDING_BOX}（整块）。
+     *
+     * <p>与旧版一致，这里<strong>不校验</strong>范围或 {@code min <= max}：解析只把六个数字原样搬进来，
+     * 由 {@code Shapes.create} 在真正使用时承担后果。旧版 {@code DynamicMachine.java:595-607} 同样如此。
+     */
+    public AABB controllerBoundingBox() {
+        return this.controllerBoundingBox;
+    }
+
+    /**
+     * 带指定控制器盒子的副本；解析器用它，而不是去改一个已经建好的定义。
+     *
+     * <p>{@code null} 会被拒绝：默认值是整块而不是「没有盒子」，调用者要表达「整块」应传
+     * {@link #FULL_CONTROLLER_BOUNDING_BOX}。
+     */
+    public MachineDefinition withControllerBoundingBox(AABB controllerBoundingBox) {
+        Objects.requireNonNull(controllerBoundingBox, "controllerBoundingBox");
+        return new MachineDefinition(this.id, this.localizedName, this.pattern, this.failureAction,
+                this.requiresBlueprint, this.maxParallelism, this.internalParallelism, this.parallelizable,
+                this.modifiers, this.maxThreads, this.hasFactory, this.factoryOnly, this.coreThreads,
+                this.smartInterfaces, this.dynamicPatterns, this.color, this.geoModel,
+                this.hideComponentsWhenFormed, this.multiBlockModifiers, this.prefix, controllerBoundingBox);
     }
 
     /** Registry name of the machine, e.g. {@code modular_machinery_reborn:transformer}. */

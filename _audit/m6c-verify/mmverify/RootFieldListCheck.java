@@ -37,6 +37,9 @@ import java.util.Set;
  *
  * <p>还有一条<b>阴性对照</b>：拼错的字段（{@code prefx}）在 strict 下仍然被拒绝。放宽这三个字段之后，
  * 拼写检查不能变成「什么都收」——否则这条修复就等于把 strict 拆了。
+ *
+ * <p>0.81.0（E6）之后 {@code controller-bounding-box} 已由 {@link ControllerBoundingBoxCheck} 求值，
+ * 未实现名单因此为空；本节对「空」的断言从失败翻成通过，其余结构/行为断言保持不变。
  */
 final class RootFieldListCheck {
 
@@ -49,7 +52,12 @@ final class RootFieldListCheck {
             "\"parts\":[{\"x\":0,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"},"
                     + "{\"x\":1,\"y\":0,\"z\":0,\"elements\":\"minecraft:stone\"}]";
 
-    /** 三个「认得但不求值」的字段，值按旧版 {@code DynamicMachine} 的形状写（类型对不对已经不重要——本项目还不读它们）。 */
+    /**
+     * 三个曾经「认得但不求值」的字段，值按旧版 {@code DynamicMachine} 的形状写。
+     *
+     * <p>0.81.0 起 {@code controller-bounding-box} 也求值了，名单因而清空；这份定义保留作历史夹具，
+     * 用来继续证明这三个字段在 strict/非 strict 两条路径上都被接受。
+     */
     private static final String UNIMPLEMENTED_FIELDS =
             "\"prefix\":\"彩虹 \""
                     + ",\"hide-components-when-formed\":true"
@@ -73,11 +81,11 @@ final class RootFieldListCheck {
                     + "这份结构断言拿不到证据", false);
             return;
         }
-        // 名单为空时，下面那组「每一项都在已知名单里」会变成空转。把它钉成失败不是给缺陷背书：
-        // 而是让「三个字段真的都做完、名单清空」那一天**当场失败**，逼下一个人改写本节，而不是让本节悄悄失去意义。
-        ParallelCraftCheck.report("「认得但不求值」名单非空（" + unimplemented.length + " 个："
-                        + String.join("、", unimplemented) + "）——为空则本节已空转，必须改写",
-                unimplemented.length > 0);
+        // 0.63.0 时这条断言写的是「名单必须非空」：那时名单里还有三个字段，空掉说明加载器把字段丢了。
+        // 0.81.0 的 E6 做完最后一个字段后，空名单才是正确状态——断言随之翻面，而不是删掉：
+        // 将来谁再往名单里塞字段，这里会立刻失败，提醒他同时补上「确实求值」的断言。
+        ParallelCraftCheck.check("0.81.0 起「认得但不求值」名单为空（E6 完成最后一个根字段）",
+                0, unimplemented.length);
 
         for (String field : unimplemented) {
             ParallelCraftCheck.report("'" + field + "' 在「认得但不求值」名单里，就必须在 KNOWN_ROOT_FIELDS 里"
