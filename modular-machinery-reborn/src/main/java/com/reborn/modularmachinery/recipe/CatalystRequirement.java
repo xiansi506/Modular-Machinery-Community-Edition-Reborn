@@ -183,6 +183,17 @@ public final class CatalystRequirement extends MachineRequirement {
         if (this.chance < 1.0F && random.nextFloat() >= this.chance) {
             return true;
         }
+        return reserve(ports, RecipeModifiers.EMPTY);
+    }
+
+    @Override
+    public boolean reserve(HatchCollection ports, RecipeModifiers modifiers) {
+        if (!hasCatalyst(ports)) return true;
+        return reserveRequired(ports);
+    }
+
+    /** A selected catalyst must be paid; only unselected catalysts are optional. */
+    public boolean reserveRequired(HatchCollection ports) {
         List<IItemHandler> handlers = ports.itemInputs();
         for (IngredientArrayEntry entry : this.entries) {
             int amount = entry.amount();
@@ -196,7 +207,13 @@ public final class CatalystRequirement extends MachineRequirement {
             }
             return true;
         }
-        return true;
+        return false;
+    }
+
+    public boolean applyRequired(HatchCollection ports, RandomSource random) {
+        if (!hasCatalyst(ports)) return false;
+        if (this.chance < 1.0F && random.nextFloat() >= this.chance) return true;
+        return reserveRequired(ports);
     }
 
     @Override

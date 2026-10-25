@@ -205,7 +205,8 @@ final class HatchGroupCheck {
                     engine.contains("for (int group : ports.groupIds())")
                             && (engine.contains("recipe.canStart(ports.withGroup(group), effective)")
                                     || engine.contains("recipe.canStart(groupPorts, effective)")
-                                    || engine.contains("recipe.canStart(ports.withGroup(group), modifiers)"))
+                                    || engine.contains("recipe.canStart(ports.withGroup(group), modifiers)")
+                                    || engine.contains("candidate.canStart(groupPorts, plan)"))
                             // 0.65.0 (B9): the candidate also freezes that group's modifiers.
                             && (engine.contains("new Candidate(recipe, group)")
                                     || engine.contains("new Candidate(recipe, group, effective)")));

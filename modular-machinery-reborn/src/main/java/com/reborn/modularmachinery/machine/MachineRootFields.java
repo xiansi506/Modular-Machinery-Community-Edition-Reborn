@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.reborn.modularmachinery.config.ModConfig;
 import net.minecraft.world.phys.AABB;
 
 /**
@@ -34,14 +35,13 @@ public final class MachineRootFields {
      *
      * @param root  定义的根对象
      * @param where 出错信息里用来指认是哪个文件（作者据此找到那一行）
-     * @return 颜色值；没有 {@code color} 字段时返回 {@link MachineDefinition#DEFAULT_COLOR}
+     * @return 颜色值；没有 {@code color} 字段时返回 {@code general.general-casing-color}
      * @throws IllegalArgumentException 字段存在但不是「恰好六位十六进制」（含旧版的两条错误情形）
      */
     public static int color(JsonObject root, String where) {
         JsonElement element = root.get("color");
         if (element == null) {
-            // 没有这个字段就是「不染色」，与旧版 definedColor 从默认值起步等价。
-            return MachineDefinition.DEFAULT_COLOR;
+            return ModConfig.generalCasingColor();
         }
         return MachineDefinition.parseColor(root, where);
     }

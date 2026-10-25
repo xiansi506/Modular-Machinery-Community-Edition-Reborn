@@ -146,7 +146,7 @@ public final class MachineControllerBlock extends Block implements EntityBlock {
         if (this.boundMachine == null) {
             return Shapes.block();
         }
-        return MachineRegistry.byId(this.boundMachine)
+        return MachineRegistry.byId(this.boundMachine, level)
                 .map(MachineDefinition::controllerBoundingBox)
                 .map(box -> box.equals(MachineDefinition.FULL_CONTROLLER_BOUNDING_BOX)
                         ? Shapes.block()

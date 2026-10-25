@@ -20,10 +20,39 @@ minecraft {
 }
 
 repositories {
+    // KubeJS 的传递依赖 Architectury 不发布在 Maven Central。
+    maven {
+        name = 'Architectury'
+        url = 'https://maven.architectury.dev'
+        content { includeGroup 'dev.architectury' }
+    }
+    maven {
+        name = 'Latvian'
+        url = 'https://maven.latvian.dev/releases'
+        content { includeGroup 'dev.latvian.mods' }
+    }
+    maven {
+        name = 'ModMaven'
+        url = 'https://modmaven.dev'
+        content { includeGroup 'mekanism' }
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
     maven { name = 'Aliyun'; url = 'https://maven.aliyun.com/repository/public' }
-    maven { name = 'BlameJared'; url = 'https://maven.blamejared.com' }
+    maven {
+        name = 'BlameJared'
+        url = 'https://maven.blamejared.com'
+        content { includeGroup 'mezz.jei' }
+    }
     // 0.70.0（C7）：GeckoLib 4.4.9。本地构建走 libs/ 里的 jar；非 local 构建从这里取。
-    maven { name = 'GeckoLib'; url = 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/' }
+    maven {
+        name = 'GeckoLib'
+        url = 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/'
+        content { includeGroup 'software.bernie.geckolib' }
+    }
     flatDir { dirs 'libs' }
 }
 
@@ -59,9 +88,16 @@ dependencies {
         // 与旧版 GeoBlockRenderer 的 preRender/actuallyRender 语义接近，且这个版本已在 libs/ 里核对过源码。
         compileOnly fg.deobf('libs:geckolib-forge-1.20.1:4.4.9')
     } else {
-        compileOnly fg.deobf('dev.latvian.mods:kubejs-forge:2001.6.5-build.16')
-        compileOnly fg.deobf('mezz.jei:jei-1.20.1-forge:15.2.0.27')
+        // 与已验证的本地 API 版本一致；运行时可选不等于编译时可以缺少依赖。
+        compileOnly fg.deobf('dev.latvian.mods:kubejs-forge:2001.6.5-build.26')
+        compileOnly fg.deobf('dev.latvian.mods:rhino-forge:2001.2.3-build.10')
+        compileOnly fg.deobf('mezz.jei:jei-1.20.1-forge:15.49.0.188')
         compileOnly fg.deobf('software.bernie.geckolib:geckolib-forge-1.20.1:4.4.9')
+        compileOnly fg.deobf('mekanism:Mekanism:1.20.1-10.4.16.80')
+        // 由对应发布页给出的不可变 Modrinth Maven 坐标。
+        compileOnly fg.deobf('maven.modrinth:nvQzSEkH:xJQHCmWJ') // Jade 11.13.3+forge
+        compileOnly fg.deobf('maven.modrinth:XxWD5pD3:7KVs6HMQ') // AE2 Forge 15.4.10
+        compileOnly fg.deobf('maven.modrinth:Ck4E7v7R:i7Tp1AHw') // GuideME 20.1.15
     }
 }
 

@@ -25,11 +25,17 @@ public final class ModularMachineryJadePlugin implements IWailaPlugin {
     public void register(IWailaCommonRegistration registration) {
         registration.registerFluidStorage(HatchFluidStorageProvider.SERVER,
                 com.reborn.modularmachinery.block.MachineHatchBlockEntity.class);
+        // E9（0.99.0）：控制器的状态/进度/owner/并行数据（服务端采集，经 Jade 同步给客户端）
+        registration.registerBlockDataProvider(new ControllerInfoProviders.Server(),
+                com.reborn.modularmachinery.block.MachineControllerBlockEntity.class);
     }
 
     @Override
     public void registerClient(IWailaClientRegistration registration) {
         registration.registerFluidStorageClient(HatchFluidStorageProvider.client());
         registration.addTooltipCollectedCallback(FluidStorageSuppressor.INSTANCE);
+        // E9（0.99.0）：控制器信息行
+        registration.registerBlockComponent(new ControllerInfoProviders.Client(),
+                com.reborn.modularmachinery.block.MachineControllerBlock.class);
     }
 }

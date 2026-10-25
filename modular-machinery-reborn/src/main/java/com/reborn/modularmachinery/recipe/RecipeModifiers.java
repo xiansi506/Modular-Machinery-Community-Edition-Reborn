@@ -42,6 +42,32 @@ public final class RecipeModifiers {
         return this.modifiers;
     }
 
+    /** 已付催化剂对应的冻结修改器必须随在途合成保存，不能重读当前库存重建。 */
+    public net.minecraft.nbt.ListTag save() {
+        net.minecraft.nbt.ListTag list = new net.minecraft.nbt.ListTag();
+        for (RecipeModifier modifier : modifiers) {
+            net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
+            if (modifier.target() != null) tag.putString("target", modifier.target().name());
+            if (modifier.ioTarget() != null) tag.putString("io", modifier.ioTarget().name());
+            tag.putFloat("value", modifier.value());
+            tag.putString("operation", modifier.operation().name());
+            tag.putBoolean("chance", modifier.affectsChance());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    public static RecipeModifiers load(net.minecraft.nbt.ListTag list) {
+        java.util.ArrayList<RecipeModifier> modifiers = new java.util.ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            net.minecraft.nbt.CompoundTag tag = list.getCompound(i);
+            modifiers.add(new RecipeModifier(tag.contains("target") ? RecipeModifier.Target.valueOf(tag.getString("target")) : null,
+                    tag.contains("io") ? IOType.valueOf(tag.getString("io")) : null, tag.getFloat("value"),
+                    RecipeModifier.Operation.valueOf(tag.getString("operation")), tag.getBoolean("chance")));
+        }
+        return of(modifiers);
+    }
+
     public boolean isEmpty() {
         return this.modifiers.isEmpty();
     }

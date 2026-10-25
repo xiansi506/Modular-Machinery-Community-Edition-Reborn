@@ -202,7 +202,7 @@ public final class UpgradeBusScreen extends AbstractContainerScreen<UpgradeBusMe
             description.add(Component.translatable(KEY + "bounded", bound.size()));
         }
         bound.forEach((pos, machine) -> {
-            Component name = MachineRegistry.byId(machine)
+            Component name = MachineRegistry.clientById(machine)
                     .map(definition -> (Component) definition.displayName())
                     .orElseGet(() -> Component.literal(machine.toString()));
             // The original's `"%s (%s)"` with MiscUtils.posToString, which is the bare (x, y, z) triple.

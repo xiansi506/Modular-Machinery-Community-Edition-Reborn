@@ -4,6 +4,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraftforge.fml.util.thread.EffectiveSide;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -28,6 +30,9 @@ public final class MachineRegistry {
 
     private static volatile Map<ResourceLocation, MachineDefinition> machines = Map.of();
     private static volatile Map<ResourceLocation, MachinePattern[]> rotations = Map.of();
+    private record ClientView(Map<ResourceLocation, MachineDefinition> machines,
+                              Map<ResourceLocation, MachinePattern[]> rotations) {}
+    private static volatile ClientView client = new ClientView(Map.of(), Map.of());
 
     /**
      * 波 4：每个定义**解析用的那份 JSON**，按 id 存放。
@@ -49,18 +54,44 @@ public final class MachineRegistry {
     private MachineRegistry() {
     }
 
+    /** Logical-client data never replaces the integrated server's definitions or source JSON. */
+    public static void replaceClient(Map<ResourceLocation, MachineDefinition> loaded) {
+        Map<ResourceLocation, MachineDefinition> copy = Collections.unmodifiableMap(new LinkedHashMap<>(loaded));
+        Map<ResourceLocation, MachinePattern[]> variants = new LinkedHashMap<>();
+        for (var entry : copy.entrySet()) {
+            MachinePattern[] patterns = new MachinePattern[4];
+            patterns[0] = entry.getValue().pattern();
+            for (int i = 1; i < 4; i++) patterns[i] = patterns[i - 1].rotateYCounterClockwise();
+            variants.put(entry.getKey(), patterns);
+        }
+        client = new ClientView(copy, Collections.unmodifiableMap(variants));
+    }
+
+    public static void clearClient() { client = new ClientView(Map.of(), Map.of()); }
+    public static Collection<MachineDefinition> clientAll() { return client.machines().values(); }
+    public static Optional<MachineDefinition> clientById(@Nullable ResourceLocation id) {
+        return id == null ? Optional.empty() : Optional.ofNullable(client.machines().get(id));
+    }
+
+    public static Optional<MachineDefinition> byId(@Nullable ResourceLocation id, boolean clientSide) {
+        return clientSide ? clientById(id) : byId(id);
+    }
+
+    /** Common shape queries have a world when possible; chunk views use the calling logical thread. */
+    public static Optional<MachineDefinition> byId(@Nullable ResourceLocation id, BlockGetter world) {
+        return byId(id, world instanceof Level level ? level.isClientSide : EffectiveSide.get().isClient());
+    }
+
+    public static Optional<MachineDefinition> presentationById(@Nullable ResourceLocation id) {
+        return byId(id, EffectiveSide.get().isClient());
+    }
+
     /** Replaces the registry contents; called by {@link MachineLoader} on every resource reload. */
     public static void replace(Map<ResourceLocation, MachineDefinition> loaded) {
         replace(loaded, Map.of());
     }
 
-    /**
-     * {@link #replace(Map)} plus the source JSON each definition was parsed from.
-     *
-     * <p>两个参数的版本保留下来，是因为**客户端**重建定义时手上没有源 JSON：它已经把 JSON 解析成
-     * {@code MachineDefinition} 了，再往注册表里放一遍那份 JSON 没有意义（客户端不往外发同步）。
-     * 服务端则总是走两参数的那个。
-     */
+    /** 只写服务端权威表并保留同步所需的源 JSON；客户端使用 replaceClient。 */
     public static void replace(Map<ResourceLocation, MachineDefinition> loaded,
                                Map<ResourceLocation, com.google.gson.JsonElement> loadedSources) {
         // Insertion order is preserved so that, when two definitions could match the same structure, the
@@ -163,6 +194,8 @@ public final class MachineRegistry {
                                   @Nullable ResourceLocation blueprintMachine,
                                   @Nullable ResourceLocation boundMachine) {
         int steps = rotationStepsFor(facing);
+        Map<ResourceLocation, MachineDefinition> definitions = level.isClientSide ? client.machines() : machines;
+        Map<ResourceLocation, MachinePattern[]> oriented = level.isClientSide ? client.rotations() : rotations;
 
         if (blueprintMachine != null) {
             Match fromBlueprint = tryMachine(level, controller, steps, blueprintMachine);
@@ -172,15 +205,15 @@ public final class MachineRegistry {
         }
 
         if (boundMachine != null) {
-            MachineDefinition bound = machines.get(boundMachine);
+            MachineDefinition bound = definitions.get(boundMachine);
             if (bound != null && bound.requiresBlueprint() && !boundMachine.equals(blueprintMachine)) {
                 return null;
             }
             return tryMachine(level, controller, steps, boundMachine);
         }
 
-        for (Map.Entry<ResourceLocation, MachinePattern[]> entry : rotations.entrySet()) {
-            MachineDefinition machine = machines.get(entry.getKey());
+        for (Map.Entry<ResourceLocation, MachinePattern[]> entry : oriented.entrySet()) {
+            MachineDefinition machine = definitions.get(entry.getKey());
             if (machine == null || machine.requiresBlueprint()) {
                 continue;
             }
@@ -194,8 +227,8 @@ public final class MachineRegistry {
 
     @Nullable
     private static Match tryMachine(Level level, BlockPos controller, int steps, ResourceLocation id) {
-        MachinePattern[] variants = rotations.get(id);
-        MachineDefinition machine = machines.get(id);
+        MachinePattern[] variants = (level.isClientSide ? client.rotations() : rotations).get(id);
+        MachineDefinition machine = byId(id, level.isClientSide).orElse(null);
         if (variants == null || machine == null) {
             return null;
         }

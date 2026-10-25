@@ -92,12 +92,11 @@ public final class IngredientIo {
      * all-or-nothing property every other helper in this class keeps.
      */
     public static boolean insertAll(List<IItemHandler> handlers, List<StackAmount> inserts) {
-        if (!simulateInsertAll(handlers, inserts)) {
-            return false;
-        }
+        ResourceTransaction transaction = new ResourceTransaction();
+        List<IItemHandler> planned = handlers.stream().map(transaction::items).toList();
         for (StackAmount insert : inserts) {
             int remaining = insert.amount();
-            for (IItemHandler handler : handlers) {
+            for (IItemHandler handler : planned) {
                 if (remaining <= 0) {
                     break;
                 }
@@ -108,13 +107,10 @@ public final class IngredientIo {
                 }
             }
             if (remaining > 0) {
-                // The simulation said this could not happen; leaving half the batch inserted would be worse
-                // than reporting it loudly.
-                throw new IllegalStateException("Item insertion disagreed with its own simulation for "
-                        + insert.stack() + " x" + insert.amount());
+                return false;
             }
         }
-        return true;
+        return transaction.commit();
     }
 
     private static boolean simulateInsertAll(List<IItemHandler> handlers, List<StackAmount> inserts) {
@@ -282,7 +278,7 @@ public final class IngredientIo {
     public static boolean extractEnergy(List<IEnergyStorage> handlers, long amount) {
         long available = 0L;
         for (IEnergyStorage storage : handlers) {
-            available += storage.getEnergyStored();
+            available += storage.extractEnergy((int) Math.min(Integer.MAX_VALUE, Math.max(0, amount - available)), true);
         }
         if (available < amount) {
             return false;

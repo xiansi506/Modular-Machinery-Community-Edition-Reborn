@@ -79,8 +79,14 @@ public final class EnergyRequirement extends MachineRequirement {
         return (long) Math.max(0.0, Math.floor(modified));
     }
 
-    /** What one tick of this craft draws, across every copy and accounting for a shortened duration. */
-    private long perTickDraw(RecipeModifiers modifiers) {
+    /** What one tick of this craft draws, across every copy and accounting for a shortened duration.
+     *
+     * <p>0.105.0（E9 能量行）改为 public：旧版 {@code MMInfoProvider.getEnergyRequired :306-320}
+     * 展示的正是这条链（需求值 × modifiers × durationMul × parallelism），Jade 的能量快照
+     * （{@code MachineControllerBlockEntity#energySnapshot}）复用同一算式——展示与结算
+     * 永远是同一个数字，不会各算各的。
+     */
+    public long perTickDraw(RecipeModifiers modifiers) {
         long perCopy = modifiedEnergyPerTick(modifiers);
         if (perCopy <= 0L) {
             return 0L;
@@ -134,6 +140,11 @@ public final class EnergyRequirement extends MachineRequirement {
             available = IngredientIo.insertCapacity(ports.energyOutputs());
         }
         return (int) Math.min(ceiling, available / perCopyPerTick);
+    }
+
+    @Override
+    public boolean reserve(HatchCollection ports, RecipeModifiers modifiers) {
+        return tick(ports, null, modifiers);
     }
 
     @Override

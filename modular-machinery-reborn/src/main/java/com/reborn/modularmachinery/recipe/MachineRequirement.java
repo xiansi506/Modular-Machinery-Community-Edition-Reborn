@@ -224,6 +224,16 @@ public abstract class MachineRequirement {
     /** Pure check: could this requirement be met right now? Never mutates the ports. */
     public abstract boolean canSatisfy(HatchCollection ports);
 
+    /** 修改器感知的多态入口，兼容模块不再经过主模组的 instanceof 白名单。 */
+    public boolean canSatisfy(HatchCollection ports, RecipeModifiers modifiers) {
+        return canSatisfy(ports);
+    }
+
+    /** 在事务副本上预留保证数量；只读需求默认只检查条件。 */
+    public boolean reserve(HatchCollection ports, RecipeModifiers modifiers) {
+        return canSatisfy(ports, modifiers);
+    }
+
     /**
      * Why {@link #canSatisfy} answers {@code false}, as a translation key, or {@code null} when this requirement
      * has nothing to say.
@@ -246,9 +256,17 @@ public abstract class MachineRequirement {
         return true;
     }
 
+    public boolean apply(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
+        return apply(ports, random);
+    }
+
     /** Runs once per tick, for per-tick requirements only. */
     public boolean tick(HatchCollection ports, RandomSource random) {
         return true;
+    }
+
+    public boolean tick(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
+        return tick(ports, random);
     }
 
     /** Short human-readable summary, used by JEI. */

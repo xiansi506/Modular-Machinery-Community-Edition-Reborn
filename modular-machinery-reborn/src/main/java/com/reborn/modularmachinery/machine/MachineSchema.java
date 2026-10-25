@@ -97,7 +97,13 @@ public final class MachineSchema {
             "prefix", "hide-components-when-formed", "controller-bounding-box",
             // 0.70.0（C7）：`geo-model`。旧版没有这个根字段——它走 CraftTweaker 注册表，
             // 本版没有脚本面，所以把同一组资源放进定义里（解析见 GeoModelSpec）。
-            "geo-model");
+            "geo-model",
+            // 0.85.1（X6）：`registryName`——旧版 DynamicMachine.Deserializer 认的驼峰别名
+            // （registryname 为空时回退，DynamicMachine.java:613-619），读取见 readRegistryName。
+            // 必须同时列在这里：否则写了别名的合法定义会收到「this loader does not know: registryName」，
+            // strict 路径（MachineBuilderJS.register）还会整份拒收——与上面 color/prefix 的坑同源，
+            // 两份名单是同一个契约。
+            "registryName");
     /**
      * Root fields the loader evaluates but the script API cannot yet write — <b>empty as of 0.31.0</b>, and kept
      * as an empty list on purpose.
@@ -147,7 +153,7 @@ public final class MachineSchema {
                                          boolean strict) {
         JsonObject root = asObject(element, where);
 
-        String registryName = requireString(root, "registryname", where);
+        String registryName = readRegistryName(root, where);
         ResourceLocation id = registryName.contains(":")
                 ? ResourceLocation.tryParse(registryName)
                 : new ResourceLocation(ModularMachineryReborn.MOD_ID, registryName);
@@ -176,7 +182,7 @@ public final class MachineSchema {
         // （空串拒绝），本版照做；没有前缀时明确是 null，而不是把裸语言键画到标题上。
         String prefix = MachineRootFields.prefix(root, String.valueOf(where));
 
-        int maxParallelism = MachineDefinition.DEFAULT_MAX_PARALLELISM;
+        int maxParallelism = com.reborn.modularmachinery.config.ModConfig.maxMachineParallelism();
         if (root.has("max-parallelism")) {
             maxParallelism = readParallelism(root, "max-parallelism", where);
         }
@@ -186,7 +192,7 @@ public final class MachineSchema {
             internalParallelism = readParallelism(root, "internal-parallelism", where);
         }
 
-        boolean parallelizable = MachineDefinition.DEFAULT_PARALLELIZABLE;
+        boolean parallelizable = com.reborn.modularmachinery.config.ModConfig.machineParallelizeEnabledByDefault();
         if (root.has("parallelizable")) {
             JsonElement flag = root.get("parallelizable");
             if (!flag.isJsonPrimitive() || !flag.getAsJsonPrimitive().isBoolean()) {
@@ -1096,5 +1102,28 @@ public final class MachineSchema {
             throw new JsonParseException("Missing required field '" + key + "' in " + where);
         }
         return root.get(key).getAsString();
+    }
+
+    /**
+     * X6（0.85.1）：机器名的两个拼法，照旧版 {@code DynamicMachine.Deserializer}（DynamicMachine.java:613-619）
+     * ——先读 {@code registryname}，为空再看驼峰别名 {@code registryName}；两个都为空才算缺字段。
+     * 非字符串的原语（数字、布尔）在这里按「空」处理，走缺字段的报错，而不是让 {@code getAsString}
+     * 把 {@code 123} 悄悄变成 {@code "123"}。
+     */
+    private static String readRegistryName(JsonObject root, Object where) {
+        String name = stringFieldOrNull(root, "registryname");
+        if (name == null || name.isEmpty()) {
+            name = stringFieldOrNull(root, "registryName");
+        }
+        if (name == null || name.isEmpty()) {
+            throw new JsonParseException("Missing required field 'registryname' in " + where
+                    + " (the camel-case alias 'registryName' is also accepted)");
+        }
+        return name;
+    }
+
+    private static String stringFieldOrNull(JsonObject root, String key) {
+        return root.has(key) && root.get(key).isJsonPrimitive() && root.get(key).getAsJsonPrimitive().isString()
+                ? root.get(key).getAsString() : null;
     }
 }

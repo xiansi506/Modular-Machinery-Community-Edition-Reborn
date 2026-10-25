@@ -351,9 +351,9 @@ public final class EventLayerCheck {
                 source.contains("be.postStructureEvents(!wasFormed);"));
 
         int checkStart = source.indexOf("be.postRecipeCheck(Phase.START");
-        int canStart = source.indexOf("!recipe.canStart(scope, effective)");
+        int canStart = source.indexOf("!recipe.canStart(scope, prepared)");
         int checkEnd = source.indexOf("be.postRecipeCheck(Phase.END");
-        int start = source.indexOf("if (!recipe.start(scope, level.random, effective))");
+        int start = source.indexOf("if (!recipe.start(scope, level.random, prepared))");
         int postStart = source.indexOf("be.postRecipeStart(");
         int clear = source.indexOf("be.clearStartFailure();", start);
         report("开工检查 START 在 canStart 之前", checkStart >= 0 && checkStart < canStart);

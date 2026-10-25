@@ -164,6 +164,15 @@ public final class MachineControllerMenu extends AbstractContainerMenu {
     }
 
     /**
+     * C2b（0.88.0）：任意字符串的失败原因（{@code RecipeCheckEvent.setFailed} 的通道），
+     * 走方块实体 update tag 同步——菜单整数槽装不下字符串。没有则为 {@code null}。
+     */
+    @javax.annotation.Nullable
+    public String failureCauseText() {
+        return machine.failureCauseText();
+    }
+
+    /**
      * The declared smart-interface types of the formed machine, in declaration order — what the screen's
      * interface block lists. The machine definition is loaded from the same data pack on both sides, so the
      * client can read it directly; only the <b>values</b> have to arrive over the wire.

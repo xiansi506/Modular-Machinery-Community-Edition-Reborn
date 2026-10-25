@@ -64,6 +64,11 @@ public final class BlueprintPreviewScreen extends Screen {
             graphics.renderTooltip(this.font, component, mouseX, mouseY);
             return;
         }
+        ItemStack selected = this.panel.selectedItemAt(localX, localY);
+        if (!selected.isEmpty()) {
+            graphics.renderTooltip(this.font, selected, mouseX, mouseY);
+            return;
+        }
         List<Component> lines = this.panel.tooltipLines(localX, localY);
         if (!lines.isEmpty()) {
             graphics.renderTooltip(this.font, lines, Optional.empty(), mouseX, mouseY);
@@ -100,5 +105,17 @@ public final class BlueprintPreviewScreen extends Screen {
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, delta);
+    }
+
+    /**
+     * E2（0.101.0）：材料格的 JEI R/U 快捷键（R=查配方、U=查用途，键位跟随 JEI 配置）。
+     * 面板只在鼠标悬停于材料格上时响应，其余按键（含 ESC）照走原路径。
+     */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (this.panel.keyPressed(keyCode, scanCode)) {
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 }

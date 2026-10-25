@@ -177,11 +177,11 @@ final class ControllerBoundingBoxCheck {
      */
     private static void shapeTests(MachineDefinition definition) {
         Map<ResourceLocation, MachineDefinition> saved = new LinkedHashMap<>();
-        for (MachineDefinition machine : MachineRegistry.all()) {
+        for (MachineDefinition machine : MachineRegistry.clientAll()) {
             saved.put(machine.id(), machine);
         }
         try {
-            MachineRegistry.replace(Map.of(definition.id(), definition));
+            MachineRegistry.replaceClient(Map.of(definition.id(), definition));
             MachineControllerBlock bound = newBlock(definition.id());
             MachineControllerBlock generic = newBlock(null);
             MachineControllerBlock missing = newBlock(new ResourceLocation("mmverify", "e6_no_such_machine"));
@@ -197,14 +197,14 @@ final class ControllerBoundingBoxCheck {
                     "盒子显式写成整块的定义被接受",
                     definition("e6_full", "\"controller-bounding-box\":[0.0,0.0,0.0,1.0,1.0,1.0]"));
             if (fullDefinition != null) {
-                MachineRegistry.replace(Map.of(fullDefinition.id(), fullDefinition));
+                MachineRegistry.replaceClient(Map.of(fullDefinition.id(), fullDefinition));
                 MachineControllerBlock fullBlock = newBlock(fullDefinition.id());
                 reportBox("显式整块的定义得到的仍是整块形状", shapeOf(fullBlock).bounds(), FULL);
             }
         } catch (RuntimeException failure) {
             ParallelCraftCheck.report("方块形状测试抛出异常：" + failure, false);
         } finally {
-            MachineRegistry.replace(saved, MachineRegistry.sources());
+            MachineRegistry.replaceClient(saved);
         }
     }
 

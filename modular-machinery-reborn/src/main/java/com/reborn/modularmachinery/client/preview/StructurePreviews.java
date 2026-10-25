@@ -4,6 +4,8 @@ import com.reborn.modularmachinery.block.ModBlocks;
 import com.reborn.modularmachinery.machine.BlockMatcher;
 import com.reborn.modularmachinery.machine.DynamicPattern;
 import com.reborn.modularmachinery.machine.MachineDefinition;
+import com.reborn.modularmachinery.machine.MachineModifier;
+import com.reborn.modularmachinery.machine.MachineMultiBlockModifier;
 import com.reborn.modularmachinery.machine.MachinePattern;
 import com.reborn.modularmachinery.machine.StructurePreview;
 import net.minecraft.client.Minecraft;
@@ -14,6 +16,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.BlockPos;
 import net.minecraftforge.registries.RegistryObject;
 
 import java.util.LinkedHashMap;
@@ -44,7 +47,55 @@ public final class StructurePreviews {
 
     /** {@link #of(MachineDefinition)} for a chosen dynamic size — what the panel rebuilds when the player picks one. */
     public static StructurePreview of(MachineDefinition machine, int dynamicPatternSize) {
-        return StructurePreview.of(previewPattern(machine, dynamicPatternSize), controllerState(machine));
+        return StructurePreview.of(previewRenderPattern(machine, dynamicPatternSize), controllerState(machine));
+    }
+
+    /** 预览渲染结构：本体、动态段和单块/多块 modifier 的候选方块。 */
+    public static MachinePattern previewRenderPattern(MachineDefinition machine, int dynamicPatternSize) {
+        MachinePattern merged = previewPattern(machine, dynamicPatternSize);
+        for (MachineModifier modifier : machine.modifiers()) {
+            merged = merged.withMerged(MachinePattern.builder()
+                    .add(modifier.offset(), modifier.accepted()).build());
+        }
+        for (MachineMultiBlockModifier modifier : machine.multiBlockModifiers()) {
+            merged = merged.withMerged(modifier.pattern());
+        }
+        return merged;
+    }
+
+    /**
+     * Modifier 清单：每条对应旧版可点击的一个 UpgradeIngredient；多块项涵盖它的整个结构。
+     * 坐标均相对控制器，预览固定朝向北，因此不旋转。
+     */
+    public static List<ModifierIngredient> modifierIngredients(MachineDefinition machine) {
+        List<ModifierIngredient> result = new java.util.ArrayList<>();
+        for (MachineModifier modifier : machine.modifiers()) {
+            if (modifier.accepted().isEmpty()) continue;
+            ItemStack icon = itemFor(modifier.accepted().get(0).representativeState());
+            if (!icon.isEmpty()) result.add(new ModifierIngredient(icon, List.of(modifier.offset()), modifier.description()));
+        }
+        for (MachineMultiBlockModifier modifier : machine.multiBlockModifiers()) {
+            List<BlockPos> positions = List.copyOf(modifier.pattern().positions().keySet());
+            if (positions.isEmpty()) continue;
+            List<BlockMatcher> first = modifier.pattern().positions().get(positions.get(0));
+            ItemStack icon = first == null || first.isEmpty() ? ItemStack.EMPTY
+                    : itemFor(first.get(0).representativeState());
+            if (!icon.isEmpty()) result.add(new ModifierIngredient(icon, positions, modifier.description()));
+        }
+        return List.copyOf(result);
+    }
+
+    public record ModifierIngredient(ItemStack icon, List<BlockPos> positions, String description) {
+        public ModifierIngredient {
+            icon = icon.copy();
+            positions = List.copyOf(positions);
+            description = description == null ? "" : description;
+        }
+    }
+
+    private static ItemStack itemFor(BlockState state) {
+        Item item = state.getBlock().asItem();
+        return item == Items.AIR ? ItemStack.EMPTY : new ItemStack(item);
     }
 
     /**

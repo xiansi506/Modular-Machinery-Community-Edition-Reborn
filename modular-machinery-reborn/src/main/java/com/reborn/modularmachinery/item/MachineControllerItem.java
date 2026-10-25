@@ -93,7 +93,7 @@ public class MachineControllerItem extends BlockItem {
     @Override
     public Component getName(ItemStack stack) {
         if (this.boundMachine != null) {
-            MachineDefinition definition = MachineRegistry.byId(this.boundMachine).orElse(null);
+            MachineDefinition definition = MachineRegistry.presentationById(this.boundMachine).orElse(null);
             if (definition != null) {
                 return Component.translatable("block.modular_machinery_reborn.machine_controller.named",
                         definition.displayName());

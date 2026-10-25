@@ -2,6 +2,7 @@ package com.reborn.modularmachinery.client;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.reborn.modularmachinery.ModularMachineryReborn;
+import com.reborn.modularmachinery.api.ControllerGuiInfoEvent;
 import com.reborn.modularmachinery.block.MachineControllerBlockEntity;
 import com.reborn.modularmachinery.factory.FactoryThread;
 import com.reborn.modularmachinery.machine.ControllerStatus;
@@ -13,6 +14,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraftforge.common.MinecraftForge;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -439,6 +441,14 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     public static List<ScreenLayout.Measured> orderedInfoRows(boolean pRedstone, boolean pFormed, boolean pBlueprint,
             int pBlueprintLines, int pStructureLines, int pStatusLines, int pThreadsLines,
             int pParallelismLines, int pSpacer) {
+        return orderedInfoRows(pRedstone, pFormed, pBlueprint, pBlueprintLines, pStructureLines, 0,
+                pStatusLines, pThreadsLines, pParallelismLines, pSpacer);
+    }
+
+    /** The measured layout with {@code ControllerGuiInfoEvent} lines after the machine name. */
+    public static List<ScreenLayout.Measured> orderedInfoRows(boolean pRedstone, boolean pFormed, boolean pBlueprint,
+            int pBlueprintLines, int pStructureLines, int pExtraLines, int pStatusLines, int pThreadsLines,
+            int pParallelismLines, int pSpacer) {
         List<ScreenLayout.Measured> rows = new ArrayList<>();
         if (pRedstone) {
             rows.add(line(0));
@@ -450,6 +460,10 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
             rows.add(line(BLOCK_GAP));
         }
         rows.addAll(walk(pStructureLines, 0, 0));
+        if (pExtraLines > 0) {
+            rows.add(line(5));
+            rows.addAll(walk(pExtraLines, 0, 0));
+        }
         if (!pFormed) {
             return rows;
         }
@@ -482,6 +496,9 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     /** {@code GuiFactoryController#drawFactoryStatus} ({@code :189-246}), now bounded to its region. */
     private void drawFactoryStatus(GuiGraphics graphics) {
         MachineControllerBlockEntity machine = this.menu.machine();
+        boolean redstone = this.menu.redstoneStopped();
+        List<Component> extraInfo = !redstone && machine != null && machine.machineName() != null
+                ? extraInfo(machine) : List.of();
         int structureLines = 0;
         if (machine != null && machine.machineName() != null) {
             for (FormattedCharSequence ignored : wrap(machine.machineName())) {
@@ -490,16 +507,16 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
         } else if (machine != null) {
             structureLines = 1;
         }
+        int extraInfoLines = wrappedLineCount(extraInfo);
         int blueprintLines = 1;
         int statusLines = wrap(Component.translatable(this.menu.status().translationKey())).size();
         int threadsLines = this.menu.maxThreads() > 0 ? 1 : 0;
         int parallelismLines = this.menu.maxParallelism() > 1 && parallelism() > 1 ? 2 : 0;
         boolean hasBlueprint = machine != null && blueprintLabel(machine) != null;
         boolean formed = this.menu.formedValue();
-        boolean redstone = this.menu.redstoneStopped();
 
         List<ScreenLayout.Measured> rows = orderedInfoRows(redstone, formed, hasBlueprint, blueprintLines,
-                structureLines, statusLines, threadsLines, parallelismLines, 0);
+                structureLines, extraInfoLines, statusLines, threadsLines, parallelismLines, 0);
         ScreenLayout.Block block = ScreenLayout.FactoryPanel.block(rows);
 
         // The panel's own rectangle in absolute GUI coordinates, taken from panelRect() rather than typed out
@@ -582,6 +599,20 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
                     Component.translatable(CONTROLLER_KEY + "structure.none")), x, y, WHITE, true);
         }
 
+        if (found != null && !extraInfo.isEmpty()) {
+            y += 5;
+            counter.take(); // Consume the blank spacer row measured above.
+            for (Component info : extraInfo) {
+                for (FormattedCharSequence line : wrap(info)) {
+                    if (!counter.take()) {
+                        break;
+                    }
+                    y += LINE;
+                    graphics.drawString(this.font, line, x, y, WHITE, true);
+                }
+            }
+        }
+
         if (!formed) {
             graphics.pose().popPose();
             graphics.disableScissor();
@@ -618,6 +649,20 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
                 Math.min(y, block.footerY), WHITE, true);
         graphics.pose().popPose();
         graphics.disableScissor();
+    }
+
+    private List<Component> extraInfo(MachineControllerBlockEntity machine) {
+        ControllerGuiInfoEvent event = new ControllerGuiInfoEvent(machine);
+        MinecraftForge.EVENT_BUS.post(event);
+        return event.extraInfo();
+    }
+
+    private int wrappedLineCount(List<Component> lines) {
+        int count = 0;
+        for (Component line : lines) {
+            count += wrap(line).size();
+        }
+        return count;
     }
 
     /**

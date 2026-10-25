@@ -1,16 +1,16 @@
 # Modular Machinery: Community Edition Reborn
 
-> **状态说明（2026-10-23）**：本 README 的功能叙述停在 0.31.0；当前版本与交接状态见 [docs/交接-2026-10-23.md](docs/交接-2026-10-23.md)。不要用本文的 “Current release” 判断现状。
+> **当前源码 0.107.3（2026-10-25）**：最新功能介绍见 [中文简介](docs/简介.md) / [English introduction](docs/Introduction.md)，入门见 [使用说明](docs/使用说明.md) 和 [配方指南](docs/KJS-配方指南.md)。本 README 下方保留 0.31.0 时的开发记录，不能用历史发布声明、未实现清单或实机声明判断当前版本；开发与发布状态见 [现行交接](docs/交接-2026-10-23.md)。
 
 Forge 1.20.1 / Java 17 migration foundation for the archived Modular Machinery: Community Edition source.
 
-**Current release: 0.31.0** — the first **feature** release after the launch. It closes the item the 0.30.1 notes
+**Historical release: 0.31.0** — the first **feature** release after the launch. It closes the item the 0.30.1 notes
 had listed as unfinished: **KubeJS can write a complete machine definition** (all eleven extended root fields, see
 **KubeJS** below). It also fixes the community-reported "every block takes forever to mine and drops nothing" —
 four silent defects behind one symptom (tag namespace, no loot tables at all, per-variant tables, and the generated
 data pack's namespace declaration and resource-id shape). **Verified in game** (mining speed and drops, by runtime
 probes), deployed, and archived under `releases/modular-machinery-reborn/v0.31.0/`. Its record is in
-`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b.
+`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.107.3 and is not a published release.**
 
 > **0.31.0 supersedes 0.30.1**, which had corrected only the `license` / `authors` metadata in
 > `META-INF/mods.toml` and was otherwise functionally 0.29.0.

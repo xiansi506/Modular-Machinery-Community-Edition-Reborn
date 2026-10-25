@@ -153,12 +153,12 @@ public final class MachineDirectory {
     private static MachineRef readRef(Path root, Path file) {
         try {
             JsonObject json = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), JsonObject.class);
-            if (json == null || !json.has("registryname")) {
+            String raw = json == null ? null : declaredRegistryName(json);
+            if (raw == null) {
                 LOGGER.warn("[{}] {} has no 'registryname', so it gets no controller block",
                         ModularMachineryReborn.MOD_ID, file);
                 return null;
             }
-            String raw = json.get("registryname").getAsString();
             ResourceLocation id = raw.contains(":")
                     ? ResourceLocation.tryParse(raw)
                     : new ResourceLocation(ModularMachineryReborn.MOD_ID, raw);
@@ -177,6 +177,22 @@ public final class MachineDirectory {
                     + "this launch", ModularMachineryReborn.MOD_ID, file, exception);
             return null;
         }
+    }
+
+    /**
+     * X6（0.85.1）：声明文件里的机器名——先 {@code registryname}，为空回退驼峰别名 {@code registryName}，
+     * 与 {@code MachineSchema.readRegistryName} 同一规则（旧版 DynamicMachine.java:613-619）。
+     * 两个拼法都缺席（或非字符串、或空串）时返回 {@code null}，由调用者给出「拿不到控制器」的日志。
+     */
+    private static String declaredRegistryName(JsonObject json) {
+        for (String key : new String[]{"registryname", "registryName"}) {
+            if (json.has(key) && json.get(key).isJsonPrimitive()
+                    && json.get(key).getAsJsonPrimitive().isString()
+                    && !json.get(key).getAsString().isEmpty()) {
+                return json.get(key).getAsString();
+            }
+        }
+        return null;
     }
 
     /**
@@ -284,12 +300,15 @@ public final class MachineDirectory {
         return files;
     }
 
-    /** True when a file names a machine but carries no {@code parts}, i.e. it only claims a controller. */
+    /**
+     * True when a file names a machine but carries no {@code parts}, i.e. it only claims a controller.
+     * Either spelling of the machine name counts — see {@link #declaredRegistryName} (X6).
+     */
     private static boolean isControllerClaim(ResourceLocation id, JsonElement json) {
         if (id.getPath().endsWith(".var") || !json.isJsonObject()) {
             return false;
         }
         JsonObject object = json.getAsJsonObject();
-        return object.has("registryname") && !object.has("parts");
+        return (object.has("registryname") || object.has("registryName")) && !object.has("parts");
     }
 }

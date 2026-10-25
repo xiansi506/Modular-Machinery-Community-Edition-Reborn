@@ -2,6 +2,7 @@ package com.reborn.modularmachinery.client.jei;
 
 import com.reborn.modularmachinery.ModularMachineryReborn;
 import com.reborn.modularmachinery.block.ModBlocks;
+import com.reborn.modularmachinery.client.preview.PreviewJeiActions;
 import com.reborn.modularmachinery.item.BlueprintItem;
 import com.reborn.modularmachinery.item.ModItems;
 import com.reborn.modularmachinery.machine.MachineDefinition;
@@ -17,6 +18,7 @@ import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
 import mezz.jei.api.registration.IRecipeRegistration;
 import mezz.jei.api.registration.ISubtypeRegistration;
+import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -89,6 +91,16 @@ public final class ModularMachineryJeiPlugin implements IModPlugin {
     }
 
     /**
+     * E2（0.101.0）：把运行时交给预览材料格查询桥——蓝图预览屏的材料格用它做左键/右键与 R/U
+     * （旧版 {@code SlotItemVirtualJEI} 的对应物；桥在 {@code client/preview/PreviewJeiActions}，
+     * 只在 JEI 在场时被类加载）。插件类本身只被 JEI 加载，这里引用 JEI 类型是安全的。
+     */
+    @Override
+    public void onRuntimeAvailable(IJeiRuntime runtime) {
+        PreviewJeiActions.onRuntimeAvailable(runtime);
+    }
+
+    /**
      * A blueprint is machine-specific: the original registered a subtype interpreter returning the machine's
      * registry name ({@code ModIntegrationJEI#registerItemSubtypes}), which is what makes "click this machine's
      * blueprint to see its recipes" work. JEI 15.49's equivalent for NBT-carried identity is this one call.
@@ -123,7 +135,7 @@ public final class ModularMachineryJeiPlugin implements IModPlugin {
 
         // One structure preview per loaded machine. The registry is filled from the server's reload, so on a
         // dedicated-server client it is empty and this category simply has nothing to show.
-        List<MachineDefinition> machines = List.copyOf(MachineRegistry.all());
+        List<MachineDefinition> machines = List.copyOf(MachineRegistry.clientAll());
         if (!machines.isEmpty()) {
             registration.addRecipes(StructurePreviewCategory.TYPE, machines);
         }
@@ -178,7 +190,7 @@ public final class ModularMachineryJeiPlugin implements IModPlugin {
      */
     private static List<MachineGroup> collectGroups() {
         Map<ResourceLocation, MachineDefinition> definitions = new LinkedHashMap<>();
-        for (MachineDefinition machine : MachineRegistry.all()) {
+        for (MachineDefinition machine : MachineRegistry.clientAll()) {
             definitions.put(machine.id(), machine);
         }
 

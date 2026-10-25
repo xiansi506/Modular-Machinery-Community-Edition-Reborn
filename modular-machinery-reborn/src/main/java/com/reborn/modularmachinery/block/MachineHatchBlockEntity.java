@@ -176,6 +176,18 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         return this.kind;
     }
 
+    /**
+     * C4-II（0.92.0，统一总线）：本仓口额外提供的**流体端口**，默认没有。
+     *
+     * <p>为什么需要它：端口收集按 {@code kind.family()} 分桶，统一总线（ME 输入/输出总线）是 ITEM
+     * 家族——它的物品半边照常进物品桶，而流体半边（9 罐）需要经由这里作为**流体端口**另入流体桶。
+     * 由 ME 总线子类覆写；那个类只在 AE2 在场时存在，主模组因此不引用任何 AE2 类型。
+     */
+    @Nullable
+    public net.minecraftforge.fluids.capability.IFluidHandler extraFluidPort() {
+        return null;
+    }
+
     public HatchTier tier() {
         return this.tier;
     }
@@ -449,23 +461,15 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         /**
          * 这个罐里**真的**有没有流体，绕过上面那层挡住逻辑。
          *
-         * <p>气体罐要问这个问题来决定「灌气体前要不要先清掉流体」——而被挡住时
+         * <p>气体罐据此拒绝向已有流体的仓注入——而被挡住时
          * {@code getFluidAmount()} 恒答 0，从外面问不出来。
          */
         int realFluidAmount() {
             return super.getFluidAmount();
         }
 
-        /**
-         * **真的**把这个罐清空，绕过挡住逻辑。
-         *
-         * <p>为什么必须是真的清空而不是「读起来是空的」：后者会在气体被抽空之后把旧液体露出来，
-         * 而那正是「一个仓只能有一种东西」的反面。
-         */
-        void clearForGas() {
-            if (super.getFluidAmount() > 0) {
-                super.setFluid(net.minecraftforge.fluids.FluidStack.EMPTY);
-            }
+        net.minecraftforge.fluids.FluidStack realFluidStack() {
+            return super.getFluid().copy();
         }
     }
 
@@ -516,19 +520,15 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         }
     }
 
-    /**
-     * **真的**把这个仓的流体那一半清空（绕过「有气体时看起来是空的」那层挡住逻辑）。
-     *
-     * <p>给兼容层用：要往这个罐里灌气体，就得先把里面的流体清掉——「一个仓只能有一种东西」。
-     * 它必须是**真的**清空，而不是让它读起来是空的：后者会在气体被抽空之后把旧液体露出来。
-     */
-    public void clearFluidForGas() {
+    /** 事务恢复所需的真实流体副本，包含旧存档中可能被气体显示闸门隐藏的内容。 */
+    public net.minecraftforge.fluids.FluidStack realFluidStack() {
         if (this.tank instanceof FluidTankWithGasPriority hybrid) {
-            hybrid.clearForGas();
+            return hybrid.realFluidStack();
         }
+        return this.tank == null ? net.minecraftforge.fluids.FluidStack.EMPTY : this.tank.getFluid().copy();
     }
 
-    /** 这个仓里**真的**有多少流体（绕过「有气体时看起来是空的」）。给兼容层判断要不要先清罐。 */
+    /** 真实流体量；兼容层据此拒绝另一种介质的注入。 */
     public int realFluidAmount() {
         return this.tank instanceof FluidTankWithGasPriority hybrid ? hybrid.realFluidAmount() : 0;
     }

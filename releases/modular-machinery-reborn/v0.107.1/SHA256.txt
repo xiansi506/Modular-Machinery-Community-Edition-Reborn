@@ -1,0 +1,9 @@
+modular-machinery-reborn-0.107.1.jar
+bytes=1114442
+SHA256=82BBFAB80682C03067DFEF7B83D5C6935A38D136A2D7C1436E1D1D4C091D133D
+Minecraft=1.20.1
+Forge compile target=47.2.0
+Java=17
+Network protocol=2
+Build dependencies=default Maven branch, official artifacts verified/cached
+Deployment=not installed into game instance

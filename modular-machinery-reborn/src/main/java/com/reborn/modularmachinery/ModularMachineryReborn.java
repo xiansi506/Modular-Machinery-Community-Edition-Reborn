@@ -58,6 +58,12 @@ public final class ModularMachineryReborn {
             // not a Forge registry either, so they reload the same way. The two listeners are independent:
             // neither reads the other's output.
             event.addListener(new com.reborn.modularmachinery.upgrade.UpgradeLoader());
+            // C1 第一纵切（0.107.0）：适配器生成轮。必须排在这两个之后——机器注册表先填好（生成轮做
+            // 存在性校验）；且 Forge 把本事件收集的监听器追加在原版监听器之后（证据链见 MachineLoader
+            // javadoc 0.28.0 节），原版 RecipeManager 就在原版监听器里，所以生成轮 apply 时 manager
+            // 已经装满 datapack 配方（含适配器声明占位），扫声明→生成→replaceRecipes 回注（全公开 API）。
+            event.addListener(new com.reborn.modularmachinery.recipe.adapter.RecipeAdapterLoader(
+                    event.getServerResources().getRecipeManager(), event.getRegistryAccess()));
         });
         // Registers the synthetic resource pack that models controllers declared by a pack author.
         bus.addListener(com.reborn.modularmachinery.block.GeneratedPacks::onAddPackFinders);
@@ -77,10 +83,18 @@ public final class ModularMachineryReborn {
         // /mm-get_blueprint <machine>, the original's command for obtaining a blueprint.
         MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.command.BlueprintCommand::onRegisterCommands);
         MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.command.DiagnoseCommand::onRegisterCommands);
+        // F2/F3/F4（0.86.0）：旧版的另外三条命令——手里物品写成描述符、控制器逐台计时报告、机器/配方语法检查。
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.command.HandCommand::onRegisterCommands);
+        MinecraftForge.EVENT_BUS.addListener(
+                com.reborn.modularmachinery.command.PerformanceReportCommand::onRegisterCommands);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.command.SyntaxCommand::onRegisterCommands);
         // 0.29.0: the construct tool's per-player selection lives on the server, and the original dropped it when
         // the connection did (PlayerStructureSelectionHelper:128-134). A new session must not inherit one.
         MinecraftForge.EVENT_BUS.addListener(
                 com.reborn.modularmachinery.selection.ServerSelections::onPlayerLoggedOut);
+        // A8（0.106.0）：自动搭建的事件接线（蓝图入槽 / 搭建触发 / 逐 tick 推进 / 登出清理）。
+        // 它是实例监听器（三个 @SubscribeEvent 一组），走 register 而不是逐方法 addListener。
+        MinecraftForge.EVENT_BUS.register(new com.reborn.modularmachinery.common.assembly.AssemblyHandler());
         // 波 4：把机器定义送到客户端。`OnDatapackSyncEvent` 是这件事**唯一**正确的时机——
         // 它在玩家登录时针对该玩家触发、在 `/reload` 之后针对所有人触发一次（`getPlayer()` 为 null）。
         // 自己监听 `PlayerLoggedInEvent` 会在定义加载之前就发（玩家可能在 reload 中间进服）。

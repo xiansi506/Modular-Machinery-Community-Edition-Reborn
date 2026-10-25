@@ -237,15 +237,20 @@ public final class IngredientArrayRequirement extends MachineRequirement {
 
     @Override
     public boolean apply(HatchCollection ports, RandomSource random) {
-        List<IItemHandler> handlers = ports.itemInputs();
         if (this.chance < 1.0F && random.nextFloat() >= this.chance) {
             // The original rolled this once for the whole settlement (`chance.canWork` gating doItemIO), and it
             // rolled it after the decision to start, so a failed roll pays nothing while the craft still runs.
             return true;
         }
+        return reserve(ports, RecipeModifiers.EMPTY);
+    }
+
+    @Override
+    public boolean reserve(HatchCollection ports, RecipeModifiers modifiers) {
+        ResourceTransaction transaction = new ResourceTransaction();
+        List<IItemHandler> handlers = ports.itemInputs().stream().map(transaction::items).toList();
         int copies = this.parallelism();
         int served = 0;
-        int[] perEntry = new int[this.entries.size()];
         for (int index = 0; index < this.entries.size(); index++) {
             IngredientArrayEntry entry = this.entries.get(index);
             int perCopy = entry.amount();
@@ -257,19 +262,11 @@ public final class IngredientArrayRequirement extends MachineRequirement {
                 break;
             }
             int fromThisEntry = Math.min(stillWanted, entry.availableIn(handlers, this.nbt) / perCopy);
-            perEntry[index] = fromThisEntry * perCopy;
+            if (fromThisEntry > 0 && !IngredientIo.extract(handlers,
+                    stack -> entry.matches(stack, this.nbt), fromThisEntry * perCopy)) return false;
             served += fromThisEntry;
         }
-        for (int index = 0; index < this.entries.size(); index++) {
-            IngredientArrayEntry entry = this.entries.get(index);
-            if (perEntry[index] > 0 && !IngredientIo.extract(handlers,
-                    stack -> entry.matches(stack, this.nbt), perEntry[index])) {
-                // canSatisfy already proved this cannot happen; reporting it loudly beats half-consuming a craft.
-                throw new IllegalStateException("the ingredient array agreed with its own simulation and then "
-                        + "could not extract " + perEntry[index] + "x " + entry.itemId());
-            }
-        }
-        return true;
+        return served == copies && transaction.commit();
     }
 
     @Override

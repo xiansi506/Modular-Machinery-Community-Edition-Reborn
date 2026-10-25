@@ -185,13 +185,21 @@ public final class MyMachineEvents {
 
 ---
 
+## 8. 0.88.0 新增（C2 第二切片）
+
+- **`RecipeCheckEvent.setFailed(reason)`**：否决这次开工（`@Cancelable`）。`START` 段取消 = 不问门槛不开工；`END` 段取消 = 门槛已过、一次性输入尚未支付，同样不开工、什么都不扣。`reason` 是可直接展示的文案（含 `.` 按 translatable 键渲染，否则明文），经方块实体同步到界面、排在固定失败键行之后。
+- **`RecipeFailureEvent`**：运行中的配方放弃时发出。`cause()` = 本次失败键；`destructRecipe()` 默认 = 配方 `cancelIfPerTickFails`，`setDestructRecipe(boolean)` 可按次改写（true = 清合成、已付一次性输入不返还；false = 走机器 failure-action）。0.75.0 起记录的「第三方不能覆盖 cancelIfPerTickFails」差异就此收回。
+- **0.91.0（C2 小件）**：`ResultChanceCreateEvent`（结算前，可 `setRandom(RandomSource)` 替换本次产物掷点随机源——旧版替换 ResultChance 的等价物）；`SmartInterfaceUpdateEvent`（智能接口值成功写入后，携带 type/newValue；旧版是独立方块带坐标，本版接口在控制器上——差异已记）。GUI/geo 三事件不移植（渲染半边属 C7 延伸）。
+- **0.90.0（C3）**：KubeJS 脚本侧回调——事件组绑定 `MachineLifecycleEvents`（`structureFormed/structureUpdated/machineTick/recipeCheck/recipeStart/recipeTick/recipeFinish/recipeFailure/factoryRecipeStart/Tick/Finish/Failure`），取消/改写语义原样转发（`setFailed`、`cancel()`、`destructRecipe =`）。**未实机：没有真实脚本订阅验证过**。
+- **0.89.0（C2 收尾）**：`FactoryRecipeStartEvent`（开工成后，只读）、`FactoryRecipeTickEvent`（`@Cancelable`：START 取消 = 整 tick 跳过不扣；END 取消 = 资源留扣、进度不加）、`FactoryRecipeFailureEvent`（cause + destruct 默认 `cancelIfPerTickFails` 可改写）、`FactoryRecipeFinishEvent`（完成后，只读）。全部携带 `threadOrdinal()`（槽位序号）。**工厂侧仍只发这些，不发单控制器的 Recipe 事件族**。C2 剩余小事件：`ResultChanceCreateEvent`、`SmartInterfaceUpdateEvent`、GUI/geo 事件。
+
 ## 7. 未验证清单
 
 - **没有进游戏**：所有事件都只在离线复现器里用独立 `BusBuilder` 总线和 `Unsafe` 分配的控制器跑过；
   真实服务端 tick、区块加载/卸载、多人环境未跑。
 - **没有真实附属模组**：没有第二个 `@Mod` 订阅这些事件；真实模组构造顺序、事件总线阶段、
   与服务端线程的交互未验证。
-- **没有工厂对照**：工厂路径只做了源码断言“不派发 Recipe 事件”，没有实际工厂线程。
+- **没有工厂对照**：工厂路径只做了源码断言“不派发 Recipe 事件”，没有实际工厂线程。**0.88.0 新增的 setFailed / RecipeFailureEvent / 失败原因字符串通道同样未实机**（否决路径、update tag 同步、界面原因行显示）。
 - **监听器异常**：Forge 6.0.5 的 `EventBus#post` 会先记录再**重新抛出**监听器异常；本版没有在每个
   派发点包 try/catch。监听器自己抛异常会中断本次控制器 tick。请在自己的处理器里捕获预期异常。
 - **性能**：每个服务端 tick 至少两次 `MachineTickEvent`；单配方每 tick 两次 `RecipeTickEvent`。

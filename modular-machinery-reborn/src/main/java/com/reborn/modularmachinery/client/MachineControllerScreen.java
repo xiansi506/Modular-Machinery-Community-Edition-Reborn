@@ -328,6 +328,13 @@ public final class MachineControllerScreen extends AbstractContainerScreen<Machi
                 failures++;
             }
         }
+        // C2b：任意字符串原因同样占行（与上面的绘制侧保持同一套换行算法）。
+        String cause = menu.failureCauseText();
+        if (cause != null && !cause.isEmpty()) {
+            Component causeLine = cause.contains(".")
+                    ? Component.translatable(cause) : Component.literal(cause);
+            failures += wrap(causeLine).size();
+        }
         return infoRows(false, menu.formedValue(), hasBlueprint, nameLines, extraLines, interfaceLines,
                 statusLines, failures, menu.progressValue() > 0);
     }
@@ -478,6 +485,20 @@ public final class MachineControllerScreen extends AbstractContainerScreen<Machi
 
             for (String failure : failureLines(menu.startFailureKey())) {
                 for (FormattedCharSequence line : wrap(Component.translatable(failure))) {
+                    if (counter.take()) {
+                        graphics.drawString(font, line, x, y, RED, true);
+                        y += LINE;
+                    }
+                }
+                y += 5;
+            }
+
+            // C2b（0.88.0）：第三方经 RecipeCheckEvent.setFailed 给出的任意字符串原因，排在固定键行之后。
+            String cause = menu.failureCauseText();
+            if (cause != null && !cause.isEmpty()) {
+                Component causeLine = cause.contains(".")
+                        ? Component.translatable(cause) : Component.literal(cause);
+                for (FormattedCharSequence line : wrap(causeLine)) {
                     if (counter.take()) {
                         graphics.drawString(font, line, x, y, RED, true);
                         y += LINE;

@@ -145,7 +145,9 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
     }
 
     private PreviewPanel panel(MachineDefinition machine) {
-        return this.panels.computeIfAbsent(machine, PreviewPanel::new);
+        // jeiHost = true：这一侧的材料格是下面的真 JEI 槽位，R/U 由 JEI 原生处理，
+        // 面板不得再把手绘格的点击接给 JEI（E2，否则一格两触发）。
+        return this.panels.computeIfAbsent(machine, m -> new PreviewPanel(m, true));
     }
 
     /**

@@ -181,12 +181,10 @@ public final class MachineDefinition {
     }
 
     /**
-     * 定义里 {@code color} 的默认值——白色，也就是「不染色」。
+     * 定义里 {@code color} 的兼容默认值——白色，也就是「不染色」。
      *
-     * <p>旧版这里不是常量：{@code AbstractMachine.definedColor} 从 {@code Config.machineColor} 起步，
-     * 而那个配置键（{@code general-casing-color}，默认 {@code "FFFFFF"}）本版**没有移植**。
-     * 本版先固定为白：**没有配置键时，「不染色」是唯一不撒谎的默认值**——编一个颜色出来就等于
-     * 替包作者做了决定。等真的要做配置（与 §10 的其它配置项一起）时再把它接上。
+     * <p>机器 JSON 的实际缺省值由 {@code general.general-casing-color} 提供；此常量保留给没有经过
+     * {@link MachineSchema} 的直接构造调用及配置尚未加载时的回退。
      */
     public static final int DEFAULT_COLOR = 0xFFFFFF;
 

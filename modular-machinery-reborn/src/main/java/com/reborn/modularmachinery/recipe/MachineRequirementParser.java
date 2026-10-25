@@ -58,7 +58,34 @@ public final class MachineRequirementParser {
         // 部件，于是它只看得到那个部件上的端口。解析放在这里而不是各类型的 read 里，是因为它对每种需求类型
         // 含义完全相同——把同一条规则写进十来个 parse 分支，就会有一份迟早分叉的副本。
         requirement.setSelectorTag(readSelectorTag(requirementJson, recipeId));
+        readParallelizeUnaffected(requirementJson, requirement, recipeId);
         return requirement;
+    }
+
+    /**
+     * 0.98.0：需求级可选布尔字段 {@code parallelize-unaffected}——把这条需求设成「不随并行放大」。
+     *
+     * <p>机制自 0.65.0 起就完整（{@code MachineRequirement.setParallelizeUnaffected}，catalyst 构造时
+     * 内置置位），缺的一直是通用 JSON 入口。旧版同样没有 JSON 读入——{@code ComponentRequirement:473}
+     * 的 setter 只有 CraftTweaker 能碰到；1.20.1 没有 CraftTweaker，所以入口改为本字段
+     * （「CT 入口 → JSON 等价」移植，同 failure-action 的先例）。
+     *
+     * <p>可选布尔，缺省 false（与机制默认一致）；写了非布尔值明确报错——一条作者以为生效的
+     * 字段悄悄失效，比一句明确的报错更贵。
+     */
+    private static void readParallelizeUnaffected(JsonObject requirementJson, MachineRequirement requirement,
+                                                  ResourceLocation recipeId) {
+        if (!requirementJson.has("parallelize-unaffected")) {
+            return;
+        }
+        JsonElement element = requirementJson.get("parallelize-unaffected");
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isBoolean()) {
+            throw new JsonParseException("'parallelize-unaffected' of a requirement in " + recipeId
+                    + " must be true or false");
+        }
+        if (element.getAsBoolean()) {
+            requirement.setParallelizeUnaffected(true);
+        }
     }
 
     /**
@@ -160,6 +187,7 @@ public final class MachineRequirementParser {
         // 空串代表「没有标签」，而不是写一个可空值：`FriendlyByteBuf#writeUtf` 不接受 null，
         // 而「没有标签」是这个字段的常态。
         buf.writeUtf(requirement.selectorTag() == null ? "" : requirement.selectorTag());
+        buf.writeBoolean(requirement.isParallelizeUnaffected());
     }
 
     /**
@@ -184,6 +212,18 @@ public final class MachineRequirementParser {
         MachineRequirement requirement = type.readBody(buf, ioType);
         String selectorTag = buf.readUtf();
         requirement.setSelectorTag(selectorTag.isEmpty() ? null : selectorTag);
+        requirement.setParallelizeUnaffected(buf.readBoolean());
         return requirement;
+    }
+
+    /** 与网络完全同源的深拷贝，包括基类标签和并行标志。 */
+    public static MachineRequirement copy(MachineRequirement requirement) {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+        try {
+            write(buffer, requirement);
+            return read(buffer);
+        } finally {
+            buffer.release();
+        }
     }
 }

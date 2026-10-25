@@ -118,6 +118,13 @@ public final class ParallelCraftCheck {
         System.out.println(EVIDENCE.selfTest());
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        try {
+            Field eventBus = com.reborn.modularmachinery.api.event.MachineEvents.class.getDeclaredField("bus");
+            eventBus.setAccessible(true);
+            eventBus.set(null, net.minecraftforge.eventbus.api.BusBuilder.builder().build());
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("Cannot initialize offline event bus", failure);
+        }
 
         // The machine: 8x coal -> 1x diamond, 10 ticks, 100 FE/t. The shape of the alloy furnace's recipes.
         MachineRecipe recipe = new MachineRecipe(new ResourceLocation("mmverify", "parallel_demo"), "demo", "demo",
@@ -911,7 +918,8 @@ public final class ParallelCraftCheck {
         // 44 = that plus A10's three structure-check keys and A12's general.enable-full-data-sync.
         // 45 = that plus A11's general.enable-security-system.
         // 46 = that plus B11's general.enable-duration-multiplier.
-        check("the config spec defines this many keys", 46, rendered.size());
+        // 0.85.0 adds three defaults; 0.106.0 adds three auto-assembly settings.
+        check("the config spec defines this many keys", 52, rendered.size());
 
         String[][] expected = {
                 {"general.enable-full-data-sync", "false"},
@@ -1524,7 +1532,7 @@ public final class ParallelCraftCheck {
             // tooltip.modular_machinery_reborn.catalyst[.effect] lines, 196 plus 2.
             // 204 from 0.73.0: C4 adds two ME bus block names and the online/offline screen strings,
             // 200 plus 4.
-            check("the language files' key count", 204, zhMap.size());
+            check("the language files' key count", 331, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to
@@ -1743,9 +1751,10 @@ public final class ParallelCraftCheck {
                 tagged.withTag("line").itemInputs().get(0) == lineIn);
         report("筛一个结构里不存在的标签得到空集合（配方引用了不存在的部件不会崩，只是永远不满足）",
                 tagged.withTag("no_such_part").itemInputs().isEmpty());
-        check("没有标签的需求只看到没打标签的端口", 1, tagged.withTag(null).itemInputs().size());
-        report("...也就是那个无标签的仓，而不是「全都能看到」",
-                tagged.withTag(null).itemInputs().get(0) == plainIn);
+        // 1.12.2 RecipeCraftingContext:221-230: null selector means no tag filtering.
+        check("没有标签的需求能看到全部有效端口", 3, tagged.withTag(null).itemInputs().size());
+        report("...包括无标签与带标签的仓",
+                tagged.withTag(null).itemInputs().containsAll(List.of(plainIn, smelterIn, lineIn)));
 
         // 控制器自己的槽位永远不算任何部件的端口：否则「进第 3 段」会被控制器自己的槽位满足，
         // 这个特性就形同虚设。
@@ -1755,7 +1764,7 @@ public final class ParallelCraftCheck {
                 .add(com.reborn.modularmachinery.block.HatchKind.ITEM_INPUT, smelterIn, null, null, "input")
                 .addItemHandler(controllerOwn, true)
                 .build();
-        check("控制器自己的槽位进了无标签桶", 1, withController.withTag(null).itemInputs().size());
+        check("没有 selector 时保留整个端口集合", 2, withController.withTag(null).itemInputs().size());
         report("...并且对任何打了标签的需求都不可见",
                 withController.withTag("input").itemInputs().size() == 1
                         && withController.withTag("input").itemInputs().get(0) == smelterIn);
@@ -1936,28 +1945,28 @@ public final class ParallelCraftCheck {
                     String.valueOf(snapshot.keySet().iterator().next()));
 
             // 客户端那一步：清空注册表，装作刚连上来的客户端，再接收同步。
-            com.reborn.modularmachinery.machine.MachineRegistry.replace(java.util.Map.of());
+            com.reborn.modularmachinery.machine.MachineRegistry.clearClient();
             report("客户端接收之前注册表是空的（这就是专用服务器客户端的现状）",
-                    com.reborn.modularmachinery.machine.MachineRegistry.all().isEmpty());
+                    com.reborn.modularmachinery.machine.MachineRegistry.clientAll().isEmpty());
             com.reborn.modularmachinery.client.ClientMachines.accept(snapshot);
             check("接收之后注册表里有 1 台机器", 1,
-                    com.reborn.modularmachinery.machine.MachineRegistry.size());
+                    com.reborn.modularmachinery.machine.MachineRegistry.clientAll().size());
             report("...而且就是那台机器（界面用 byId 查得到）",
-                    com.reborn.modularmachinery.machine.MachineRegistry.byId(sentDefinition.id())
+                    com.reborn.modularmachinery.machine.MachineRegistry.clientById(sentDefinition.id())
                             .map(found -> found.toString().equals(sentDefinition.toString()))
                             .orElse(false));
             check("...没有条目被拒", 0, com.reborn.modularmachinery.client.ClientMachines.lastRejected());
             // 断线清空：否则换一个服务器之后，上一个服务器的机器还留在界面里。
             com.reborn.modularmachinery.client.ClientMachines.clear();
             report("断线清空之后注册表又空了",
-                    com.reborn.modularmachinery.machine.MachineRegistry.all().isEmpty());
+                    com.reborn.modularmachinery.machine.MachineRegistry.clientAll().isEmpty());
 
             // 一份坏定义被跳过并计数，而不是让整次同步失败——少一台机器好过整个界面打不开。
             com.reborn.modularmachinery.client.ClientMachines.accept(java.util.Map.of(
                     sentDefinition.id(), wireJson,
                     new ResourceLocation("mmverify", "broken"), "{\"registryname\":"));
             check("坏定义被跳过，好的那台仍然收下", 1,
-                    com.reborn.modularmachinery.machine.MachineRegistry.size());
+                    com.reborn.modularmachinery.machine.MachineRegistry.clientAll().size());
             check("...并且被计数", 1, com.reborn.modularmachinery.client.ClientMachines.lastRejected());
 
             // **客户端重建必须与服务端加载一样宽容。**
@@ -1969,7 +1978,7 @@ public final class ParallelCraftCheck {
             //
             // 所以这里把两端**实际上用的那个模式**断言成同一个值，而不只是断言"客户端能解析"：
             // 后者在两边都宽容时也会通过，而前者才是"忠实重建"这件事本身。
-            com.reborn.modularmachinery.machine.MachineRegistry.replace(java.util.Map.of());
+            com.reborn.modularmachinery.machine.MachineRegistry.clearClient();
             String withUnknownField = "{\"registryname\":\"mmverify_unknown\","
                     + "\"a-field-from-a-newer-version\":123,"
                     + "\"parts\":[{\"x\":0,\"y\":0,\"z\":-1,\"elements\":\"minecraft:stone\"}]}";
@@ -1978,7 +1987,7 @@ public final class ParallelCraftCheck {
             com.reborn.modularmachinery.client.ClientMachines.accept(java.util.Map.of(
                     new ResourceLocation("mmverify", "unknown_field"), withUnknownField));
             check("含未知根字段的定义在客户端也被收下（服务端就是这么接受它的）", 1,
-                    com.reborn.modularmachinery.machine.MachineRegistry.size());
+                    com.reborn.modularmachinery.machine.MachineRegistry.clientAll().size());
             check("...没有被拒", 0, com.reborn.modularmachinery.client.ClientMachines.lastRejected());
             // 对照：严格模式确实会拒绝它——证明上面那条不是因为「未知字段其实没人检查」而通过的。
             report("对照：严格模式确实拒绝同一个定义（所以宽容不是空断言）",
@@ -2933,6 +2942,21 @@ public final class ParallelCraftCheck {
      * is a {@code Level}, which is precisely why the engine takes a host interface at all.
      */
     private static final class FactoryRig implements FactoryHost {
+
+        private com.reborn.modularmachinery.block.MachineControllerBlockEntity eventController;
+
+        @Override
+        public com.reborn.modularmachinery.block.MachineControllerBlockEntity controller() {
+            if (eventController == null) {
+                try {
+                    eventController = (com.reborn.modularmachinery.block.MachineControllerBlockEntity)
+                            allocateInstance(com.reborn.modularmachinery.block.MachineControllerBlockEntity.class);
+                } catch (Exception failure) {
+                    throw new IllegalStateException("Cannot create offline event controller", failure);
+                }
+            }
+            return eventController;
+        }
 
         private final List<MachineRecipe> recipes = new ArrayList<>();
         private final List<FactoryThreadModel.CoreThreadSpec> coreSpecs;
@@ -4345,7 +4369,7 @@ public final class ParallelCraftCheck {
             // "1" each time — adding an id is the compatible direction, and a mismatched pair of builds is
             // refused on the version string anyway.
             // Five from 0.64.0: A2's hatch group update (the group screen's only write path).
-            check("the channel registers exactly five messages", 5, registrations);
+            check("the channel registers all twelve messages", 12, registrations);
             report("all five messages are registered against those constants",
                     source.contains("CHANNEL.registerMessage(ID_PARALLEL_CONTROLLER_UPDATE, "
                             + "ParallelControllerUpdatePacket.class")
@@ -4357,8 +4381,8 @@ public final class ParallelCraftCheck {
                                     + "MachineDefinitionSyncPacket.class")
                             && source.contains("CHANNEL.registerMessage(ID_HATCH_GROUP_UPDATE, "
                                     + "HatchGroupUpdatePacket.class"));
-            report("the protocol version is unchanged from 0.20.0's '1'",
-                    source.contains("PROTOCOL_VERSION = \"1\""));
+            report("the changed requirement wire format requires protocol 2",
+                    source.contains("PROTOCOL_VERSION = \"2\""));
         } catch (Exception exception) {
             report("reading ModNetwork.java failed: " + exception, false);
         }

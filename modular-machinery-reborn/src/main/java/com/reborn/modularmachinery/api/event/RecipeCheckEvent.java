@@ -12,21 +12,23 @@ import java.util.Objects;
  * asked, {@link Phase#END} after they both answered yes and before the one-shot inputs are paid.
  *
  * <p>The original's {@code RecipeCheckEvent} could also fail the craft and lower parallelism
- * ({@code TileMultiblockMachineController:1020-1049}). This slice keeps the half that has a defined meaning in
- * this state machine: {@link #setParallelism(int)} lowers the parallelism used for <b>this</b> start, the
- * original's {@code min(recipe.getParallelism(), requested)}. The result is clamped to
- * {@code 1..computed} when the controller resolves it, so an event can never raise the machine's ceiling or
- * ask for zero copies.
+ * ({@code TileMultiblockMachineController:1020-1049}). This port has both halves:
+ * {@link #setParallelism(int)} lowers the parallelism used for <b>this</b> start, the original's
+ * {@code min(recipe.getParallelism(), requested)}, clamped to {@code 1..computed} when the controller resolves
+ * it; and {@link #setFailed(String)} vetoes the start outright — 0.88.0（C2b）起，配套的**失败原因字符串通道**
+ * （方块实体同步的 {@code failureCause}）让监听器给的理由能显示在界面上，不再是上一片记录的
+ * 「取消后只剩一句 idle」。
  *
- * <p><b>Not ported yet:</b> {@code setFailed}. This port has no failure-message path that can carry an
- * addon's own translation key to the client (the menu mirrors a fixed integer list), so a failed check would
- * show a bare "idle" — the exact invisible failure the project forbids. Failure events are C2b, together with
- * the requirement API that can produce a per-tick cause.
+ * <p>取消的时机语义：{@code START} 段被取消 = 不问门槛直接不开工；{@code END} 段被取消 =
+ * 门槛已过、**一次性输入尚未支付**，同样不开工。两种情况都不扣任何东西。
  */
+@net.minecraftforge.eventbus.api.Cancelable
 public final class RecipeCheckEvent extends RecipeEvent {
 
     private final Phase phase;
     private int parallelism;
+    @Nullable
+    private String failureReason;
 
     /** For Forge's listener-list probe only; see {@link MachineEvent#MachineEvent()}. */
     public RecipeCheckEvent() {
@@ -57,6 +59,21 @@ public final class RecipeCheckEvent extends RecipeEvent {
      */
     public void setParallelism(int parallelism) {
         this.parallelism = parallelism;
+    }
+
+    /**
+     * 否决这次开工（旧版 {@code setFailed}）。{@code reason} 是**可直接展示**的文案（翻译键或明文），
+     * 会经方块实体同步到客户端、与失败键行并排显示；{@code null} 表示不展示理由。
+     */
+    public void setFailed(@Nullable String reason) {
+        this.failureReason = reason;
+        this.setCanceled(true);
+    }
+
+    /** 监听器写入的否决理由；未否决时为 {@code null}。 */
+    @Nullable
+    public String failureReason() {
+        return this.failureReason;
     }
 
     /**

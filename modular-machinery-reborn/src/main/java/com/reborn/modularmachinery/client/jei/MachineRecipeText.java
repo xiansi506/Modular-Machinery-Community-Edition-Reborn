@@ -122,14 +122,19 @@ final class MachineRecipeText {
     /**
      * {@link #tips} plus the original's trailing group for {@code recipe.getFormattedTooltip()}.
      *
-     * <p>This mod's recipe schema has no tooltip field, so that group is always empty — but it still costs one
-     * 2px divider when {@code drawInfo} lays the block out, which is why it is kept rather than optimised away:
-     * that method walks the block backwards subtracting one divider per group before drawing it forwards, so
-     * dropping the empty group would shift every line down.
+     * <p>0.98.0：配方 JSON 根字段 tooltips（单字符串或字符串数组）现在填充这一组——展示规则照旧版
+     * getFormattedTooltip：翻译键则本地化，否则原文。没有该字段时组保持为空（保留空组的理由不变：
+     * drawInfo 反向按组扣 2px 分隔线，丢掉会整体位移）。旧版入口只有 CraftTweaker
+     * （RecipePrimer.addRecipeTooltip），1.20.1 没有 CraftTweaker，入口改 JSON。
      */
     static List<List<String>> tipGroupsWithRecipeTooltip(MachineRecipe recipe) {
         List<List<String>> groups = tips(recipe);
-        groups.add(List.of());
+        List<String> recipeTips = new ArrayList<>(recipe.tooltips().size());
+        for (String tip : recipe.tooltips()) {
+            recipeTips.add(net.minecraft.client.resources.language.I18n.exists(tip)
+                    ? net.minecraft.client.resources.language.I18n.get(tip) : tip);
+        }
+        groups.add(recipeTips);
         return groups;
     }
 

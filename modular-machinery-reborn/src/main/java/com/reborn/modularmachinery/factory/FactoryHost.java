@@ -1,5 +1,6 @@
 package com.reborn.modularmachinery.factory;
 
+import com.reborn.modularmachinery.block.MachineControllerBlockEntity;
 import com.reborn.modularmachinery.machine.FailureAction;
 import com.reborn.modularmachinery.machine.HatchCollection;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
@@ -20,6 +21,13 @@ import java.util.List;
  * concurrency of its own (see {@link FactoryThreadModel}).
  */
 public interface FactoryHost {
+
+    /**
+     * The controller this engine runs in — C2 收尾（0.89.0）：工厂配方事件的载荷需要一个
+     * {@code MachineControllerBlockEntity}（{@code RecipeEvent} 的基字段）。离线复现器返回事件层
+     * 已在用的 Unsafe 分配控制器即可；这里只需要它做事件载荷，不触碰世界。
+     */
+    MachineControllerBlockEntity controller();
 
     /**
      * The machine's recipe modifiers, recomputed with the structure — the controller's

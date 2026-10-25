@@ -3,6 +3,8 @@ package com.reborn.modularmachinery.network;
 import com.reborn.modularmachinery.ModularMachineryReborn;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.NetworkDirection;
+import java.util.Optional;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 /**
@@ -35,30 +37,20 @@ import net.minecraftforge.network.simple.SimpleChannel;
  */
 public final class ModNetwork {
 
-    private static final String PROTOCOL_VERSION = "1";
+    // 0.107.1：需求 wire 新增 parallelize-unaffected；两端必须同时升级。
+    private static final String PROTOCOL_VERSION = "2";
     private static final int ID_PARALLEL_CONTROLLER_UPDATE = 0;
-    /**
-     * M6d-b's message. The protocol version deliberately stays {@code "1"}: nothing about the existing message
-     * changed, and a message the other side does not know is only a problem for a mismatched pair of builds —
-     * which Forge already refuses on the version string. Adding an id is the compatible direction.
-     */
     private static final int ID_SMART_INTERFACE_UPDATE = 1;
-    /**
-     * 0.29.0's message: the construct tool's selection, server → client (the original's {@code PktSyncSelection}).
-     * The protocol version stays {@code "1"} for the same reason the id above did — adding an id is the
-     * compatible direction, and a mismatched pair of builds is refused on the version string anyway.
-     */
     private static final int ID_SELECTION_SYNC = 2;
-    /**
-     * 波 4 的消息：机器定义（服务端 → 客户端）。协议版本仍然保持 {@code "1"}——理由与上面两个 id 相同：
-     * 追加 id 是兼容方向，而一对不匹配的构建本来就会被版本字符串拒掉。
-     */
     private static final int ID_MACHINE_DEFINITION_SYNC = 3;
-    /**
-     * A2 的消息：输入组配置（客户端 → 服务端）。协议版本仍为 {@code "1"}——追加 id 是兼容方向，
-     * 一对不匹配的构建本来就会被版本字符串拒掉。
-     */
     private static final int ID_HATCH_GROUP_UPDATE = 4;
+    private static final int ID_CLIPBOARD_COPY = 5;
+    private static final int ID_ME_FLUID_CONFIG = 6;
+    private static final int ID_ME_PATTERN = 7;
+    private static final int ID_ME_PATTERN_SYNC = 8;
+    private static final int ID_ME_PATTERN_PROVIDER_ACTION = 9;
+    private static final int ID_PROJECTOR_REQUEST = 10;
+    private static final int ID_PROJECTOR_RESPONSE = 11;
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(ModularMachineryReborn.MOD_ID, "main"),
@@ -70,23 +62,51 @@ public final class ModNetwork {
         CHANNEL.registerMessage(ID_PARALLEL_CONTROLLER_UPDATE, ParallelControllerUpdatePacket.class,
                 ParallelControllerUpdatePacket::encode,
                 ParallelControllerUpdatePacket::new,
-                ParallelControllerUpdatePacket::handle);
+                ParallelControllerUpdatePacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         CHANNEL.registerMessage(ID_SMART_INTERFACE_UPDATE, SmartInterfaceUpdatePacket.class,
                 SmartInterfaceUpdatePacket::encode,
                 SmartInterfaceUpdatePacket::new,
-                SmartInterfaceUpdatePacket::handle);
+                SmartInterfaceUpdatePacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         CHANNEL.registerMessage(ID_SELECTION_SYNC, SelectionSyncPacket.class,
                 SelectionSyncPacket::encode,
                 SelectionSyncPacket::new,
-                SelectionSyncPacket::handle);
+                SelectionSyncPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         CHANNEL.registerMessage(ID_MACHINE_DEFINITION_SYNC, MachineDefinitionSyncPacket.class,
                 MachineDefinitionSyncPacket::encode,
                 MachineDefinitionSyncPacket::new,
-                MachineDefinitionSyncPacket::handle);
+                MachineDefinitionSyncPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         CHANNEL.registerMessage(ID_HATCH_GROUP_UPDATE, HatchGroupUpdatePacket.class,
                 HatchGroupUpdatePacket::encode,
                 HatchGroupUpdatePacket::new,
-                HatchGroupUpdatePacket::handle);
+                HatchGroupUpdatePacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(ID_CLIPBOARD_COPY, ClipboardCopyPacket.class,
+                ClipboardCopyPacket::encode,
+                ClipboardCopyPacket::new,
+                ClipboardCopyPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(ID_ME_FLUID_CONFIG, MeFluidConfigPacket.class,
+                MeFluidConfigPacket::encode,
+                MeFluidConfigPacket::new,
+                MeFluidConfigPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(ID_ME_PATTERN, MePatternPacket.class,
+                MePatternPacket::encode,
+                MePatternPacket::new,
+                MePatternPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(ID_ME_PATTERN_SYNC, MePatternSyncPacket.class,
+                MePatternSyncPacket::encode,
+                MePatternSyncPacket::new,
+                MePatternSyncPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(ID_ME_PATTERN_PROVIDER_ACTION, MePatternProviderActionPacket.class,
+                MePatternProviderActionPacket::encode,
+                MePatternProviderActionPacket::new,
+                MePatternProviderActionPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(ID_PROJECTOR_REQUEST, ProjectorRequestPacket.class,
+                ProjectorRequestPacket::encode,
+                ProjectorRequestPacket::new,
+                ProjectorRequestPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(ID_PROJECTOR_RESPONSE, ProjectorResponsePacket.class,
+                ProjectorResponsePacket::encode,
+                ProjectorResponsePacket::new,
+                ProjectorResponsePacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     private ModNetwork() {

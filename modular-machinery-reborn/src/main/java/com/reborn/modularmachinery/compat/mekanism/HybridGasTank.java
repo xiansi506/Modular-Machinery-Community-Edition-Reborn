@@ -22,30 +22,22 @@ import javax.annotation.Nullable;
  * 方块只能在 mod 构造期注册、注册表随后冻结，而「给已有方块加一种能力」不需要新方块。
  *
  * <p><b>一个罐子要么装流体要么装气体</b>，这正是旧版 {@code HybridGasTank} 的语义
- * （它的 {@code setFluid} 与 {@code setGas} 互相覆盖同一个罐）。所以本类持有一个
- * {@link FluidTank} 的引用，并在装气体时把它清空；容量用那个罐的容量。
+ * （它的 {@code setFluid} 与 {@code setGas} 可直接置换内容）。正常传输走另一条规则：
+ * 旧版 {@code receiveGas} 在已有流体时返回 0，本版同样拒绝注入，绝不为收气体清掉流体。
  *
  * <p><b>本类会加载 Mekanism 的类，所以它绝对不能被主模组引用。</b>主模组拿到它只有一条路：
  * {@code MekanismModule} 在 {@code FMLCommonSetupEvent} 里造一个、包成
  * {@code BlockEntityPortMapper} 交给 {@code ModCompat}。没装 Mekanism 时那个模块根本不会被调用，
  * 于是这个类不会被解析——这就是 {@code compat/} 隔离的全部意义。
  */
-final class HybridGasTank implements IGasHandler {
+final class HybridGasTank implements IGasHandler, com.reborn.modularmachinery.recipe.ResourceTransaction.OpaquePort {
 
     /** 只有一个罐，与旧版一样（{@code HybridGasTank} 就是一个 {@code HybridTank}）。 */
     private static final int TANKS = 1;
 
     private final MachineHatchBlockEntity hatch;
     private final FluidTank fluid;
-    /**
-     * 气罐的容量。
-     *
-     * <p><b>它不再借 {@code fluid.getCapacity()}</b>：那是流体罐的**总**容量，而气罐的空间要靠
-     * 「总容量减去当前装着的流体」算出来，否则两种东西会同时挤进同一个罐里——旧版的
-     * {@code HybridGasTank} 根本不可能出现那个状态（`setFluid` 与 `setGas` 互相覆盖同一个罐）。
-     *
-     * <p>取值在构造时定下（{@code fluid.getCapacity()}），因为流体仓的容量由它的等级决定、永不改变。
-     */
+    /** 互斥使用整个仓容量；另一种介质未排空时不接收。 */
     private final long capacity;
 
     /** 每当内容变化时通知宿主去存盘并（流体那一半需要）同步给客户端。 */
@@ -72,6 +64,56 @@ final class HybridGasTank implements IGasHandler {
     @Override
     public int getTanks() {
         return TANKS;
+    }
+
+    @Override
+    public Object transactionView(com.reborn.modularmachinery.recipe.ResourceTransaction transaction) {
+        GasStack before = current().copy();
+        FluidStack fluidBefore = hatch.realFluidStack();
+        var fluidView = transaction.fluids(fluid);
+        class GasView implements IGasHandler {
+            private GasStack working = before.copy();
+            @Override public int getTanks() { return 1; }
+            @Override public GasStack getChemicalInTank(int tank) { return tank == 0 ? working.copy() : GasStack.EMPTY; }
+            @Override public void setChemicalInTank(int tank, GasStack stack) {
+                throw new UnsupportedOperationException("Recipe transactions use insert/extract");
+            }
+            @Override public long getTankCapacity(int tank) { return HybridGasTank.this.getTankCapacity(tank); }
+            @Override public boolean isValid(int tank, GasStack stack) { return HybridGasTank.this.isValid(tank, stack); }
+            @Override public GasStack insertChemical(int tank, GasStack stack, Action action) {
+                if (tank != 0 || stack.isEmpty() || !fluidView.getFluidInTank(0).isEmpty()
+                        || (!working.isEmpty() && !working.isTypeEqual(stack))) return stack;
+                long n = Math.min(stack.getAmount(), Math.max(0, capacity - working.getAmount()));
+                if (n <= 0) return stack;
+                if (action.execute()) {
+                    working = new GasStack(stack, working.getAmount() + n);
+                    transaction.record(() -> HybridGasTank.this.insertChemical(tank, new GasStack(stack, n), Action.EXECUTE).isEmpty());
+                }
+                return n == stack.getAmount() ? GasStack.EMPTY : new GasStack(stack, stack.getAmount() - n);
+            }
+            @Override public GasStack extractChemical(int tank, long requested, Action action) {
+                if (tank != 0 || requested <= 0 || working.isEmpty()) return GasStack.EMPTY;
+                long n = Math.min(working.getAmount(), requested);
+                GasStack result = new GasStack(working, n);
+                if (action.execute() && n > 0) {
+                    working = working.getAmount() == n ? GasStack.EMPTY : new GasStack(working, working.getAmount() - n);
+                    transaction.record(() -> HybridGasTank.this.extractChemical(tank, n, Action.EXECUTE).getAmount() == n);
+                }
+                return result;
+            }
+        }
+        GasView view = new GasView();
+        transaction.coupleFluidTank(fluid, () -> !view.working.isEmpty());
+        transaction.enlist(() -> {
+            GasStack now = current();
+            boolean gasUnchanged = before.isEmpty() ? now.isEmpty()
+                    : !now.isEmpty() && before.isTypeEqual(now) && before.getAmount() == now.getAmount();
+            return gasUnchanged && fluidBefore.isFluidStackIdentical(hatch.realFluidStack());
+        }, () -> {
+            setChemicalInTank(0, before.copy());
+            fluid.setFluid(fluidBefore.copy());
+        });
+        return view;
     }
 
     @Override
@@ -102,11 +144,8 @@ final class HybridGasTank implements IGasHandler {
     }
 
     /**
-     * 灌入。**一个罐要么装流体、要么装气体**（旧版 {@code HybridGasTank} 的语义：`setFluid` 与 `setGas`
-     * 互相覆盖同一个 {@code HybridTank}）。
-     *
-     * <p><b>流体会挡住气体，而灌气体会把流体清掉。</b>两条都是上面那句话的直接后果，缺一条就不自洽：
-     * 只挡不清则永远进不去（流体仓里通常有流体），只清不挡则两种东西同时存在（旧版不可能出现的状态）。
+     * 正常灌入与旧版 receiveGas 一致：已有流体则整份退回，排空后才可切换介质。
+     * SIMULATE 和 EXECUTE 遵守同一规则，不调用用于直接置换内容的 setGas。
      */
     @Override
     public GasStack insertChemical(int tank, GasStack stack, Action action) {
@@ -125,17 +164,10 @@ final class HybridGasTank implements IGasHandler {
             MEKANISM_PROBE.note("参数不对（tank=" + tank + " 或空栈）");
             return stack == null ? GasStack.EMPTY : stack;
         }
-        // 罐里已经有流体：**先把它清掉再收气体**。旧版就是这么做的——一个罐只装一样
-        // （`setFluid` 与 `setGas` 互相覆盖同一个罐）。
-        //
-        // 问的是 `realFluidAmount()` 而不是 `getFluidAmount()`：后者在有气体时被挡成 0
-        // （见 MachineHatchBlockEntity#FluidTankWithGasPriority），用它判断会永远认为「罐里没流体」，
-        // 于是旧液体留着不清——气体被抽空之后它又冒出来。
+        // 使用绕过气体显示闸门的真实流体量；拒绝传输，不覆盖现有资源。
         if (this.hatch.realFluidAmount() > 0) {
-            if (action.execute()) {
-                this.hatch.clearFluidForGas();
-                this.onChanged.run();
-            }
+            MEKANISM_PROBE.note("被拒：仓内仍有流体");
+            return stack;
         }
         if (!sameType(stack)) {
             // 罐里是**别种气体**：不受理。回整份，表示一点都没进去。

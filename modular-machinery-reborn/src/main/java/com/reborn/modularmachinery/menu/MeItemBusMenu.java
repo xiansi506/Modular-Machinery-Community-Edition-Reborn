@@ -74,20 +74,25 @@ public final class MeItemBusMenu extends AbstractContainerMenu {
         this.addPlayerSlots(inventory, this.playerInventoryY);
 
         if (this.input) {
-            ItemStackHandler config = this.bus == null ? null : this.bus.configHandler();
-            if (config != null) {
-                for (int row = 0; row < 4; row++) {
-                    for (int col = 0; col < 4; col++) {
-                        this.addSlot(new SlotItemHandler(config, col + row * 4, 8 + col * 18, 35 + row * 18));
+            // 0.94.0（照高版 AE2 接口）：配置格是 **ghost 标记**，不挂真实槽——交互由窗口侧捕获
+            // 并发包（MeFluidConfigPacket）。0.94.1 修复：0.94.0 那次替换实际没有落上（脚本未命中
+            // 仍报成功），真实槽留在了原地——这就是「标记还是消耗物品/一个物品显示两个」的直接原因
+            // （真实槽收进物品 + ghost 渲染叠加）。占位槽 mayPlace/mayPickup 都关，杜绝一切
+            // vanilla 路径（点击/拖拽/双击收集）把物品塞进虚空容器。
+            for (int i = 0; i < CONFIG_SLOTS; i++) {
+                this.addSlot(new net.minecraft.world.inventory.Slot(
+                        new net.minecraft.world.SimpleContainer(CONFIG_SLOTS), i,
+                        8 + (i % 4) * 18, 35 + (i / 4) * 18) {
+                    @Override
+                    public boolean mayPlace(net.minecraft.world.item.ItemStack stack) {
+                        return false;
                     }
-                }
-            } else {
-                // 方块实体缺失/类型不对时仍要把 16 个配置槽的位置占住，否则后面的内部槽会
-                // 被客户端按错误的菜单索引对齐。
-                for (int i = 0; i < CONFIG_SLOTS; i++) {
-                    this.addSlot(new net.minecraft.world.inventory.Slot(new net.minecraft.world.SimpleContainer(CONFIG_SLOTS), i,
-                            8 + (i % 4) * 18, 35 + (i / 4) * 18));
-                }
+
+                    @Override
+                    public boolean mayPickup(net.minecraft.world.entity.player.Player player) {
+                        return false;
+                    }
+                });
             }
             ItemStackHandler internal = this.hatch.itemHandler();
             if (internal != null) {
@@ -128,6 +133,11 @@ public final class MeItemBusMenu extends AbstractContainerMenu {
 
     private boolean isClientSide() {
         return this.hatch.getLevel() != null && this.hatch.getLevel().isClientSide;
+    }
+
+    /** C4-II（0.93.0）：配置包的验证要用——发件人开着的必须是这台总线的界面。 */
+    public MachineHatchBlockEntity hatch() {
+        return this.hatch;
     }
 
     public boolean isInput() {

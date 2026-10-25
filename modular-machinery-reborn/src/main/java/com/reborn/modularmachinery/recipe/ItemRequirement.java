@@ -235,6 +235,7 @@ public final class ItemRequirement extends MachineRequirement {
     /** {@link #canSatisfy} for an explicit number of copies. */
     public boolean canSatisfy(HatchCollection ports, RecipeModifiers modifiers, int copies) {
         int perCopy = modifiedAmount(modifiers);
+        if (perCopy == 0) return true;
         if (this.ioType() == IOType.INPUT) {
             return this.ingredient != null && perCopy > 0
                     && IngredientIo.count(ports.itemInputs(), this::inputMatches) >= perCopy * copies;
@@ -281,6 +282,15 @@ public final class ItemRequirement extends MachineRequirement {
     }
 
     @Override
+    public boolean reserve(HatchCollection ports, RecipeModifiers modifiers) {
+        int total = Math.multiplyExact(modifiedAmount(modifiers), parallelism());
+        if (total == 0) return true;
+        return ioType() == IOType.INPUT
+                ? IngredientIo.extract(ports.itemInputs(), this::inputMatches, total)
+                : IngredientIo.insertItems(ports.itemOutputs(), this.stack, total);
+    }
+
+    @Override
     public boolean apply(HatchCollection ports, RandomSource random) {
         return apply(ports, random, RecipeModifiers.EMPTY);
     }
@@ -315,9 +325,11 @@ public final class ItemRequirement extends MachineRequirement {
             if (rollChance && random.nextFloat() >= decidedChance) {
                 continue;
             }
-            total += this.hasAmountRange()
-                    ? this.minAmount + random.nextInt(this.maxAmount - this.minAmount + 1)
+            int rolled = this.hasAmountRange()
+                    ? (int) Math.max(0, Math.floor(modifiers.apply(this,
+                            this.minAmount + random.nextInt(this.maxAmount - this.minAmount + 1), false)))
                     : perCopy;
+            total = Math.addExact(total, rolled);
         }
         if (total <= 0) {
             return true;

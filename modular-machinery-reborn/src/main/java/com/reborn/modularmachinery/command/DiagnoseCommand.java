@@ -55,48 +55,49 @@ public final class DiagnoseCommand {
     }
 
     private static int run(CommandSourceStack source) {
+        // F6 第二片（0.87.1）：界面文案全部走翻译键（command.modular_machinery_reborn.diagnose.*）；
+        // 纯数据行（坐标、端口描述、能力名）保留 literal。键名与 %s 个数由脚本静态核对过。
+        final String d = "command.modular_machinery_reborn.diagnose.";
         Level level = source.getLevel();
         MachineControllerBlockEntity controller = findController(source, level);
         if (controller == null) {
-            source.sendFailure(Component.literal("附近没有机器控制器。站到控制器旁边（8 格内）再执行。"));
+            source.sendFailure(Component.translatable(d + "no_controller"));
             return 0;
         }
 
         BlockPos pos = controller.getBlockPos();
-        source.sendSuccess(() -> Component.literal("=== 控制器 " + pos.toShortString()
-                + " ==="), false);
-        source.sendSuccess(() -> Component.literal("成型: " + controller.isFormed()
-                + "   状态: " + controller.status().name()
-                + " (" + controller.status().translationKey() + ")"), false);
+        source.sendSuccess(() -> Component.translatable(d + "header", pos.toShortString()), false);
+        source.sendSuccess(() -> Component.translatable(d + "formed_status", controller.isFormed(),
+                controller.status().name(), controller.status().translationKey()), false);
         if (!controller.isFormed()) {
-            source.sendSuccess(() -> Component.literal(
-                    "机器没有成型，下面没有可诊断的端口。先确认结构搭对了。"), false);
+            source.sendSuccess(() -> Component.translatable(d + "not_formed_note"), false);
             return 1;
         }
 
         var machineId = controller.machineId();
         MachineDefinition machine = machineId == null ? null : MachineRegistry.byId(machineId).orElse(null);
-        source.sendSuccess(() -> Component.literal("机器: " + machineId
-                + (machine == null ? "  (注册表里找不到这台机器！)" : "")), false);
+        source.sendSuccess(() -> Component.translatable(d + "machine_line", machineId,
+                machine == null ? Component.translatable(d + "machine_unknown_suffix") : Component.empty()),
+                false);
         if (machine == null) {
             return 1;
         }
 
         // ---- 结构里的标签（定义展开之后的，也就是运行时真正用的那一份）--------------------------
-        source.sendSuccess(() -> Component.literal("--- 结构的标签（selector-tag）---"), false);
+        source.sendSuccess(() -> Component.translatable(d + "section_tags"), false);
         MachinePattern pattern = machine.pattern();
         if (!machine.hasDynamicPatterns()) {
-            source.sendSuccess(() -> Component.literal("  （这台机器没有动态结构）"), false);
+            source.sendSuccess(() -> Component.translatable(d + "no_dynamic"), false);
         } else {
-            source.sendSuccess(() -> Component.literal("  动态结构 " + controller.dynamicPatterns().size()
-                    + " 个模式（节数/朝向如下；下面列出的位置标签是它们展开之后的）"), false);
+            source.sendSuccess(() -> Component.translatable(d + "dynamic_count",
+                    controller.dynamicPatterns().size()), false);
             for (var status : controller.dynamicPatterns()) {
-                source.sendSuccess(() -> Component.literal("    模式 '" + status.patternName()
-                        + "' 节数=" + status.size() + " 朝向=" + status.face().getName()), false);
+                source.sendSuccess(() -> Component.translatable(d + "dynamic_pattern",
+                        status.patternName(), status.size(), status.face().getName()), false);
             }
         }
         if (!pattern.hasTags() && !machine.hasDynamicPatterns()) {
-            source.sendSuccess(() -> Component.literal("  没有任何位置带标签"), false);
+            source.sendSuccess(() -> Component.translatable(d + "no_tags"), false);
         }
         for (Map.Entry<BlockPos, String> entry : new java.util.TreeMap<>(runtimeTags(controller, machine)).entrySet()) {
             source.sendSuccess(() -> Component.literal("  " + entry.getKey().toShortString()
@@ -105,19 +106,17 @@ public final class DiagnoseCommand {
 
         // ---- 实际收集到的端口及其标签 ---------------------------------------------------------
         HatchCollection hatches = controller.hatches();
-        source.sendSuccess(() -> Component.literal("--- 收集到的端口（共 " + hatches.hatchCount() + " 个）---"),
-                false);
+        source.sendSuccess(() -> Component.translatable(d + "section_ports", hatches.hatchCount()), false);
         for (String line : hatches.describePorts()) {
             source.sendSuccess(() -> Component.literal("  " + line), false);
         }
 
         // ---- 输入组（A2）---------------------------------------------------------------------
         // 组号是另一个看不见的状态：玩家把仓口分到几组、正在跑的是哪一组，只看世界看不出来。
-        source.sendSuccess(() -> Component.literal("--- 输入组（A2）---"), false);
-        final String groupSummary = "  组号: " + hatches.groupIds()
-                + "   正在跑的组: " + (controller.activeGroupId() == null ? "无" : controller.activeGroupId())
-                + "   （仓口行里的 group=general 是通用端口，对每组都可见）";
-        source.sendSuccess(() -> Component.literal(groupSummary), false);
+        source.sendSuccess(() -> Component.translatable(d + "section_groups"), false);
+        final Component groupSummary = Component.translatable(d + "group_summary", hatches.groupIds(),
+                controller.activeGroupId() == null ? "-" : controller.activeGroupId());
+        source.sendSuccess(() -> groupSummary, false);
 
         // ---- 结构展开后**带标签**的每一格，以及那一格里实际是什么 --------------------------------
         //
@@ -126,25 +125,23 @@ public final class DiagnoseCommand {
         // 要么它们在、但那一格不是本模组的仓口方块（这里会显示成别的东西）。
         Map<BlockPos, String> tags = runtimeTags(controller, machine);
         Map<BlockPos, ?> positions = runtimePositions(controller, machine);
-        source.sendSuccess(() -> Component.literal("--- 带标签的结构位置（相对 / 世界 / 标签 / 实际方块）---"),
-                false);
+        source.sendSuccess(() -> Component.translatable(d + "section_tagged_positions"), false);
         for (Map.Entry<BlockPos, String> entry : new java.util.TreeMap<>(tags).entrySet()) {
             BlockPos at = pos.offset(entry.getKey());
             String block = String.valueOf(net.minecraft.core.registries.BuiltInRegistries.BLOCK
                     .getKey(level.getBlockState(at).getBlock()));
             boolean isHatch = level.getBlockEntity(at)
                     instanceof com.reborn.modularmachinery.block.MachineHatchBlockEntity;
-            source.sendSuccess(() -> Component.literal("  相对" + entry.getKey().toShortString()
-                    + " 世界" + at.toShortString() + " 标签=" + entry.getValue()
-                    + " 方块=" + block + (isHatch ? "  ← 仓口" : "")), false);
+            source.sendSuccess(() -> Component.translatable(d + "tagged_position",
+                    entry.getKey().toShortString(), at.toShortString(), entry.getValue(), block,
+                    isHatch ? Component.translatable(d + "hatch_marker") : Component.empty()), false);
         }
         if (tags.isEmpty()) {
-            source.sendSuccess(() -> Component.literal(
-                    "  （没有任何带标签的位置——这本身就是异常：动态段应当生成标签）"), false);
+            source.sendSuccess(() -> Component.translatable(d + "no_tagged_positions"), false);
         }
 
         // ---- 不带标签的结构位置，好确认「带标签的格子」到底落在世界里的哪儿 -----------------------
-        source.sendSuccess(() -> Component.literal("--- 不带标签的结构位置（最多 24 个）---"), false);
+        source.sendSuccess(() -> Component.translatable(d + "section_plain_positions"), false);
         int plainShown = 0;
         for (BlockPos relative : new java.util.TreeMap<>(
                 runtimePositions(controller, machine)).keySet()) {
@@ -157,8 +154,8 @@ public final class DiagnoseCommand {
             BlockPos at = pos.offset(relative);
             String block = String.valueOf(net.minecraft.core.registries.BuiltInRegistries.BLOCK
                     .getKey(level.getBlockState(at).getBlock()));
-            source.sendSuccess(() -> Component.literal("  相对" + relative.toShortString()
-                    + " 世界" + at.toShortString() + " 方块=" + block), false);
+            source.sendSuccess(() -> Component.translatable(d + "plain_position",
+                    relative.toShortString(), at.toShortString(), block), false);
         }
 
         // ---- 直接扫描世界，找出**真实存在**的仓口，不管结构怎么算 --------------------------------
@@ -167,7 +164,7 @@ public final class DiagnoseCommand {
         // （结构最多十几格），所以直接把范围内所有 `MachineHatchBlockEntity` 找出来，
         // 用它自己的位置去和结构的位置对表——如果结构与世界对不上，这里会立刻显示成
         // 「某个仓口不在结构的任何位置上」。
-        source.sendSuccess(() -> Component.literal("--- 世界里实际存在的仓口（扫描 ±16 格）---"), false);
+        source.sendSuccess(() -> Component.translatable(d + "section_world_hatches"), false);
         int foundHatches = 0;
         for (int dx = -16; dx <= 16; dx++) {
             for (int dy = -16; dy <= 16; dy++) {
@@ -181,22 +178,20 @@ public final class DiagnoseCommand {
                     BlockPos relative = at.subtract(pos);
                     String tag = tags.get(relative);
                     boolean inStructure = tag != null || positions.containsKey(relative);
-                    final String describe = "  相对" + relative.toShortString() + " 世界" + at.toShortString()
-                            + " 种类=" + hatch.kind()
-                            + " 标签=" + (tag == null ? "-" : tag)
-                            + " " + hatch.groupDescription()
-                            + (inStructure ? "" : "   ← 不在结构的任何位置上！")
-                            + "  " + hatch.autoIoDescription();
-                    source.sendSuccess(() -> Component.literal(describe), false);
+                    source.sendSuccess(() -> Component.translatable(d + "world_hatch",
+                            relative.toShortString(), at.toShortString(), hatch.kind(),
+                            tag == null ? "-" : tag, hatch.groupDescription(),
+                            inStructure ? Component.empty()
+                                    : Component.translatable(d + "not_in_structure"),
+                            hatch.autoIoDescription()), false);
                 }
             }
         }
         final int hatchTotal = foundHatches;
-        source.sendSuccess(() -> Component.literal("  共找到 " + hatchTotal + " 个仓口方块；"
-                + "控制器收集到 " + hatches.hatchCount() + " 个端口"), false);
+        source.sendSuccess(() -> Component.translatable(d + "hatch_scan_summary", hatchTotal,
+                hatches.hatchCount()), false);
         if (foundHatches > 0 && hatches.hatchCount() == 0) {
-            source.sendSuccess(() -> Component.literal(
-                    "  ⚠ 世界里有仓口但一个都没被收集——这是本模组的缺陷，请把上面几行发回来"), false);
+            source.sendSuccess(() -> Component.translatable(d + "hatch_scan_warning"), false);
         }
 
         // ---- 兼容端口（波 5.3：Mekanism 的气体）-------------------------------------------------
@@ -206,18 +201,21 @@ public final class DiagnoseCommand {
         // 波 6：染色。分三段问，因为「没变色」有几种完全不同的原因：
         // 定义没解析出颜色 / 控制器没拿到 / 拿到的没同步给客户端 / 渲染层没 tint 层。
         // 解析、下发与邻近部件状态在这里可查；客户端最终渲染仍需实机确认。
-        source.sendSuccess(() -> Component.literal("--- 染色（color）---"), false);
+        source.sendSuccess(() -> Component.translatable(d + "section_color"), false);
         {
-            final int definitionColor = controller.machineId() == null ? -1
+            final Component definitionColor = controller.machineId() == null
+                    ? Component.translatable(d + "color_missing")
                     : com.reborn.modularmachinery.machine.MachineRegistry.byId(controller.machineId())
-                            .map(com.reborn.modularmachinery.machine.MachineDefinition::color).orElse(-1);
-            source.sendSuccess(() -> Component.literal("  这台机器的定义 color = "
-                    + (definitionColor < 0 ? "（没有机器 / 没读到）" : String.format("#%06X", definitionColor))
-                    + "（未设过时是 #FFFFFF）"), false);
-            source.sendSuccess(() -> Component.literal("  控制器自己的 machineColor = "
-                    + (controller.machineColor() == null ? "null（没被下发过）"
-                            : String.format("#%06X", controller.machineColor()))
-                    + "（这条是**服务端**的值；客户端那份靠方块实体同步）"), false);
+                            .map(definition -> Component.literal(
+                                    String.format("#%06X", definition.color())))
+                            .orElseGet(() -> Component.translatable(d + "color_missing"));
+            source.sendSuccess(() -> Component.translatable(d + "color_definition", definitionColor),
+                    false);
+            final Component controllerColor = controller.machineColor() == null
+                    ? Component.translatable(d + "color_not_distributed")
+                    : Component.literal(String.format("#%06X", controller.machineColor()));
+            source.sendSuccess(() -> Component.translatable(d + "color_controller", controllerColor),
+                    false);
             int hatchesWithColor = 0;
             int hatchesSeen = 0;
             int casingsWithColor = 0;
@@ -242,29 +240,25 @@ public final class DiagnoseCommand {
             }
             final int seen = hatchesSeen;
             final int colored = hatchesWithColor;
-            source.sendSuccess(() -> Component.literal("  附近仓里被下发过颜色的: " + colored + " / " + seen
-                    + "（0 且上面那行非 null，说明下发没走到）"), false);
+            source.sendSuccess(() -> Component.translatable(d + "color_hatches", colored, seen), false);
             final int coloredCasings = casingsWithColor;
             final int seenCasings = casingsSeen;
-            source.sendSuccess(() -> Component.literal("  附近结构外壳里被下发过颜色的: "
-                    + coloredCasings + " / " + seenCasings
-                    + "（未染色的附近外壳可能不属于这台机器）"), false);
+            source.sendSuccess(() -> Component.translatable(d + "color_casings", coloredCasings,
+                    seenCasings), false);
         }
 
-        source.sendSuccess(() -> Component.literal("--- 兼容端口（气体）---"), false);
-        source.sendSuccess(() -> Component.literal("  已登记的端口映射器数量 = "
-                + com.reborn.modularmachinery.compat.ModCompat.portMapperCount()
-                + "（0 表示没有任何兼容模块挂上端口）"), false);
-        source.sendSuccess(() -> Component.literal("  气体能力可用 = "
-                + com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasPortReady()
-                + "（false 表示 Mekanism 不在场，或它的能力对象还没建立）"), false);
+        source.sendSuccess(() -> Component.translatable(d + "section_compat"), false);
+        source.sendSuccess(() -> Component.translatable(d + "mapper_count",
+                com.reborn.modularmachinery.compat.ModCompat.portMapperCount()), false);
+        source.sendSuccess(() -> Component.translatable(d + "gas_ready",
+                com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasPortReady()), false);
 
         // ---- 流体能力与 Jade ---------------------------------------------------------------
         // Jade 显示流体走的是「向方块实体要 ForgeCapabilities.FLUID_HANDLER，然后逐罐读
         // getTankCapacity/getFluidInTank」这一条**标准**路（由 Jade 的 CommonProxy#wrapFluidStorage →
         // JadeForgeUtils#fromFluidHandler 实现，本模组不参与）。所以「Jade 不显示液体」只有两种可能：
         // 方块实体没交出那个能力，或者交出来了但罐是空的。这一节把两者分开。
-        source.sendSuccess(() -> Component.literal("--- 流体能力（Jade 读的就是这里）---"), false);
+        source.sendSuccess(() -> Component.translatable(d + "section_fluid"), false);
         // 闸门计数放在最前面：它回答「有没有发生过『罐里真有液体、却被闸门读成 0』」。
         // 这是「游戏内界面看得见液体、Jade 只显示 0」这类现象的唯一可能来源，而它发生在一瞬，
         // 只能靠计数事后问出来。
@@ -272,13 +266,14 @@ public final class DiagnoseCommand {
                 + com.reborn.modularmachinery.block.MachineHatchBlockEntity.gateCounters()), false);
         // Jade 那个替换器的可观测性：它已失败过两次，而两次在游戏里表现一样（提示毫无变化）——
         // 「回调没被调用」与「调用了但没定位到」要的修法完全不同。
-        source.sendSuccess(() -> Component.literal("  Jade 提示替换器: "
-                + com.reborn.modularmachinery.integration.jade.FluidStorageSuppressor.counters()), false);
-        source.sendSuccess(() -> Component.literal("  Jade 本模组流体条: "
-                + com.reborn.modularmachinery.integration.jade.HatchFluidStorageProvider.diagnostics()), false);
+        source.sendSuccess(() -> Component.translatable(d + "jade_replacer",
+                com.reborn.modularmachinery.integration.jade.FluidStorageSuppressor.counters()), false);
+        source.sendSuccess(() -> Component.translatable(d + "jade_own_bar",
+                com.reborn.modularmachinery.integration.jade.HatchFluidStorageProvider.diagnostics()),
+                false);
         // 气体读盘：所有者报过「上一会话的 brine 在新会话里是空的」。那一行让它可判定。
-        source.sendSuccess(() -> Component.literal("  气体读盘: "
-                + com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasRestoreCounters()), false);
+        source.sendSuccess(() -> Component.translatable(d + "gas_restore",
+                com.reborn.modularmachinery.compat.mekanism.MekanismModule.gasRestoreCounters()), false);
         // **完整模拟 Jade 的服务端流程**：Jade 的 CommonProxy#wrapFluidStorage 做的是
         //   目标 instanceof CapabilityProvider（方块实体都是）
         //   → provider.getCapability(ForgeCapabilities.FLUID_HANDLER)   ← 注意是**无方向**的那次调用
@@ -289,8 +284,7 @@ public final class DiagnoseCommand {
         // **逐个仓都报**（0.56.0 修正）：上一版只报「扫描到的第一个」流体仓，而所有者看的是另一个，
         // 于是那一行显示「空」、看起来像与界面的 32000 mB 矛盾——一次**探针自己造成的误导**。
         // 探针报错比没有探针更糟，所以这里改为每行都带坐标，并且不再替玩家挑一个。
-        source.sendSuccess(() -> Component.literal(
-                "  Jade 流程模拟（走 CapabilityProvider 的无方向查询，逐个仓）:"), false);
+        source.sendSuccess(() -> Component.translatable(d + "jade_sim_title"), false);
         for (int dx = -16; dx <= 16; dx++) {
             for (int dy = -16; dy <= 16; dy++) {
                 for (int dz = -16; dz <= 16; dz++) {
@@ -303,19 +297,21 @@ public final class DiagnoseCommand {
                     }
                     var viaProvider = hatch.getCapability(
                             net.minecraftforge.common.capabilities.ForgeCapabilities.FLUID_HANDLER);
-                    String summary;
+                    Component summary;
                     if (!viaProvider.isPresent()) {
-                        summary = "没拿到 FLUID_HANDLER → 按 Jade 的代码它 return null（什么都不显示）";
+                        summary = Component.translatable(d + "jade_sim_no_handler");
                     } else {
                         var handler = viaProvider.orElse(null);
                         var stack = handler.getFluidInTank(0);
-                        summary = "罐数=" + handler.getTanks() + " 容量=" + handler.getTankCapacity(0)
-                                + " 内容=" + (stack.isEmpty() ? "空（Jade 会显示 jade.fluid.empty）"
-                                        : stack.getFluid().builtInRegistryHolder().key().location()
-                                                + " x" + stack.getAmount() + " mB");
+                        Component contents = stack.isEmpty()
+                                ? Component.translatable(d + "jade_sim_empty")
+                                : Component.literal(stack.getFluid().builtInRegistryHolder().key().location()
+                                        + " x" + stack.getAmount() + " mB");
+                        summary = Component.translatable(d + "jade_sim_tank", handler.getTanks(),
+                                handler.getTankCapacity(0), contents);
                     }
-                    final String line = "    " + at.toShortString() + " → " + summary;
-                    source.sendSuccess(() -> Component.literal(line), false);
+                    source.sendSuccess(() -> Component.translatable(d + "jade_sim_entry",
+                            at.toShortString(), summary), false);
                 }
             }
         }
@@ -340,63 +336,63 @@ public final class DiagnoseCommand {
                     // 内容要**手写**成「什么液体、多少」：FluidStack 没有覆写 toString()，
                     // 直接拼对象只会打出 `net.minecraftforge.fluids.FluidStack@2b3b25cc`——
                     // 那一行等于没问（探针说废话比不说更糟）。同理容量也要按 Jade 的判据写出。
-                    String contents = "（没有能力）";
+                    Component contents = Component.translatable(d + "no_capability");
                     int capacity = -1;
                     if (handler.isPresent()) {
                         var tank = handler.orElse(null);
                         capacity = tank.getTankCapacity(0);
                         net.minecraftforge.fluids.FluidStack inTank = tank.getFluidInTank(0);
                         contents = inTank.isEmpty()
-                                ? "空"
-                                : inTank.getFluid().builtInRegistryHolder().key().location()
-                                        + " x" + inTank.getAmount() + " mB";
+                                ? Component.translatable(d + "empty_tank")
+                                : Component.literal(inTank.getFluid().builtInRegistryHolder().key().location()
+                                        + " x" + inTank.getAmount() + " mB");
                     }
                     // 罐的真值：直接问方块实体，不经过能力层。
                     net.minecraftforge.fluids.FluidStack raw = hatch.fluidTank() == null
                             ? net.minecraftforge.fluids.FluidStack.EMPTY
                             : hatch.fluidTank().getFluid();
-                    String rawText = raw.isEmpty() ? "空"
-                            : raw.getFluid().builtInRegistryHolder().key().location()
-                                    + " x" + raw.getAmount() + " mB";
+                    Component rawText = raw.isEmpty()
+                            ? Component.translatable(d + "empty_tank")
+                            : Component.literal(raw.getFluid().builtInRegistryHolder().key().location()
+                                    + " x" + raw.getAmount() + " mB");
                     // **关键对比**：本类重写的 getCapability 与父类（Forge 的
                     // CapabilityDispatcher，也就是「别的模组用 AttachCapabilitiesEvent 挂上来的能力」）
                     // 会不会给出**不同的处理器**。如果不同，就说明有第三方能力盖在本模组之上——
                     // 而 Jade 走的正是父类那条路（它按 CapabilityProvider 查），于是它读到别人的空罐。
-                    String dispatcher = "（父类未交出）";
+                    Component dispatcher = Component.translatable(d + "super_no_handler");
                     var viaSuper = hatch.fluidCapabilityViaSuper();
                     if (viaSuper.isPresent()) {
                         var other = viaSuper.orElse(null);
                         var stack = other.getFluidInTank(0);
-                        dispatcher = "罐数=" + other.getTanks() + " 容量=" + other.getTankCapacity(0)
-                                + " 内容=" + (stack.isEmpty() ? "空"
-                                        : stack.getFluid().builtInRegistryHolder().key().location()
-                                                + " x" + stack.getAmount() + " mB")
-                                + " 同一个对象=" + (handler.isPresent()
-                                        && other == handler.orElse(null));
+                        Component superContents = stack.isEmpty()
+                                ? Component.translatable(d + "empty_tank")
+                                : Component.literal(stack.getFluid().builtInRegistryHolder().key().location()
+                                        + " x" + stack.getAmount() + " mB");
+                        dispatcher = Component.translatable(d + "super_tank", other.getTanks(),
+                                other.getTankCapacity(0), superContents,
+                                handler.isPresent() && other == handler.orElse(null));
                     }
-                    final String line = "    " + at.toShortString() + " 种类=" + hatch.kind()
-                            + " 罐真值=" + rawText
-                            + " ｜ 本类交出=" + contents
-                            + " ｜ 父类(Forge 派发)交出=" + dispatcher;
-                    source.sendSuccess(() -> Component.literal(line), false);
+                    // contents / dispatcher 在本循环体内被重新赋值，lambda 只能引用实际上的最终变量。
+                    final Component contentsFinal = contents;
+                    final Component dispatcherFinal = dispatcher;
+                    source.sendSuccess(() -> Component.translatable(d + "tank_compare",
+                            at.toShortString(), hatch.kind(), rawText, contentsFinal,
+                            dispatcherFinal), false);
                 }
             }
         }
-        source.sendSuccess(() -> Component.literal("  这台机器收集到的气体端口: 输入 "
-                + hatches.gasInputs().size() + " 个 / 输出 " + hatches.gasOutputs().size() + " 个"), false);
-        source.sendSuccess(() -> Component.literal("  其它模组问过的能力（最多记 40 个）:"), false);
+        source.sendSuccess(() -> Component.translatable(d + "gas_ports_collected",
+                hatches.gasInputs().size(), hatches.gasOutputs().size()), false);
+        source.sendSuccess(() -> Component.translatable(d + "queried_caps_title"), false);
         var queried = com.reborn.modularmachinery.compat.ModCompat.queriedCapabilitiesNamed();
         if (queried.isEmpty()) {
-            source.sendSuccess(() -> Component.literal(
-                    "    （还没有任何能力查询经过本模组的仓口——如果你的管道接在上面，这一条就是问题所在）"),
-                    false);
+            source.sendSuccess(() -> Component.translatable(d + "queried_caps_empty"), false);
         } else {
             for (String capability : queried) {
                 source.sendSuccess(() -> Component.literal("    " + capability), false);
             }
         }
-        source.sendSuccess(() -> Component.literal(
-                "  附近流体仓的气体那一半（没有条目 = 从来没被管道或端口收集走到过）:"), false);
+        source.sendSuccess(() -> Component.translatable(d + "gas_half_title"), false);
         int gasTanks = 0;
         for (int dx = -16; dx <= 16; dx++) {
             for (int dy = -16; dy <= 16; dy++) {
@@ -412,29 +408,28 @@ public final class DiagnoseCommand {
                         continue;
                     }
                     gasTanks++;
-                    final String line = "    " + at.toShortString() + " 种类=" + hatch.kind()
-                            + " 气体=" + gasContents;
-                    source.sendSuccess(() -> Component.literal(line), false);
+                    source.sendSuccess(() -> Component.translatable(d + "gas_half_entry",
+                            at.toShortString(), hatch.kind(), gasContents), false);
                     // 插入尝试单独一行：这是「管道到底灌过没有」的唯一直接证据，
                     // 藏在一行长文本的末尾会被读漏。
                     final String tally = com.reborn.modularmachinery.compat.mekanism.MekanismModule
                             .describeGasInserts(hatch);
                     if (tally != null) {
-                        source.sendSuccess(() -> Component.literal("        插入尝试: " + tally), false);
+                        source.sendSuccess(() -> Component.translatable(d + "insert_tally", tally),
+                                false);
                     }
                 }
             }
         }
         final int gasTankTotal = gasTanks;
         if (gasTanks == 0) {
-            source.sendSuccess(() -> Component.literal(
-                    "    一个都没有"), false);
+            source.sendSuccess(() -> Component.translatable(d + "gas_none"), false);
         } else {
-            source.sendSuccess(() -> Component.literal("    共 " + gasTankTotal + " 个"), false);
+            source.sendSuccess(() -> Component.translatable(d + "gas_total", gasTankTotal), false);
         }
 
         // ---- 这台机器的配方，逐条说清能不能开工 ------------------------------------------------
-        source.sendSuccess(() -> Component.literal("--- 这台机器的配方 ---"), false);
+        source.sendSuccess(() -> Component.translatable(d + "section_recipes"), false);
         int total = 0;
         int runnable = 0;
         // 和控制器同一顺序：诊断时列出的「第一条失败原因」必须就是控制器实际先试的那条。
@@ -469,30 +464,31 @@ public final class DiagnoseCommand {
             final int lockedFinal = lockedGroup;
             final String failureFinal = failure;
             final HatchCollection requirementScope = lockedScope != null ? lockedScope : lastScope;
-            source.sendSuccess(() -> Component.literal("  " + recipe.getId()
-                    + "  可开工=" + okFinal
-                    + (startFinal ? "  锁定组=" + lockedFinal : "")
-                    + (okFinal ? "" : "  (canStart=" + startFinal + " canTick=" + tickFinal
-                            + " 原因=" + (failureFinal == null ? "无（料不够但没给出具体原因）" : failureFinal) + ")")),
+            source.sendSuccess(() -> Component.translatable(d + "recipe_line", recipe.getId(), okFinal,
+                    startFinal ? Component.translatable(d + "recipe_locked_group", lockedFinal)
+                            : Component.empty(),
+                    okFinal ? Component.empty()
+                            : Component.translatable(d + "recipe_fail_detail", startFinal, tickFinal,
+                                    failureFinal == null
+                                            ? Component.translatable(d + "recipe_no_reason")
+                                            : Component.literal(failureFinal))),
                     false);
             // 每条需求单独说：它绑了哪个标签、在那个标签下能不能满足。这是定位「料放错段」最快的一条。
             for (MachineRequirement requirement : recipe.requirements()) {
                 String tag = requirement.selectorTag();
                 String satisfied = String.valueOf(requirement.canSatisfy(requirement.visiblePorts(requirementScope)));
-                source.sendSuccess(() -> Component.literal("      " + requirement.getClass().getSimpleName()
-                        + " [" + requirement.ioType() + "] tag=" + (tag == null ? "(无)" : tag)
-                        + " 满足=" + satisfied), false);
+                source.sendSuccess(() -> Component.translatable(d + "requirement_line",
+                        requirement.getClass().getSimpleName(), requirement.ioType(),
+                        tag == null ? Component.translatable(d + "no_tag") : Component.literal(tag),
+                        satisfied), false);
             }
         }
         if (total == 0) {
-            source.sendSuccess(() -> Component.literal(
-                    "  （没有任何配方的 machine 指向这台机器——检查配方的 \"machine\" 与定义的 \"registryname\"）"),
-                    false);
+            source.sendSuccess(() -> Component.translatable(d + "no_recipes"), false);
         } else {
             final int t = total;
             final int r = runnable;
-            source.sendSuccess(() -> Component.literal("  小结: " + t + " 条配方，其中 " + r + " 条此刻可开工"),
-                    false);
+            source.sendSuccess(() -> Component.translatable(d + "recipe_summary", t, r), false);
         }
         return 1;
     }
@@ -527,25 +523,13 @@ public final class DiagnoseCommand {
      *   <li><b>先把各段在朝向 0 下合并，再整体旋转。</b>否则动态段的局部坐标（朝向 0 下写的）与
      *       基座的坐标（已旋转）不在同一个坐标系里相加。</li>
      * </ol>
+     *
+     * <p>0.104.0：实现移到 {@code MachineStructures}——投影仪的世界虚影需要同一份组装逻辑，
+     * 复制会漂移（诊断说一套、虚影画一套），规则原文也随实现迁了过去。
      */
     private static MachinePattern runtimeStructure(MachineControllerBlockEntity controller,
                                                    MachineDefinition machine) {
-        MachinePattern assembled = machine.pattern();
-        for (var dynamic : machine.dynamicPatterns()) {
-            int size = dynamic.minSize();
-            for (var status : controller.dynamicPatterns()) {
-                if (status.patternName().equals(dynamic.name())) {
-                    size = status.size();
-                }
-            }
-            // 朝向 0 下合并，因为段自己的坐标就是按朝向 0 写的。
-            assembled = assembled.withMerged(dynamic.expand(size, 0));
-        }
-        // 合并完整之后，整体按控制器朝向旋转。
-        for (int i = 0; i < controller.rotationSteps(); i++) {
-            assembled = assembled.rotateYCounterClockwise();
-        }
-        return assembled;
+        return com.reborn.modularmachinery.machine.MachineStructures.runtimeStructure(controller, machine);
     }
 
     /** 找到离命令执行者最近的控制器：先看脚下 8 格内，再看准星指向的方块。 */

@@ -1,19 +1,43 @@
 package com.reborn.modularmachinery.client;
 
+import com.reborn.modularmachinery.block.MeBusAccess;
+import com.reborn.modularmachinery.block.MeFluidTanks;
+import com.reborn.modularmachinery.compat.ae2.MeItemBusBlockEntity;
 import com.reborn.modularmachinery.menu.MeItemBusMenu;
+import com.reborn.modularmachinery.network.MeFluidConfigPacket;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.FluidUtil;
+
+import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * C4（0.73.0）：ME 物品总线的窗口。
  *
  * <p>输入窗口沿用旧版 {@code textures/gui/meiteminputbus.png}（176×204）；输出窗口照旧版直接
- * 引用 AE2 的 {@code ae2:textures/guis/skychest.png}（176×195 的面板画在 256×256 画布左上角）。
- * 这里不 import 任何 {@code appeng} 类型，只在资源路径上依赖 AE2——而这两个方块本来就只有装了
- * AE2 才会注册。
+ * 引用 AE2 的 {@code ae2:textures/guis/skychest.png}（176×195）。不 import 任何 {@code appeng}
+ * 类型，只在资源路径上依赖 AE2——这两个方块本来就只有装了 AE2 才会注册。
+ *
+ * <h2>C4-II（0.94.0，照高版 AE2 接口）：配置格 = ghost 标记</h2>
+ *
+ * <p>输入侧的 16 个配置格是**物品/流体混排的 ghost 标记**（高版接口 {@code FakeSlot} +
+ * {@code GenericStackInv} 的对应物）：手持物品左键标记（数量 = 手持数）、右键标记 1 个；手持流体
+ * 容器标记流体（目标量 = 容器量）；空手（或容器无流体）点击清除。物品不再被吃进配置格，
+ * 破坏也不掉落配置内容。写入经 {@link MeFluidConfigPacket} 上行、服务端验证后写回，
+ * 客户端随 update tag 镜像刷新。
+ *
+ * <p>罐条（输入竖条/输出横条）自 0.94.0 起纯显示（配置都在格子里）。渲染 v1 简化：
+ * 流体贴图**不做 tint**，按比例从罐底画到液面；全部信息在悬停提示里。
  */
 public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu> {
 
@@ -22,11 +46,34 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
     private static final ResourceLocation OUTPUT =
             new ResourceLocation("ae2", "textures/guis/skychest.png");
 
+    /** 输入侧 4×4 配置格的左上角（占位槽同位）。 */
+    private static final int GRID_X = 8;
+    private static final int GRID_Y = 35;
+    /** 输入侧罐条（纯显示）：配置格与内部格之间的空带。 */
+    private static final int IN_STRIP_X = 81;
+    private static final int GAUGE_W = 12;
+    private static final int GAUGE_H = 8;
+    /** 输出侧罐条（纯显示）：内部格下方。 */
+    private static final int OUT_STRIP_Y = 98;
+
+    @Nullable
+    private MeBusAccess bus;
+
     public MeItemBusScreen(MeItemBusMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
         this.imageWidth = 176;
         this.imageHeight = menu.isInput() ? 204 : 195;
         this.inventoryLabelY = menu.isInput() ? 111 : 101;
+    }
+
+    @Nullable
+    private MeBusAccess bus() {
+        if (this.bus == null) {
+            if (this.menu.hatch() instanceof MeBusAccess access) {
+                this.bus = access;
+            }
+        }
+        return this.bus;
     }
 
     @Override
@@ -39,11 +86,199 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
         graphics.drawString(this.font, status,
                 this.leftPos + this.imageWidth - 8 - this.font.width(status),
                 this.topPos + 6, color, false);
+        this.renderFluidStrip(graphics, mouseX, mouseY);
+        this.renderConfigMarks(graphics, mouseX, mouseY);
     }
 
     @Override
     protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
         graphics.blit(this.menu.isInput() ? INPUT : OUTPUT,
                 this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
+    }
+
+    // ------------------------------------------------------------ 配置格（0.94.0 ghost 标记）
+
+    private int configSlotAt(double mouseX, double mouseY) {
+        if (!this.menu.isInput()) {
+            return -1;
+        }
+        int relX = (int) mouseX - this.leftPos - GRID_X;
+        int relY = (int) mouseY - this.topPos - GRID_Y;
+        if (relX < 0 || relY < 0 || relX >= 4 * 18 || relY >= 4 * 18) {
+            return -1;
+        }
+        int col = relX / 18;
+        int row = relY / 18;
+        if (relX - col * 18 >= 16 || relY - row * 18 >= 16) {
+            return -1;
+        }
+        return col + row * 4;
+    }
+
+    private void renderConfigMarks(GuiGraphics graphics, int mouseX, int mouseY) {
+        MeBusAccess bus = bus();
+        if (bus == null || !this.menu.isInput()) {
+            return;
+        }
+        int hovered = configSlotAt(mouseX, mouseY);
+        for (int slot = 0; slot < MeItemBusBlockEntity.CONFIG_GRID; slot++) {
+            int x = this.leftPos + GRID_X + (slot % 4) * 18;
+            int y = this.topPos + GRID_Y + (slot / 4) * 18;
+            ItemStack item = bus.configItemAt(slot);
+            Fluid fluid = bus.fluidMarkAt(slot);
+            if (item != null && !item.isEmpty()) {
+                graphics.renderItem(item, x, y);
+                graphics.renderItemDecorations(this.font, item, x, y);
+            } else if (fluid != null) {
+                // 流体标记：12×12 的流体块 + 目标量小字。
+                drawFluidBlock(graphics, fluid, x + 2, y + 2, 12, 12);
+                String label = amountLabel(bus.fluidMarkAmount(slot));
+                graphics.drawString(this.font, label, x + 16 - this.font.width(label), y + 8,
+                        0xFFFFFF, true);
+            }
+            if (slot == hovered) {
+                graphics.renderComponentTooltip(this.font, configTooltip(bus, slot), (int) mouseX, (int) mouseY);
+            }
+        }
+    }
+
+    private List<Component> configTooltip(MeBusAccess bus, int slot) {
+        List<Component> lines = new ArrayList<>();
+        ItemStack item = bus.configItemAt(slot);
+        Fluid fluid = bus.fluidMarkAt(slot);
+        if (item != null && !item.isEmpty()) {
+            lines.add(item.getHoverName());
+            lines.add(Component.literal("× " + item.getCount()));
+        } else if (fluid != null) {
+            lines.add(new FluidStack(fluid, 1).getDisplayName());
+            lines.add(Component.literal(bus.fluidMarkAmount(slot) + " mB"));
+        } else {
+            lines.add(Component.translatable("screen.modular_machinery_reborn.me_bus.fluid.unfiltered"));
+        }
+        lines.add(Component.translatable("screen.modular_machinery_reborn.me_bus.fluid.hint"));
+        return lines;
+    }
+
+    /**
+     * 0.94.1：流体块的统一画法。两个坑都在这里修：①贴图是 16×16，必须用带纹理尺寸的 blit 重载
+     * （默认重载按 256×256 画布取 UV——水显示黑方块的原因）；②水的贴图依赖 tint，有 tint 的流体
+     * 直接画 tint 色块。
+     */
+    private static void drawFluidBlock(GuiGraphics graphics, Fluid fluid, int x, int y, int w, int h) {
+        IClientFluidTypeExtensions ext = IClientFluidTypeExtensions.of(fluid);
+        int tint = ext.getTintColor(new FluidStack(fluid, 1));
+        if (tint != -1) {
+            graphics.fill(x, y, x + w, y + h, 0xFF000000 | tint);
+            return;
+        }
+        ResourceLocation still = ext.getStillTexture();
+        if (still != null) {
+            graphics.blit(still, x, y, 0, 0, w, h, 16, 16);
+        } else {
+            graphics.fill(x, y, x + w, y + h, 0xFF808080);
+        }
+    }
+
+    /** 目标量的短写（≥1000 且整千 → k）。 */
+    private String amountLabel(int amount) {
+        return amount >= 1000 && amount % 1000 == 0 ? (amount / 1000) + "k" : String.valueOf(amount);
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // C4-II（0.94.2，照高版 AE2 接口的实际语义——所有者截图对照）：
+        // **左键** = 按手上的东西标记（水桶 → 标记水桶物品；普通物品 → 标记该物品，数量 = 手持数）；
+        // **右键** = 有流体容器时标记**容器里的流体**（水桶 → 水，目标量 = 容器量），空手 = 清除该格。
+        // 0.94.1 把流体放在左键优先，与高版相反；清除入口当时只挂在「空手左键」上，手持东西时无法取消。
+        int slot = configSlotAt(mouseX, mouseY);
+        if (slot >= 0) {
+            ItemStack carried = this.menu.getCarried();
+            Optional<FluidStack> contained = FluidUtil.getFluidContained(carried);
+            if (button == 0) {
+                if (carried.isEmpty()) {
+                    MeFluidConfigPacket.sendClear(slot);
+                } else {
+                    MeFluidConfigPacket.sendItem(slot, carried, false);
+                }
+            } else {
+                if (contained.isPresent()) {
+                    MeFluidConfigPacket.sendFluid(slot, contained.get().getFluid(),
+                            contained.get().getAmount());
+                } else {
+                    MeFluidConfigPacket.sendClear(slot);
+                }
+            }
+            return true;
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    // ------------------------------------------------------------ 罐条（纯显示）
+
+    private int gaugeX(int slot) {
+        return this.leftPos + (this.menu.isInput() ? IN_STRIP_X : 8 + slot * 18) + 1;
+    }
+
+    private int gaugeY(int slot) {
+        return this.topPos + (this.menu.isInput() ? GRID_Y + slot * GAUGE_H : OUT_STRIP_Y) + 1;
+    }
+
+    private int gaugeWidth() {
+        return this.menu.isInput() ? GAUGE_W - 2 : 16;
+    }
+
+    private int gaugeHeight() {
+        return this.menu.isInput() ? GAUGE_H - 2 : 12;
+    }
+
+    private int hoveredGauge(double mouseX, double mouseY) {
+        MeBusAccess bus = bus();
+        if (bus == null || bus.fluidTanks() == null) {
+            return -1;
+        }
+        for (int slot = 0; slot < MeFluidTanks.SLOTS; slot++) {
+            if (bus.fluidTanks().getFluidInTank(slot).isEmpty()) {
+                continue;
+            }
+            int x = gaugeX(slot);
+            int y = gaugeY(slot);
+            if (mouseX >= x && mouseX < x + gaugeWidth() && mouseY >= y && mouseY < y + gaugeHeight()) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    private void renderFluidStrip(GuiGraphics graphics, int mouseX, int mouseY) {
+        MeBusAccess bus = bus();
+        MeFluidTanks tanks = bus == null ? null : bus.fluidTanks();
+        if (tanks == null) {
+            return;
+        }
+        // 0.94.1（所有者反馈）：空罐不画——罐条只在有内容时可见。
+        int hovered = hoveredGauge(mouseX, mouseY);
+        for (int slot = 0; slot < MeFluidTanks.SLOTS; slot++) {
+            FluidStack contents = tanks.getFluidInTank(slot);
+            if (contents.isEmpty()) {
+                continue;
+            }
+            int x = gaugeX(slot);
+            int y = gaugeY(slot);
+            int w = gaugeWidth();
+            int h = gaugeHeight();
+            graphics.fill(x - 1, y - 1, x + w + 1, y + h + 1, hovered == slot ? 0xFFE0E0E0 : 0xFF606060);
+            graphics.fill(x, y, x + w, y + h, 0xFF101010);
+            int fill = Math.max(1, h * contents.getAmount() / tanks.getTankCapacity(slot));
+            drawFluidBlock(graphics, contents.getFluid(), x, y + (h - fill), w, fill);
+        }
+        if (hovered >= 0) {
+            FluidStack contents = tanks.getFluidInTank(hovered);
+            List<Component> lines = new ArrayList<>();
+            lines.add(contents.isEmpty()
+                    ? Component.translatable("screen.modular_machinery_reborn.me_bus.fluid.empty")
+                    : contents.getDisplayName());
+            lines.add(Component.literal(contents.getAmount() + " / " + tanks.getTankCapacity(hovered) + " mB"));
+            graphics.renderTooltip(this.font, lines, Optional.empty(), (int) mouseX, (int) mouseY);
+        }
     }
 }

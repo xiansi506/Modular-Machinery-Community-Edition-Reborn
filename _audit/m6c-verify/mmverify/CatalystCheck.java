@@ -287,22 +287,22 @@ final class CatalystCheck {
         try {
             String controller = source("block/MachineControllerBlockEntity.java");
             report("the controller folds catalyst modifiers in per candidate group",
-                    controller.contains("this.modifiers.andThen(recipe.catalystModifiers(scope))"));
+                    controller.contains("recipe.prepareStart(scope, this.modifiers)"));
             report("...and uses that set when checking a start",
-                    controller.contains("recipe.canStart(scope, effective)"));
+                    controller.contains("recipe.canStart(scope, prepared)"));
             report("...and when computing parallelism",
-                    controller.contains("recipe.parallelism(scope, modifiers, machineCeiling)"));
+                    controller.contains("recipe.parallelism(scope, plan, machineCeiling)"));
             report("...and freezes the set for the running craft",
                     controller.contains("be.activeCraftModifiers = effective;")
                             && controller.contains("this.activeCraftModifiers = null;"));
 
             String factory = source("factory/FactoryEngine.java");
             report("the factory folds catalyst modifiers per (recipe, group)",
-                    factory.contains("recipe.catalystModifiers(groupPorts)"));
+                    factory.contains("candidate.prepareStart(groupPorts, modifiers)"));
             report("...and screens candidate recipes with them",
-                    factory.contains("recipe.canStart(groupPorts, effective)"));
+                    factory.contains("candidate.canStart(groupPorts, plan)"));
             report("...and freezes them into the craft",
-                    factory.contains("candidate.modifiers()") && factory.contains("craft.modifiers()"));
+                    factory.contains("this.modifiers = plan.modifiers()") && factory.contains("craft.modifiers()"));
 
             String requirement = source("recipe/CatalystRequirement.java");
             report("the catalyst declares itself unaffected by parallelism",

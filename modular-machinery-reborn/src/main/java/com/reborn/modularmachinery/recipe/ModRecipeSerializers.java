@@ -55,27 +55,113 @@ public final class ModRecipeSerializers {
                 throw new JsonParseException("'recipeTime' of " + id + " must be at least 1");
             }
 
+            // 0.107.0（C1）：适配器声明——JSON 顶层可选 `adapter`（如 "minecraft:furnace" 或另一台机器的 id）
+            // 与 `modifiers` 数组。声明场景下 requirements 可省略（真实需求由生成轮从外部配方表产出）。
+            ResourceLocation adapterKey = parseAdapter(json, id);
+            List<RecipeModifier> adapterModifiers = parseAdapterModifiers(json, id);
+
+            List<MachineRequirement> requirements;
             JsonElement rawRequirements = json.get("requirements");
             if (rawRequirements == null || !rawRequirements.isJsonArray()) {
-                throw new JsonParseException("Missing 'requirements' array in " + id);
-            }
-            JsonArray array = rawRequirements.getAsJsonArray();
-            if (array.isEmpty()) {
-                throw new JsonParseException("Empty 'requirements' in " + id);
-            }
-
-            List<MachineRequirement> requirements = new ArrayList<>(array.size());
-            for (JsonElement element : array) {
-                if (!element.isJsonObject()) {
-                    throw new JsonParseException("A requirement of " + id + " is not a JSON object");
+                if (adapterKey == null) {
+                    throw new JsonParseException("Missing 'requirements' array in " + id);
                 }
-                // 需求的解析与 `selector-tag` 的挂载都在 MachineRequirementParser 里：它对每种需求类型
-                // 含义完全相同，所以整条路径只有一处。种类分派则交给 RequirementTypes 注册表。
-                requirements.add(MachineRequirementParser.parse(element.getAsJsonObject(), id));
+                requirements = List.of();
+            } else {
+                JsonArray array = rawRequirements.getAsJsonArray();
+                if (array.isEmpty() && adapterKey == null) {
+                    throw new JsonParseException("Empty 'requirements' in " + id);
+                }
+                requirements = new ArrayList<>(array.size());
+                for (JsonElement element : array) {
+                    if (!element.isJsonObject()) {
+                        throw new JsonParseException("A requirement of " + id + " is not a JSON object");
+                    }
+                    // 需求的解析与 `selector-tag` 的挂载都在 MachineRequirementParser 里：它对每种需求类型
+                    // 含义完全相同，所以整条路径只有一处。种类分派则交给 RequirementTypes 注册表。
+                    requirements.add(MachineRequirementParser.parse(element.getAsJsonObject(), id));
+                }
             }
             return new MachineRecipe(id, machines, registryName, recipeTime, requirements,
                     parseMaxParallelism(json, id), MachineRecipe.parseCancelIfPerTickFails(json, id),
-                    RecipeCommands.parse(json), MachineRecipe.parsePriority(json, id));
+                    RecipeCommands.parse(json), MachineRecipe.parsePriority(json, id),
+                    parseTooltips(json, id), adapterKey, adapterModifiers);
+        }
+
+        /**
+         * 0.107.0（C1）：顶层可选 {@code adapter} 字段——适配器声明的标志。
+         *
+         * <p>旧版 {@code RecipeAdapterAccessor.Deserializer:124-136} 的同款规则：字符串、完整资源位置
+         * （裸路径不做本模组命名空间前缀——与 {@code machine} 字段不同，旧版对 adapter 就是全 id 严格解析）。
+         * {@code minecraft:furnace} 走熔炉适配器；其余按另一台机器的 id 走机器间复用。
+         */
+        private static ResourceLocation parseAdapter(JsonObject json, ResourceLocation id) {
+            if (!json.has("adapter")) {
+                return null;
+            }
+            JsonElement element = json.get("adapter");
+            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+                throw new JsonParseException("'adapter' of " + id + " must be a string, e.g. "
+                        + "\"minecraft:furnace\" or the full id of another machine");
+            }
+            ResourceLocation parsed = ResourceLocation.tryParse(element.getAsString());
+            if (parsed == null) {
+                throw new JsonParseException("'adapter' of " + id + " is '" + element.getAsString()
+                        + "', which is not a valid resource location");
+            }
+            return parsed;
+        }
+
+        /**
+         * 0.107.0（C1）：适配器声明的 {@code modifiers} 数组，字段名与元素形状照旧版
+         * {@code RecipeAdapterAccessor.Deserializer:139-150}（target/io/operation/multiplier/affectChance），
+         * 解析直接复用 {@link RecipeModifier#parse}——旧版 GSON 反序列化的就是这五个字段。
+         */
+        private static List<RecipeModifier> parseAdapterModifiers(JsonObject json, ResourceLocation id) {
+            if (!json.has("modifiers")) {
+                return List.of();
+            }
+            JsonElement element = json.get("modifiers");
+            if (!element.isJsonArray()) {
+                throw new JsonParseException("'modifiers' of " + id + " must be an array of modifier objects");
+            }
+            List<RecipeModifier> modifiers = new ArrayList<>();
+            for (JsonElement entry : element.getAsJsonArray()) {
+                modifiers.add(RecipeModifier.parse(entry, id));
+            }
+            return List.copyOf(modifiers);
+        }
+
+        /**
+         * 0.98.0：配方级作者自定 tooltip 行，根字段 {@code tooltips}——单字符串或字符串数组。
+         *
+         * <p>旧版 {\code MachineRecipe#tooltipList} 的内容与展示规则原样保留，但旧版**没有 JSON 读入**
+         * （{\code RecipeLoader} 构造时传的是 CT primer 攒下的列表，入口只有
+         * {\code RecipePrimer.addRecipeTooltip}）；1.20.1 没有 CraftTweaker，所以入口改为本字段
+         * （「CT 入口 → JSON 等价」移植，同 failure-action 的先例）。展示规则（翻译键则本地化、
+         * 否则原文）在客户端 {\code MachineRecipeText} 应用。
+         */
+        private static List<String> parseTooltips(JsonObject json, ResourceLocation id) {
+            if (!json.has("tooltips")) {
+                return List.of();
+            }
+            JsonElement element = json.get("tooltips");
+            if (element.isJsonPrimitive()) {
+                return List.of(element.getAsString());
+            }
+            if (!element.isJsonArray()) {
+                throw new JsonParseException("'tooltips' of " + id + " must be a string or an array of strings");
+            }
+            JsonArray array = element.getAsJsonArray();
+            List<String> tooltips = new ArrayList<>(array.size());
+            for (JsonElement entry : array) {
+                if (!entry.isJsonPrimitive() || !entry.getAsJsonPrimitive().isString()) {
+                    throw new JsonParseException("Every entry of 'tooltips' in " + id
+                            + " must be a string (a translation key or literal text)");
+                }
+                tooltips.add(entry.getAsString());
+            }
+            return List.copyOf(tooltips);
         }
 
         /**
@@ -126,8 +212,15 @@ public final class ModRecipeSerializers {
             for (int i = 0; i < count; i++) {
                 requirements.add(MachineRequirementParser.read(buf));
             }
+            // 0.98.0：tooltips 随网络同步——客户端 JEI 的 tooltip 也要显示（vanilla 配方同步走
+            // fromNetwork，见 ClientboundUpdateRecipesPacket 的反编译确认）。
+            int tooltipCount = buf.readVarInt();
+            List<String> tooltips = new ArrayList<>(tooltipCount);
+            for (int i = 0; i < tooltipCount; i++) {
+                tooltips.add(buf.readUtf());
+            }
             return new MachineRecipe(id, machines, registryName, recipeTime, requirements, maxParallelism,
-                    cancelIfPerTickFails, commands, priority, sortId);
+                    cancelIfPerTickFails, commands, priority, sortId, tooltips);
         }
 
         @Override
@@ -146,6 +239,10 @@ public final class ModRecipeSerializers {
             buf.writeVarInt(recipe.requirements().size());
             for (MachineRequirement requirement : recipe.requirements()) {
                 MachineRequirementParser.write(buf, requirement);
+            }
+            buf.writeVarInt(recipe.tooltips().size());
+            for (String tooltip : recipe.tooltips()) {
+                buf.writeUtf(tooltip);
             }
         }
     }

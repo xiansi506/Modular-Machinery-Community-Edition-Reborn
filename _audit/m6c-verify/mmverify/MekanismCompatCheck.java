@@ -479,20 +479,18 @@ final class MekanismCompatCheck {
                     anchor.contains("\"gas.amount\"") && anchor.contains("\"gas.capacity\""));
 
             // 互斥：一个流体仓里只能有一种东西。
-            // 「灌气体时清流体」不够——流体管道照样能往同一个罐里灌液体，于是两者同时存在。
-            // 所以流体那一侧必须在有气体时装成空的；而「清」必须是真的清，否则气体抽空后旧液体又冒出来。
+            // 0.107.2：互斥传输必须拒绝另一种介质，不能为接收气体清掉已有流体。
             String hatch = withoutComments(Files.readString(hatchEntity));
             report("the fluid tank pretends to be empty while gas occupies the hatch (otherwise a fluid pipe "
                     + "could put liquid into a hatch that already holds gas)",
                     hatch.contains("class FluidTankWithGasPriority")
                             && hatch.contains("return net.minecraftforge.fluids.FluidStack.EMPTY;")
                             && hatch.contains("return gasBlocksFluid() ? 0 : super.fill("));
-            report("...and clearing the fluid for gas is a REAL clear, reachable without the blocking logic "
-                    + "(otherwise the old liquid reappears once the gas is drained)",
-                    hatch.contains("void clearForGas()") && hatch.contains("int realFluidAmount()"));
+            report("...and the hatch exposes an unfiltered snapshot without a destructive gas-fill clear hook",
+                    hatch.contains("realFluidStack()") && hatch.contains("int realFluidAmount()")
+                            && !hatch.contains("void clearForGas()"));
             report("...and the gas side asks realFluidAmount() rather than getFluidAmount() when deciding "
-                    + "whether to clear (the latter is answered 0 while gas is present, so it would always "
-                    + "decide 'nothing to clear')",
+                    + "whether to reject the transfer instead of clearing existing fluid",
                     withoutComments(Files.readString(Path.of("C:/mmwork/modular-machinery-reborn/src/main/java/"
                             + "com/reborn/modularmachinery/compat/mekanism/HybridGasTank.java")))
                             .contains("hatch.realFluidAmount()"));

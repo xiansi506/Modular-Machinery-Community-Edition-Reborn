@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import net.minecraft.nbt.ByteTag;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
@@ -144,6 +145,55 @@ public final class NbtPredicate {
      */
     public CompoundTag toTag() {
         return (CompoundTag) this.root.toTag();
+    }
+
+    /**
+     * F2（0.86.0，{@code /mm-hand}）：把物品的**实际** NBT 反写成本方言的模板 JSON，值全部是字符串
+     * （解析端只读字符串），数字带类型后缀（{@code 1b}/{@code 1s}/{@code 1}/{@code 1l}/{@code 1.0f}/{@code 1.0d}），
+     * 这样打印出来的整块可以粘回配方的 {@code nbt} 里去匹配同一个物品。
+     *
+     * <p><b>回环的边界</b>（粘回去之前要自己看一眼的）：字符串在匹配端是**正则**，带正则元字符
+     * （{@code . ( [ } 等）的字面量粘回去不一定还是字面量；{@code NaN}/{@code Infinity} 的浮点、
+     * int/long 数组这几种方言不认识，按原样文本写出（写出后解析端会当成字符串正则，匹配不上原值）。
+     * 这是展示用途的最好努力，不是序列化承诺——与旧版 {@code NBTJsonSerializer} 的地位相同。
+     */
+    public static JsonElement tagToTemplateJson(Tag tag) {
+        if (tag instanceof StringTag string) {
+            return new JsonPrimitive(string.getAsString());
+        }
+        if (tag instanceof ByteTag byteTag) {
+            return new JsonPrimitive(byteTag.getAsByte() + "b");
+        }
+        if (tag instanceof ShortTag shortTag) {
+            return new JsonPrimitive(shortTag.getAsShort() + "s");
+        }
+        if (tag instanceof IntTag intTag) {
+            return new JsonPrimitive(String.valueOf(intTag.getAsInt()));
+        }
+        if (tag instanceof LongTag longTag) {
+            return new JsonPrimitive(longTag.getAsLong() + "l");
+        }
+        if (tag instanceof FloatTag floatTag) {
+            return new JsonPrimitive(floatTag.getAsFloat() + "f");
+        }
+        if (tag instanceof DoubleTag doubleTag) {
+            return new JsonPrimitive(doubleTag.getAsDouble() + "d");
+        }
+        if (tag instanceof ListTag list) {
+            JsonArray array = new JsonArray(list.size());
+            for (Tag element : list) {
+                array.add(tagToTemplateJson(element));
+            }
+            return array;
+        }
+        if (tag instanceof CompoundTag compound) {
+            JsonObject object = new JsonObject();
+            for (String key : compound.getAllKeys()) {
+                object.add(key, tagToTemplateJson(compound.get(key)));
+            }
+            return object;
+        }
+        return new JsonPrimitive(String.valueOf(tag));
     }
 
     // ------------------------------------------------------------------ nodes

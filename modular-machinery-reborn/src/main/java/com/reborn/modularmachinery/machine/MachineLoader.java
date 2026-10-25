@@ -79,6 +79,70 @@ public final class MachineLoader extends SimpleJsonResourceReloadListener {
         super(GSON, DIRECTORY);
     }
 
+    /**
+     * F4（0.86.0，{@code /mm-syntax}）的一次重扫结果：**磁盘当前状态**的语法检查，不经过、也不改动
+     * 已加载的注册表。{@code failures} 的每条是「文件: 消息」；{@code parsedIds} 是解析成功的机器 id
+     * （不是文件名——同一台机器可以被数据包与配置目录各写一份，后者胜出）。
+     */
+    public record SyntaxReport(int variableSets, List<String> parsedIds, List<String> failures) {
+    }
+
+    /**
+     * F4：用与 {@link #apply} 完全相同的合并顺序与解析规则重读一遍**当前磁盘上的**机器文件——
+     * 数据包的 {@code data/<ns>/machinery/} 加配置目录的 {@code config/<modid>/machinery/}（同名时配置目录
+     * 胜）。给 {@code /mm-syntax} 用：作者改完 JSON 不必整场 {@code /reload} 就能知道语法对不对；
+     * {@code /reload} 之前，已加载注册表保持原样。
+     *
+     * <p>与 {@code apply} 的唯一差别是失败的去向：那里记日志继续加载，这里收进 {@link SyntaxReport}
+     * 交给命令逐条打印。变量集失败同样计入（旧版 {@code mm-syntax} 的「Testing Machines」两边都报）。
+     * KubeJS 脚本层**不**在重扫范围里——脚本只在真实 reload 中暂存，命令期没有它的入口。
+     */
+    public static SyntaxReport syntaxRescan(ResourceManager resourceManager) {
+        Map<ResourceLocation, JsonElement> all = new LinkedHashMap<>();
+        List<String> failures = new ArrayList<>();
+        for (Map.Entry<ResourceLocation, net.minecraft.server.packs.resources.Resource> entry
+                : resourceManager.listResources(DIRECTORY, id -> id.getPath().endsWith(".json")).entrySet()) {
+            ResourceLocation file = entry.getKey();
+            String path = file.getPath();
+            // SimpleJsonResourceReloadListener 的键形：剥掉目录前缀与 .json 后缀，配置目录那边同形。
+            ResourceLocation id = new ResourceLocation(file.getNamespace(),
+                    path.substring(DIRECTORY.length() + 1, path.length() - ".json".length()));
+            try (java.io.Reader reader = new java.io.InputStreamReader(entry.getValue().open(),
+                    java.nio.charset.StandardCharsets.UTF_8)) {
+                all.put(id, GSON.fromJson(reader, JsonElement.class));
+            } catch (Exception exception) {
+                failures.add(id + ": 文件读不出来或不是 JSON: " + exception);
+            }
+        }
+        all.putAll(MachineDirectory.readAll());
+
+        Map<String, List<String>> variables = new HashMap<>();
+        for (Map.Entry<ResourceLocation, JsonElement> entry : all.entrySet()) {
+            if (!isVariableFile(entry.getKey())) {
+                continue;
+            }
+            try {
+                readVariables(entry.getKey(), entry.getValue(), variables);
+            } catch (Exception exception) {
+                failures.add(entry.getKey() + " (变量集): " + exception.getMessage());
+            }
+        }
+
+        List<String> parsedIds = new ArrayList<>();
+        for (Map.Entry<ResourceLocation, JsonElement> entry : all.entrySet()) {
+            if (isVariableFile(entry.getKey())) {
+                continue;
+            }
+            try {
+                MachineDefinition definition = readMachine(entry.getKey(), entry.getValue(), variables);
+                parsedIds.add(definition.id().toString());
+            } catch (Exception exception) {
+                failures.add(entry.getKey() + ": " + exception.getMessage());
+            }
+        }
+        return new SyntaxReport(variables.size(), List.copyOf(parsedIds), List.copyOf(failures));
+    }
+
     @Override
     protected void apply(Map<ResourceLocation, JsonElement> files, ResourceManager resourceManager,
                          ProfilerFiller profiler) {
@@ -236,18 +300,30 @@ public final class MachineLoader extends SimpleJsonResourceReloadListener {
     private static void readVariables(ResourceLocation id, JsonElement element, Map<String, List<String>> out) {
         com.google.gson.JsonObject root = MachineSchema.asObject(element, id);
         for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
-            com.google.gson.JsonArray array = MachineSchema.asArray(entry.getValue(),
-                    id + " variable '" + entry.getKey() + "'");
-            List<String> values = new ArrayList<>(array.size());
-            for (JsonElement value : array) {
-                if (!value.isJsonPrimitive()) {
-                    throw new com.google.gson.JsonParseException("Variable '" + entry.getKey()
-                            + "' must contain only block descriptor strings");
-                }
-                values.add(value.getAsString());
-            }
-            out.put(entry.getKey(), List.copyOf(values));
+            out.put(entry.getKey(), readVariableValues(id, entry.getKey(), entry.getValue()));
         }
+    }
+
+    /**
+     * X5（0.85.1）：一个变量的值是「描述符数组」**或单个字符串**——旧版
+     * {@code BlockInformationVariable.Deserializer} 两种都收，单字符串当作单元素列表；数组元素必须是
+     * 字符串，数字或布尔不行（旧版同样拒绝）。其余形态（对象、嵌套数组、裸数字）在 {@code asArray}
+     * 处报错，对应旧版的「既不是数组也不是单个字符串」。
+     */
+    private static List<String> readVariableValues(ResourceLocation id, String key, JsonElement value) {
+        if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+            return List.of(value.getAsString());
+        }
+        com.google.gson.JsonArray array = MachineSchema.asArray(value, id + " variable '" + key + "'");
+        List<String> values = new ArrayList<>(array.size());
+        for (JsonElement item : array) {
+            if (!item.isJsonPrimitive() || !item.getAsJsonPrimitive().isString()) {
+                throw new com.google.gson.JsonParseException("Variable '" + key
+                        + "' must contain only block descriptor strings");
+            }
+            values.add(item.getAsString());
+        }
+        return List.copyOf(values);
     }
 
     /**

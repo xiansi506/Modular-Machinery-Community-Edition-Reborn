@@ -3,13 +3,18 @@ package com.reborn.modularmachinery.machine;
 import com.google.gson.JsonParseException;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * One accepted block of a machine structure.
@@ -35,10 +40,11 @@ public final class BlockMatcher {
     private final Block block;
     private final Map<Property<?>, Comparable<?>> required;
     private final String descriptor;
+    private volatile List<BlockMatcher> counterClockwiseRotation;
 
     private BlockMatcher(Block block, Map<Property<?>, Comparable<?>> required, String descriptor) {
         this.block = block;
-        this.required = Collections.unmodifiableMap(required);
+        this.required = Collections.unmodifiableMap(new LinkedHashMap<>(required));
         this.descriptor = descriptor;
     }
 
@@ -117,6 +123,71 @@ public final class BlockMatcher {
     }
 
     /**
+     * Rotates the accepted states using the block's own rule, as 1.12.2's state descriptors did.
+     * Unspecified properties remain unconstrained. A custom block can couple properties during rotation;
+     * when that cannot be expressed by one partial descriptor, return exact alternatives instead.
+     */
+    public List<BlockMatcher> rotateYCounterClockwise() {
+        if (this.required.isEmpty()) {
+            return List.of(this);
+        }
+        List<BlockMatcher> cached = this.counterClockwiseRotation;
+        if (cached != null) {
+            return cached;
+        }
+        Map<Block, Set<BlockState>> rotatedStates = new LinkedHashMap<>();
+        for (BlockState state : this.block.getStateDefinition().getPossibleStates()) {
+            if (matches(state)) {
+                BlockState rotated = state.rotate(Rotation.COUNTERCLOCKWISE_90);
+                rotatedStates.computeIfAbsent(rotated.getBlock(), key -> new LinkedHashSet<>()).add(rotated);
+            }
+        }
+        List<BlockMatcher> result = new ArrayList<>();
+        for (Map.Entry<Block, Set<BlockState>> entry : rotatedStates.entrySet()) {
+            Set<BlockState> accepted = entry.getValue();
+            Map<Property<?>, Comparable<?>> common = new LinkedHashMap<>(accepted.iterator().next().getValues());
+            for (BlockState state : accepted) {
+                common.entrySet().removeIf(value -> !value.getValue().equals(state.getValues().get(value.getKey())));
+            }
+            BlockMatcher compact = fromProperties(entry.getKey(), common);
+            long covered = entry.getKey().getStateDefinition().getPossibleStates().stream()
+                    .filter(compact::matches).count();
+            if (covered == accepted.size()) {
+                result.add(compact);
+            } else {
+                for (BlockState state : accepted) {
+                    result.add(fromProperties(state.getBlock(), state.getValues()));
+                }
+            }
+        }
+        this.counterClockwiseRotation = List.copyOf(result);
+        return this.counterClockwiseRotation;
+    }
+
+    private static BlockMatcher fromProperties(Block block, Map<Property<?>, Comparable<?>> properties) {
+        ResourceLocation id = ForgeRegistries.BLOCKS.getKey(block);
+        if (id == null) {
+            throw new IllegalStateException("Cannot rotate an unregistered structure block: " + block);
+        }
+        StringBuilder descriptor = new StringBuilder(id.toString());
+        if (!properties.isEmpty()) {
+            descriptor.append('[');
+            for (Map.Entry<Property<?>, Comparable<?>> entry : properties.entrySet()) {
+                if (descriptor.charAt(descriptor.length() - 1) != '[') descriptor.append(',');
+                descriptor.append(entry.getKey().getName()).append('=')
+                        .append(propertyValueName(entry.getKey(), entry.getValue()));
+            }
+            descriptor.append(']');
+        }
+        return new BlockMatcher(block, properties, descriptor.toString());
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static String propertyValueName(Property property, Comparable value) {
+        return property.getName(value);
+    }
+
+    /**
      * The state a structure preview should draw for this matcher: the block's default state with every required
      * property applied.
      *
@@ -139,7 +210,7 @@ public final class BlockMatcher {
         return state.hasProperty(property) ? state.setValue((Property) property, (Comparable) value) : state;
     }
 
-    /** The descriptor exactly as it appeared in the machine definition. */
+    /** Original definition text, or a parseable descriptor for the rotated constraints. */
     public String descriptor() {
         return this.descriptor;
     }

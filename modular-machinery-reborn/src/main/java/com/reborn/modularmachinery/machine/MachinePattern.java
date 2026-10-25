@@ -169,7 +169,8 @@ public final class MachinePattern {
         for (Map.Entry<BlockPos, List<BlockMatcher>> entry : this.positions.entrySet()) {
             BlockPos pos = entry.getKey();
             BlockPos rotated = new BlockPos(pos.getZ(), pos.getY(), -pos.getX());
-            builder.add(rotated, entry.getValue());
+            builder.add(rotated, entry.getValue().stream()
+                    .flatMap(matcher -> matcher.rotateYCounterClockwise().stream()).toList());
             String tag = this.tags.get(pos);
             if (tag != null) {
                 builder.tag(rotated, tag);

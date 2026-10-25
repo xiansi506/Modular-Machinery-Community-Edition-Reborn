@@ -14,7 +14,7 @@
 
 
 
-所有已发布 JAR。**旧版本归档永不覆盖、永不删除。**
+本索引列出有归档目录的版本；**旧版本归档永不覆盖、永不删除。** 是否存在对应的 GitHub Release，以备注为准。
 
 
 
@@ -513,7 +513,10 @@
 | `v0.30.0` | `modular_machinery_reborn-0.30.0.jar` | D9C72C6E329544D0B407A52B4163EADD9BBF9DE35F80537AB23B98A25B10DE6B | **首个公开版本**；功能上等同 0.29.0；**仅文档引导分发**；⚠️ **已被 0.30.1 取代（许可证误标）**；开发中 |
 
 | `v0.30.1` | `modular_machinery_reborn-0.30.1.jar` | 724D79FB2AD4A024B33C89D109EE5CED06191932ADFCDABEFDB035FEF76830F7 | 修正 0.30.0 的许可证误标（MIT→GPL-3.0）与署名；功能等同 0.30.0；⚠️ **已被 0.31.0 取代**；开发中 |
-| `v0.31.0` | `modular_machinery_reborn-0.31.0.jar` | C61825E7DEBD2CBCCA33C4F9C5EF59EFF69D3AA7C25F600FDBADB51A61943C21 | **当前公开版本**；KubeJS 可写完整机器定义（11 个字段）；修复社区反馈的「方块挖得极慢且什么都不掉」（4 处静默缺陷：标签命名空间、缺战利品表、变体分池、生成包声明与资源 id 形状）；⚠️ 开发中 |
+| `v0.31.0` | `modular_machinery_reborn-0.31.0.jar` | C61825E7DEBD2CBCCA33C4F9C5EF59EFF69D3AA7C25F600FDBADB51A61943C21 | **历史公开版本记录**（0.107.x 尚未建 GitHub Release）；KubeJS 可写完整机器定义（11 个字段）；修复社区反馈的「方块挖得极慢且什么都不掉」（4 处静默缺陷：标签命名空间、缺战利品表、变体分池、生成包声明与资源 id 形状）；⚠️ 开发中 |
+| `v0.107.1` | `modular-machinery-reborn-0.107.1.jar` | `82BBFAB80682C03067DFEF7B83D5C6935A38D136A2D7C1436E1D1D4C091D133D` | 对照 1.12.2 审查修复 27 项；完整离线套件 2669 PASS；未实机、未部署；[记录](../../_audit/fix-2026-10-25/修复记录.md) |
+| `v0.107.2` | `modular-machinery-reborn-0.107.2.jar` | `4881CD92D7999AF542F27B3A2B58B56681C963E0A3687E9071930EBA3A5A44AF` | 气体注入不再清空已有流体；结构旋转同步方块状态；专项 22＋29，完整套件 2669 PASS；未实机、未部署；[记录](../../_audit/fix-0.107.2/修复记录.md) |
+| `v0.107.3` | `modular-machinery-reborn-0.107.3.jar` | `F814CD1D966B5E77C572CE0295EFAA66D5A1AB0973A09516A9E2A8664AE52603` | 工厂并行分配、催化剂支付绑定、单机宿主同步、访客退出清理；专项 18＋29＋22，完整套件 2669 PASS；**当前源码版本**；未实机、未部署；[记录](../../_audit/fix-0.107.3/修复记录.md) |
 
 
 
@@ -522,7 +525,7 @@
 
 
 
-> 每个版本目录应包含：版本 JAR、该版本 README.md、SHA256.txt。
+> 每个版本目录在本机应包含：版本 JAR、该版本 README.md、SHA256.txt。提交到 Git 的只有 README.md 与 SHA256.txt，JAR 走 GitHub Releases。
 
 
 

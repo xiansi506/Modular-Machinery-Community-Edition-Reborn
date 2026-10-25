@@ -38,6 +38,14 @@ import dev.latvian.mods.kubejs.script.BindingsEvent;
  */
 public final class ModularMachineryKubeJSPlugin extends KubeJSPlugin {
 
+    /**
+     * C3（0.90.0）：Forge 总线桥在这里挂——插件只在 KubeJS 在场时被构造，桥也就只存在于此。
+     * 服务端事件；无脚本监听器时分发只是一次查表。
+     */
+    public ModularMachineryKubeJSPlugin() {
+        LifecycleEventsJS.registerBridge();
+    }
+
     @Override
     public void registerRecipeSchemas(RegisterRecipeSchemasEvent event) {
         event.namespace(ModularMachineryReborn.MOD_ID).register("machine", MachineRecipeSchema.SCHEMA);
@@ -48,6 +56,7 @@ public final class ModularMachineryKubeJSPlugin extends KubeJSPlugin {
     @Override
     public void registerEvents() {
         MachineEvents.register();
+        LifecycleEventsJS.register();
     }
 
     /**
@@ -69,6 +78,8 @@ public final class ModularMachineryKubeJSPlugin extends KubeJSPlugin {
     @Override
     public void registerBindings(BindingsEvent event) {
         event.add(MachineEvents.GROUP_NAME, new EventGroupWrapper(event.getType(), MachineEvents.group()));
+        // C3（0.90.0）：生命周期事件组。同一条规矩：绑定必须是 wrapper，不是裸 group（见上面 0.28.0 的教训）。
+        event.add(LifecycleEventsJS.GROUP_NAME, new EventGroupWrapper(event.getType(), LifecycleEventsJS.group()));
     }
 
     /**

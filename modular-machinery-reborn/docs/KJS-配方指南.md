@@ -1,474 +1,460 @@
-# 用 KubeJS 编写机器配方与机器定义
+# 配方指南：JSON、KubeJS 与高级加工
 
-> **状态**
->
-> - **配方部分：已在游戏里确认可用**（0.27.1；2026-10-01 实测：日志出现 `KubeJS schema registered`，配方在游戏里正常显示）。
-> - **机器定义部分（0.28.0 起）：已构建，但 §七 的实机步骤尚未执行**，因此按本项目的规矩标为**未实机验证**。脚本里的机器定义在离机复现器里能证到的是：它走的是**数据包那条解析路径**（同一份 `MachineSchema`，报错逐字相同）、以及合并/优先级/删脚本的行为；**证不到**的是「KubeJS 真的把这段脚本跑起来了、机器真的能成型」。
->
-> 本文面向**整合包作者**。
+适用于 **Reborn 0.107.3 / Minecraft 1.20.1 / Forge**，更新于 2026-10-25。保留原文件名，本文同时介绍 JSON 和 KubeJS；先完成 [使用说明](使用说明.md) 的圆石加工机，再添加高级需求。
 
----
+本文从基础配方开始，依次介绍高级需求、修改器、并行、配方适配器与机器事件。示例使用 Reborn 当前的解析规则和 JSON／KubeJS 接口。
 
-## 一、把脚本放在哪里
+**验证口径**：示例按当前实现核对；本轮未在游戏中逐段执行脚本。代码块标作“片段”时，需要放入指定数组／对象，不能单独当完整配方安装。
 
-```
-<实例>/kubejs/server_scripts/<任意名字>.js
-```
+## 一、选一种配方入口
 
-放好后进游戏执行 **`/reload`**（或重启）。KubeJS 会在日志里报告加载了几个脚本、几个错误。
+| 入口 | 位置 | 特点 |
+|---|---|---|
+| JSON 数据包 | `data/<namespace>/recipes/<path>.json` | 不需要脚本模组，必须有根 `type` |
+| KubeJS raw JSON | `kubejs/server_scripts/*.js` 的 `ServerEvents.recipes` | `event.custom(...)` 接受相同 JSON |
+| KubeJS typed 链 | 同上 | 使用本模组 `.machine(id)` 和需求方法 |
 
-**确认接线正常**：日志里应有这一行
+修改后 `/reload`，先查 KubeJS 错误和 `logs/latest.log`，再看 JEI 与控制器。每份配方用唯一资源 ID。以下三种示例内容等价，**只选一种**，不要重复安装。
 
-```
-[modular_machinery_reborn] KubeJS schema registered: event.recipes.modular_machinery_reborn.machine
-```
+### 完整 JSON
 
-没有这行就说明 KubeJS 没发现本模组的插件（0.27.0 及更早的版本有这个缺陷，0.27.1 已修）。
-
-## 二、最小可用配方
-
-```js
-ServerEvents.recipes(event => {
-  event.recipes.modular_machinery_reborn.machine({
-    machine: 'alloy_furnace',        // 必填：机器注册名
-    registryName: 'my_recipe',       // 可选：配方 id（缺省用脚本给的 id）
-    recipeTime: 100,                 // 可选：耗时 tick，默认 100，必须 >= 1
-    requirements: [                  // 必填、非空数组
-      { type: 'modular_machinery_reborn:energy', 'io-type': 'input', energyPerTick: 40 },
-      { type: 'modular_machinery_reborn:item',   'io-type': 'input',  item: 'minecraft:copper_ingot', amount: 2 },
-      { type: 'modular_machinery_reborn:item',   'io-type': 'output', item: 'minecraft:iron_ingot', amount: 1, chance: 0.75 },
-      { type: 'modular_machinery_reborn:fluid',  'io-type': 'input',  fluid: 'minecraft:water', amount: 100 }
-    ]
-  })
-})
-```
-
-**根级 `type` 由 KubeJS 自动写入**。手写 JSON 文件则**必须自带** `"type": "modular_machinery_reborn:machine"`，否则 `RecipeManager` 会在本模组看到它之前就把文件丢掉。
-
-## 三、两个省事的写法（已核对代码）
-
-**① 命名空间可以省略。** 解析时**冒号前的内容被整个丢弃、只取冒号后**，所以下面三种完全等价：
-
-```
-modular_machinery_reborn:item     modularmachinery:item     item
-```
-
-这意味着**旧版（1.12.2 MMCE / ModularMachinery）的配方文件可以原样加载**，不必改命名空间。
-
-**② `io-type` 决定输入还是输出**（`input` / `output`）。
-
-## 四、字段速查
-
-| 用途 | 字段 |
-|---|---|
-| 指定机器 | `machine`（**必填**；单字符串，或非空字符串数组——数组表示一份配方归多台机器） |
-| 配方 id | `registryName`（可选） |
-| 耗时 | `recipeTime`（可选，默认 100，**≥1**） |
-| 逐 tick 失败是否放弃 | `cancelIfPerTickFails`（可选布尔，默认 `false`；true 时失败即中止本次合成，已付的一次性输入不返还） |
-| 选取优先级 | `priority`（可选整数，默认 `0`；**越小越先被尝试**，同一层再按输入需求的排序权重） |
-| 命令 | `startCommands` / `processingCommands` / `finishCommands`（可选数组；每项是命令字符串或 `{ command, interval }`） |
-| 需求列表 | `requirements`（**必填非空**） |
-| 物品 | `item`（支持 `minecraft:xxx`、`#forge:...` 标签、旧版 `ore:ingotIron`）+ `amount`；输入/输出都可用 `chance` |
-| 流体 | `fluid` + `amount`；可按 tick 消耗用 `perTick` |
-| 能源 | `energyPerTick` |
-| 输入/输出 | `io-type` |
-
-**输入也能写 `chance`（0.74.0 起）**：命中才扣料，未命中不扣料、也不让配方失败，配方照常开工与运行。一次掷决定整笔并行消耗，不是每份独立掷。`item`、`fluid`、`gas` 输入都适用；`chance: 0` 仍可开工，但永不消耗。
-
-**`cancelIfPerTickFails`（0.75.0 起）**：写在配方根对象；`true` 时某次逐 tick 需求结算失败会直接放弃这次合成，普通控制器清空进度，工厂线程清空槽位。开工时已付的一次性输入不返还。缺省 `false`，此时仍按机器的 `failure-action` 处理（默认冻结进度）。它只处理逐 tick 需求失败，产物放不下和结构损坏不走这条。
-
-**配方级 `priority`（0.78.0 起）**：同一台机器装了多份配方时，`priority` **小的层先被尝试**；同一层内再按旧版的排序权重决定先后——能源输入每个扣 `50_000_000`、物品输入每个扣 `50_000`、流体/气体输入每个扣 `100`，从全局构造序号 `sortId` 里减掉，**输出需求不参与**。因此输入越「重」的配方越靠前。控制器选配方、工厂候选、`/mm-diagnose` 的「第一条为什么开不了工」、JEI 列表都走这一份顺序。缺省 `0`，允许负数；不写这个字段的旧配方行为与以前一致（都在 0 层，再按权重）。
-
-```js
-{ type: 'modular_machinery_reborn:item', 'io-type': 'input', item: 'minecraft:coal', amount: 1, chance: 0.25 }
-```
-
-**一份配方可以归多台机器，还能带命令（0.76.0 起）**：`machine` 写成非空字符串数组时，数组里每台机器都会在控制器配方列表、工厂候选、`/mm-diagnose` 与 JEI 的每机器类别里看到这份配方。`startCommands` / `processingCommands` / `finishCommands` 是可选数组，每项是命令字符串，或 `{ "command": "say hi", "interval": 20 }`；不写 `interval` 表示每次触发都跑，写了 `N` 则只在 `tick % N == 0` 时跑（`0` 本版按每次都跑处理，旧版会除零崩溃）。命令只在服务端执行，权限等级 2，位置是控制器所在格；`start` / `finish` 拿到 tick 0，`processing` 拿到本次成功结算前的进度（第一次是 0）。命令的返回值不会改变合成状态。
+文件 `data/tutorial/recipes/stone.json`，配方 ID 为 `tutorial:stone`：
 
 ```json
 {
-  "machine": ["alloy_furnace", "other:press"],
+  "type": "modular_machinery_reborn:machine",
+  "machine": "tutorial:stone_processor",
+  "registryName": "stone",
   "recipeTime": 100,
-  "startCommands": ["say start"],
-  "processingCommands": [{ "command": "say tick", "interval": 20 }],
-  "finishCommands": ["say done"],
-  "requirements": [ /* … */ ]
+  "max-parallelism": 64,
+  "requirements": [
+    { "type": "item", "io-type": "input", "item": "minecraft:cobblestone", "amount": 1 },
+    { "type": "energy", "io-type": "input", "energyPerTick": 20 },
+    { "type": "item", "io-type": "output", "item": "minecraft:stone", "amount": 1 }
+  ]
 }
 ```
 
-**配方只在对应机器成型时生效**——机器没搭好就不会跑。
+### KubeJS raw 写法
 
-## 五、可用的需求类型
+```js
+ServerEvents.recipes(event => {
+  event.custom({
+    type: 'modular_machinery_reborn:machine',
+    machine: 'tutorial:stone_processor',
+    registryName: 'stone',
+    recipeTime: 100,
+    'max-parallelism': 64,
+    requirements: [
+      { type: 'item', 'io-type': 'input', item: 'minecraft:cobblestone', amount: 1 },
+      { type: 'energy', 'io-type': 'input', energyPerTick: 20 },
+      { type: 'item', 'io-type': 'output', item: 'minecraft:stone', amount: 1 }
+    ]
+  }).id('tutorial:stone')
+})
+```
 
-- `item` / `fluid` / `energy`（三类基础）
-- `interface_number_input`（智能数据接口数值输入，0.24.0 起；只有输入方向）
-- `ingredient_array_input`（**组内只消耗其中一个**，0.26.0 起）
-- `gas` / `gas_pertick`（0.34.0 起；**装 Mekanism 时**才存在，不装则加载即报错，与旧版 `requiresModid()` 一致）
-- `catalyst`（0.65.0 起；一组可选输入 + 修改器/效果文字，见下一节）
+### KubeJS typed 写法
 
-**逐 tick 的流体**不是单独的类型：在 `fluid` 需求上加 **`"perTick": true`** 即可（开工时一次性扣 vs 每 tick 扣，由这个布尔决定）。
+```js
+ServerEvents.recipes(event => {
+  event.recipes.modular_machinery_reborn.machine('tutorial:stone_processor')
+    .registryName('stone')
+    .time(100)
+    .parallelism(64)
+    .itemInput('minecraft:cobblestone', 1)
+    .energyInput(20)
+    .itemOutput('minecraft:stone', 1)
+    .id('tutorial:stone')
+})
+```
 
-**仍未支持**（写了会**加载即报错**，不会静默跳过）：`item_durability`、`fluid_pertick`。两者的旧版 JSON 入口 `createRequirement` 都返回 `null`（只能 CraftTweaker 构造），**不是本版缺口**；逐 tick 流体用上面的 `perTick` 写。原因见 [已知限制.md](已知限制.md)。
+typed API 会生成根 `type`；`event.custom` 和手写 JSON 需要自己写。`.id(...)` 设置实际配方资源 ID，`.registryName(...)` 设置对象的名称字段；不要把机器的 `registryname` 写成配方字段。
 
-### catalyst 的 JSON 形状（0.65.0 起）
+## 二、根字段和结算时机
+
+| 字段 | 含义 |
+|---|---|
+| `type` | 固定为 `modular_machinery_reborn:machine` |
+| `machine` | 完整机器 ID，或非空 ID 数组；数组表示多台机器共享一份配方 |
+| `registryName` | 可选名称，默认使用配方资源路径 |
+| `recipeTime` | 基础 tick 数，默认 100，至少 1 |
+| `requirements` | 普通配方必须是非空需求数组；适配器声明例外 |
+| `max-parallelism` | 本配方并行上限；正整数为明确上限，0／省略交由机器上限决定；只跑单份写 1 |
+| `priority` | 整数，默认 0；越小越先尝试，同层再按输入权重排序 |
+| `cancelIfPerTickFails` | 默认 false；true 时逐 tick 结算失败放弃本次合成，已付一次性输入不返还 |
+| `tooltips` | 作者说明字符串数组，供配方显示 |
+| `startCommands` / `processingCommands` / `finishCommands` | 三阶段命令数组，详见第八节 |
+| `adapter` / `modifiers` | 配方导入声明专用，详见第七节；不是普通配方的通用根级加速入口 |
+
+**开工**：预留并支付一次性输入、选中的催化剂，冻结本次有效修改器。**运行**：逐 tick 结算能源以及标为逐 tick 的流体／气体。**完工**：结算一次性输出。结构、端口、输出空间和概率共同影响是否推进。
+
+默认逐 tick 缺料／缺能按机器 `failure-action` 处理；设置 `cancelIfPerTickFails: true` 会丢弃这次合成。这个字段不把“输出放不下”或“结构损坏”统称成逐 tick 失败。已经支付输入的合成等待输出时，不应靠反复启动来重复扣料。
+
+机器 `failure-action` 可写 `still`（保留进度）、`reset`（进度归零）、`decrease`（逐次减 1）。它控制失败时进度，不是“退还输入”选项；配方取消本次合成后也不会重新发还原料。
+
+根配方 `type` 必须是当前序列化器 ID。需求内部的 `type` 可以简写为 `item`，内置种类也兼容旧 `modularmachinery:item` 等命名空间，但**这不意味着旧版整个 JSON 或 ZenScript 可以原样加载**。旧物品 ID、元数据、气体名和脚本 API 仍需迁移。
+
+## 三、基础需求
+
+每条需求都要有 `type` 和 `io-type`。`input` / `output` 表示方向；`selector-tag` 可限定结构端口；`parallelize-unaffected: true` 表示该需求不随并行倍增。
+
+### 物品与标签
+
+下面是添加到 `requirements` 的片段：
 
 ```json
 {
-  "type": "modular_machinery_reborn:catalyst",
+  "type": "item",
+  "io-type": "input",
+  "item": "#forge:ingots/iron",
+  "amount": 2,
+  "chance": 1.0
+}
+```
+
+`#forge:ingots/iron` 匹配物品标签成员，不是一个具体物品。旧 `ore:ingotIron` 等已知矿辞名会转换成标签，但新内容建议直接使用现代标签；不要依赖所有旧矿辞都有等价映射。输出建议写具体物品 ID，避免标签解析出的首个物品随环境变化。
+
+范围产出只用于物品输出，片段如下：
+
+```json
+{
+  "type": "item",
+  "io-type": "output",
+  "item": "minecraft:flint",
+  "minAmount": 1,
+  "maxAmount": 3,
+  "chance": 0.25
+}
+```
+
+数量和概率是不同概念：命中概率后才产生范围数量。输出空间的检查可能比实际掷出的产量保守。输入数量必须固定，不支持用输入的 `minAmount`／`maxAmount` 表示随机扣料。
+
+`chance` 建议明确写 0～1，默认 1。输入未命中时不消耗，但不意味着检查阶段可省略原料；尤其催化剂必须可被选中和预留。结算按需求整体掷点，**不要假定 N 并行会独立掷 N 次**。
+
+### 流体与逐 tick 流体
+
+一次性流体输入片段：
+
+```json
+{
+  "type": "fluid",
+  "io-type": "input",
+  "fluid": "minecraft:water",
+  "amount": 1000,
+  "perTick": false
+}
+```
+
+`amount` 单位为 mB，1000 mB 为一桶。`perTick: true` 表示每个成功结算 tick 消耗／产出该数量，输出方向改成 `output`。本版不使用 `fluid_pertick` 需求类型；连续供液必须考虑“mB/t × 并行”，而非只准备一份总量。
+
+### 能源
+
+```json
+{
+  "type": "energy",
+  "io-type": "input",
+  "energyPerTick": 40
+}
+```
+
+这是 **FE/t**，不是整次耗能。100 tick、40 FE/t、单并行且没有修改器时，总耗能为 4000 FE；输出方向同理需要能源输出仓。声明可使用长整数，但实际 Forge Energy 端口和仓储仍受 int 能力范围限制，不提供 GT／IC2 能源转换。
+
+### Mekanism 气体
+
+安装 Mekanism 后才有 `gas` / `gas_pertick` 需求，片段如下：
+
+```json
+{
+  "type": "gas_pertick",
+  "io-type": "input",
+  "gas": "mekanism:oxygen",
+  "amount": 10
+}
+```
+
+`gas` 是一次性气体需求，`gas_pertick` 是逐 tick。使用完整、已注册的气体 ID；旧 `oxygen` 不直接等于 `mekanism:oxygen`。气体使用流体仓的气体存储侧，正常气液传输互斥：仓内有流体时拒绝气体，排空后才能切换。JEI 气体格目前以文本显示，不能据此判断配方未加载。
+
+## 四、备选原料、催化剂、NBT 与端口选择
+
+### 备选输入组：消费其中一项
+
+```json
+{
+  "type": "ingredient_array_input",
   "io-type": "input",
   "items": [
-    { "item": "minecraft:diamond", "amount": 2 },
-    { "item": "#forge:gems/emerald", "amount": 1 }
+    { "item": "minecraft:coal", "amount": 1 },
+    { "item": "minecraft:charcoal", "amount": 2 }
   ],
-  "amount": 2,
+  "chance": 1.0
+}
+```
+
+这是“1 煤 **或** 2 木炭”，不是两项都扣，也不是把不同备选的不足数量拼起来。条目可以写标签；条目缺少 `amount` 时使用需求级 `amount`，再缺省为 1。`chance` 和 `nbt` 放需求层，不放在每个条目内部。仅支持输入方向。
+
+### 催化剂：可选材料与本次增益
+
+```json
+{
+  "type": "catalyst",
+  "io-type": "input",
+  "items": [ { "item": "minecraft:diamond", "amount": 1 } ],
   "chance": 0.5,
-  "nbt": { "energy": ">=1000" },
   "modifiers": [
     { "target": "duration", "io": "input", "operation": 1, "multiplier": 0.5 }
   ],
-  "tooltip": ["Speeds this recipe up"]
+  "tooltip": ["使用钻石时，加工时间减半；50% 概率消耗钻石"]
 }
 ```
 
-- `items` 用 **`ingredient_array_input` 的同一套条目语法**（`item` 或 `#tag`、条目内 `amount`、需求级 `amount` 兜底）；
-- `io-type` **只能是 `input`**；
-- **催化剂是可选输入**：仓里没有（或不够）时配方照常开工，不消耗、不并入修改器；
-- 一次只消耗**一组**（某个条目够数就扣那个），**不随并行数放大**；
-- `chance` 掷失败时**不消耗**，配方照常开工/运行；
-- 在场时 `modifiers` 与机器结构修改器同一套字段（`target` / `io` / `operation` / `multiplier`），在 `canStart` 之前并入，并**冻结到本次合成结束**（催化剂已在开工时消耗，不能每 tick 重问）；
-- `target: "duration"` 改变的是**时长**。0.77.0 起默认**不**再按比例缩放每 tick 能量（对齐旧版配置的实际默认），总耗能随配方变短/变长；把 `general.enable-duration-multiplier` 设为 `true` 可恢复「总耗能恒定」的补偿；
-- `tooltip` 只用于 JEI 悬停；`nbt` 与物品需求同一个谓词语法。
+材料不足时可以不用这组催化剂开工，也不会获得其增益。一次选择一个备选，催化剂默认不随并行放大；增益在本次合成开始时确定，持续到结束。
 
-## 五之二、typed 配方 API（0.65.0 起）
+**0.107.3 的共享支付规则**：普通输入优先占用资源，选中的催化剂还必须有自己可支付的一份；多条催化剂不能拿同一份材料分别获得增益。相互冲突的可选项按定义顺序分配；此机制不保证寻找收益最高的所有组合。计划选中后库存变化导致缺料，会拒绝开工，不能“省略支付、照拿增益”。
 
-配方事件现在除了塞一个 raw 对象，也可以**链式**写。第一个参数是机器注册名，后续方法各加一项需求：
+概率免消耗仍存在：`chance: 0` 要有可选中的材料，但不扣除；`chance: 1` 必须扣除。不要把“概率未消耗”与“检查时根本没有材料”混为一谈。
 
-```js
-ServerEvents.recipes(event => {
-  event.recipes.modular_machinery_reborn.machine('alloy_furnace')
-    .machines('alloy_furnace', 'other:press')   // 可选：覆盖第一参数，归多台机器
-    .time(200)                                  // 可选，默认 100
-    .priority(1)                                // 可选，默认 0；越小越先尝试
-    .parallelism(64)                            // 可选
-    .cancelIfPerTickFails()                     // 可选：失败即中止（无参置 true）
-    .startCommand('say start')                  // 可选：开工时
-    .processingCommand('say every 20 ticks', 20)// 可选：每 20 个成功 tick
-    .finishCommand('say done')                  // 可选：完工时
-    .registryName('alloy_furnace_demo')         // 可选
-    .itemInput('minecraft:copper_ingot', 2)
-    .itemOutput('minecraft:iron_ingot', 1, 3, 0.75) // 数量 1..3，概率 0.75
-    .fluidInput('minecraft:water', 100)
-    .energyInput(40)                            // 每 tick
-    .catalyst('minecraft:diamond', 1, 0.5)
-    .catalystEntry('#forge:gems/emerald', 1)
-    .catalystModifier('duration', 'input', 1, 0.5)
-    .catalystTooltip('Speeds this recipe up')
-})
+### NBT 条件
+
+物品需求的 `nbt` 为 JSON 对象，输入按条件比较，输出按对象生成实际 NBT。以下为输入需求片段：
+
+```json
+{
+  "type": "item",
+  "io-type": "input",
+  "item": "minecraft:diamond",
+  "amount": 1,
+  "nbt": { "charge": ">=1000" },
+  "nbt-display": { "charge": "1000" }
+}
 ```
+
+这里需要物品确实携带相应自定义 NBT，普通钻石没有。本版 NBT 模板中的数字使用字符串，例如 `"1000"` 为 int、`"1000L"` 为 long；比较还区分实际 NBT 数值类型。`nbt-display` 是显示模板，不替代真实输入条件；单独写而不写 `nbt` 不生效。不要把比较表达式用作期望生成的输出数值。独立 `item_durability` 需求类型没有实现，不能照搬旧脚本耐久 API。
+
+### 只访问指定端口
+
+先在机器 `parts` 中给对应仓口写 `"selector-tag": "feed_a"`，再在需求中写相同字段。该需求只看得到这个结构标签对应的端口。它与 `#forge:ingots/iron` 的物品标签不同。
+
+工厂端口分组还会进一步限制可见范围；一个组需要能独立满足本次需求，不会自动跨所有组拼料。排错时先移除筛选建立最小例子，再逐项加回。
+
+## 五、修改器、并行和机器数值模式
+
+### 修改器的字段
+
+```json
+{
+  "target": "item",
+  "io": "output",
+  "operation": 1,
+  "multiplier": 2.0,
+  "affectChance": false
+}
+```
+
+| 字段 | 取值 |
+|---|---|
+| `target` | `item`、`fluid`、`energy`、`duration`、`*`；气体修改器使用兼容层的通配目标，不另写 `gas` 目标 |
+| `io` | `input`、`output`（也接受 `in`、`out`）；当前 JSON 不接受 `*` |
+| `operation` | 0 为加法，1 为乘法 |
+| `multiplier` | 加数或乘数，由 operation 决定 |
+| `affectChance` | true 改概率，false 改数量／时长等数值 |
+
+同类修改器按 **`(原值 + 加法和) × 乘法积`** 合并，再按对应数量规则取整与限制。`duration × 0.5` 才是时长减半；不要写“乘 2 表示速度翻倍”。默认缩短时间不补偿每 tick 能耗，总耗能随时长变化；配置 `general.enable-duration-multiplier` 会改变能源补偿行为。
+
+修改器来自结构、升级和催化剂。结构修改器是机器根字段，例子为**根对象片段**：
+
+```json
+{
+  "modifiers": [
+    {
+      "x": 0, "y": 1, "z": 0,
+      "elements": "minecraft:gold_block",
+      "description": "上方放金块时，物品输出翻倍",
+      "modifier": { "target": "item", "io": "output", "operation": 1, "multiplier": 2.0 }
+    }
+  ]
+}
+```
+
+普通 `parts` 条件也必须允许这个位置放金块，否则换块可能破坏结构。多方块条件使用 `multi-block-modifiers`。升级定义和物品关联示例另见 [examples/pack-author](../examples/pack-author/README.md)，不要把升级物品仅放进总线就当成已声明升级。
+
+### 并行参数怎样配合
+
+机器根字段 `parallelizable` 控制是否计算并行，`internal-parallelism` 给内置额度，`max-parallelism` 封顶；结构内并行控制器贡献可调额度。配方根 `max-parallelism` 再限制这份配方。需求级 `parallelize-unaffected: true` 可让固定成本不随 N 放大。
+
+例如机器额度 64，配方上限 8，只够 3 份输入且有 3 份输出空间，最终不能超过 3；若每 tick 能量只能供 2 份，还会进一步限制。工厂新开工和重开工也重新计算，不直接继承上一批并行数。
+
+### 数值接口
+
+机器根对象片段：
+
+```json
+{
+  "smart-interfaces": [ { "type": "mode", "default": 0, "priority": 1000 } ]
+}
+```
+
+配方 `requirements` 片段：
+
+```json
+{
+  "type": "interface_number_input",
+  "io-type": "input",
+  "interface": "mode",
+  "value": 2
+}
+```
+
+玩家在控制器数值界面把 `mode` 设置为 2 后匹配。区间可改用 `minValue` / `maxValue`，两端包含。这里的 `type` 是需求种类，接口名称用 `interface`；只支持数值，不支持字符串接口，也没有独立接口方块。
+
+## 六、KubeJS 方法速查和机器字段
+
+以下配方方法接在 `.machine('机器 ID')` 后：
 
 | 方法 | 作用 |
 |---|---|
-| `.time(ticks)` / `.parallelism(max)` / `.registryName(name)` | 配方级字段 |
-| `.priority(int)` | 选取优先级，默认 `0`；越小越先被尝试，同层再按输入权重 |
-| `.machines(id...)` | 覆盖第一参数指定的机器，把配方归给多台（至少一台） |
-| `.cancelIfPerTickFails()` / `.cancelIfPerTickFails(boolean)` | 逐 tick 失败是否放弃本次合成（默认 `false`） |
-| `.startCommand(cmd[, interval])` / `.processingCommand(cmd[, interval])` / `.finishCommand(cmd[, interval])` | 追加一条命令；不写 `interval` 表示每次触发都跑，否则只在 `tick % interval == 0` 时跑 |
-| `.itemInput(id, amount)` / `.itemOutput(id, amount)` | 物品需求；输出另有 `(id, min, max, chance)` |
-| `.fluidInput(id, amount[, perTick])` / `.fluidOutput(...)` | 流体需求 |
-| `.energyInput(perTick)` / `.energyOutput(perTick)` | 能量需求 |
-| `.catalyst(id, amount[, chance])` | 开一组催化剂（再写 `.catalystEntry(...)` 追加备选） |
-| `.catalystModifier(target, io, operation, multiplier)` | 给**最近一组** catalyst 加修改器；`operation` 0 加法 / 1 乘法 |
-| `.catalystTooltip(text)` | 给最近一组 catalyst 加 JEI 效果行 |
-| `.requirement(jsonObject)` | 逃生口：直接塞一份需求 JSON（气体等尚未 typed 化的类型走这里） |
+| `.time(ticks)` / `.parallelism(max)` / `.priority(n)` | 时长、并行上限、优先级 |
+| `.registryName(name)` / `.machines(id...)` | 名称；覆盖为多机器归属 |
+| `.itemInput(id, amount)` / `.itemOutput(id, amount)` | 固定物品数量 |
+| `.itemOutput(id, min, max, chance)` | 物品范围产出 |
+| `.fluidInput(id, amount[, perTick])` / `.fluidOutput(...)` | 一次性或逐 tick 流体 |
+| `.energyInput(perTick)` / `.energyOutput(perTick)` | 每 tick 能源 |
+| `.catalyst(id, amount[, chance])` | 新建一组催化剂 |
+| `.catalystEntry(id, amount)` | 为最近一组催化剂增加备选 |
+| `.catalystChance(chance)` / `.catalystModifier(target, io, operation, value)` / `.catalystTooltip(text)` | 修改最近一组催化剂 |
+| `.requirement(jsonObject)` | 追加原始需求；气体、NBT、接口、筛选标签等可走这里 |
+| `.cancelIfPerTickFails([boolean])` | 无参数表示 true |
+| `.startCommand(cmd[, interval])` / `.processingCommand(...)` / `.finishCommand(...)` | 追加阶段命令 |
+| `.id('namespace:path')` | KubeJS 配方 ID |
 
-**raw 写法仍然完全有效**，两种写法产出同一份配方 JSON。typed 链只在 `serialize()` 时组装，所以 `event.custom(...)` / 数据包不受影响。**没有** pre/post tick 之类的事件回调（Q6-B 只做 B；旧版那套 `RecipePrimer` 回调未移植）。
-
-## 六、用 KubeJS 定义机器（0.28.0 起，核心字段；0.28.2 起列表坐标叫 `.parts`）
-
-**同一份脚本文件里**，除了配方事件，还可以监听机器事件：
+typed API 未列出的字段可用 raw JSON；不要猜 `.gasInput()`、`.tooltips()` 等未提供方法。原始需求例子（完整脚本）：
 
 ```js
-MachineRegistryEvents.registry(event => {
-  event.machine('kubejs_furnace')                  // 必填：注册名，裸写路径会自动补 modular_machinery_reborn:
-    .localizedName('脚本熔炉')                      // 可选：没有语言键时显示的字符串
-    .part(1, -1, 0, 'minecraft:stone')             // 相对坐标 + 该位置接受的方块
-    .part(0, 1, 0, 'modular_machinery_reborn:blockcasing[casing=plain]',
-                    'modular_machinery_reborn:blockcasing[casing=vent]')
-    .register()                                    // ★ 必需，漏了不报错（§八）
-})
-```
-
-**事件名写法（`onEvent(...)`）在 KubeJS 6 里已经取消**，不要用：它的绑定是一个占位函数，调用即抛
-`onEvent() is no longer supported! Read more on wiki: https://kubejs.com/kjs6`。`MachineRegistryEvents.registry(...)`
-是**唯一**入口。
-
-**0.28.1 修的是一个「绑定形状」错误**：KubeJS 交给脚本的事件组**必须是 `EventGroupWrapper`**，
-事件的「方法」来自这个包装器，而不是事件组本身。0.28.0 直接把原始事件组绑上去，于是脚本第一行就死在
-`TypeError: Cannot find function registry in object MachineRegistryEvents.`——绑定**存在**（所以不是「未定义」而是
-「找不到函数」），但**一个事件都没有**。修法见 `ModularMachineryKubeJSPlugin#registerBindings`；
-离机断言见 `_audit/m6c-verify/mmverify/KubeJSBindingCheck.java`（它真的把 KubeJS 的 jar 载进来跑一遍）。
-
-**0.28.2 修的是这个入口里的「重载歧义」**：0.28.1 的 `MachineBuilderJS` 同时声明了
-`part(int,int,int,Object...)` 和 `part(List,List,List,Object...)`——**同名、同参数个数、同样以变长参数
-结尾**。用户实机跑本文档的 `.part(1, -1, 0, 'minecraft:stone')` 时，报错来自**列表那个方法**
-（`Coordinate 'x' was given no value.`，即它收到了空列表）。这是 **API 形状**的缺陷，不是脚本写错：
-Rhino 先按名字找方法，两个重载的名字一样，怎么选就只剩「参数转换权重」和「`getMethods()` 返回顺序」——
-而顺序部分**JVM 规范没有定义**。修法是把列表形式**改名**为 `.parts(…)`（见下表），
-**标量 `.part(x, y, z, …)` 一字未改**；离机断言见同文件的**段 Z10**：它用 KubeJS 自己的 Rhino 求值
-本文档那行调用，断言产出**逐字等于**数据包会携带的那份 JSON。
-
-**字段与数据包 JSON 完全同名同义**——因为走的是**同一份校验代码**（`MachineSchema`），所以脚本里的报错与 JSON 里的报错是**逐字相同**的句子（只是把「文件名」换成「machine '某某'」）。已支持：
-
-| 方法 | 对应 JSON 字段 | 说明 |
-|---|---|---|
-| `event.machine('名字')` | `registryname` | **必填**；裸写路径补本模组命名空间 |
-| `.localizedName('显示名')` | `localizedname` | 可选；有语言键 `<命名空间>.<路径>` 时优先用语言键 |
-| `.part(x, y, z, 方块…)` | `parts[]` | **一个位置**；可连写多次；`(0,0,0)` 是控制器自己，会被跳过 |
-| `.parts([x…], [y…], [z…], 方块…)` | 同上 | **多个位置**：坐标给数组＝笛卡尔积，一次描述一圈/一面墙 |
-| `.elements(方块…)` | `parts[].elements` | 覆盖**最近一个** `.part(...)` 接受的方块 |
-| `.block(x, y, z, 方块)` | 同上 | `.part(x, y, z, 方块)` 的简写 |
-
-**`.part` 与 `.parts` 是两个名字，这不是排版问题**（0.28.1 → 0.28.2 的修复）：Rhino
-（KubeJS 用的脚本引擎）**先按名字找方法，再按参数类型挑重载**。0.28.1 里两个方法**同名 `part`**、
-参数个数都是 4、末尾都是变长，于是「给一个坐标」和「给一组坐标」只能靠**参数转换权重**区分，而权重相等时
-谁被选中由 `getMethods()` 的返回顺序决定——**JVM 规范没有规定这个顺序**。0.28.2 把列表形式改名为
-`.parts(…)`，歧义从「靠运气」变成「不可能」，**标量写法一字未改，老脚本不用动**。
-
-数组写法的坐标类型是 `Number` 而不是 `Integer`，也是实测决定的：脚本里的 `[1, -1, 0]` 到了 Java 是
-**`Double` 的列表**，用 `List<Integer>` 接会在第一个元素上抛 `ClassCastException`（0.28.1 的数组写法
-实际就是这样崩的）。小数坐标会被**点名拒绝**，不会悄悄取整。
-
-方块写法与数据包一致：`命名空间:方块名`，可带方块状态 `[属性=值]`（例如
-`modular_machinery_reborn:blockcasing[casing=plain]`）；也可以写**变量集名**，但变量集只在数据包里声明
-（脚本没有声明变量集的入口）。
-
-```js
-// 一面 3×3 的墙，一次写完
-event.machine('kubejs_wall')
-  .parts([-1, 0, 1], [0], [-1, 0, 1], 'minecraft:iron_block')
-  .part(0, 1, 0, 'minecraft:furnace[facing=north]')
-```
-
-### 这台机器用什么控制器？
-
-**只能用通用 `machine_controller`。** 方块在模组构造期注册，而脚本在注册表冻结之后才跑（方案 D8），
-所以脚本定义的机器**不可能**有 `<机器名>_controller`，也不可能有工厂控制器——这与「只在数据包里定义的
-机器」待遇相同，加载器会为两者各打印一行说明。
-
-**蓝图不受影响**：创造栏的蓝图是按 `MachineRegistry` 的当前内容现做的，脚本定义的机器会自动拿到一个。
-
-### 合并规则（脚本 vs 数据包 vs 配置目录）
-
-同一个 `registryname` 被两处定义时，**优先级从高到低**：
-
-1. **KubeJS 脚本**（运行时最明确的一次声明，且能直接指出是哪个脚本）；
-2. **配置目录** `config/modular_machinery_reborn/machinery/`（本机显式覆盖）；
-3. **数据包**。
-
-脚本覆盖了别的来源时，日志会**点名**这个 id 并说明两边各来自哪里——不会静默生效。
-
-**脚本删掉，机器就没了**：每次 `/reload`（或启动）脚本重新跑一遍，机器层是**这一轮脚本**的产物，
-不是「历史上所有脚本的并集」。所以改脚本 → `/reload`；删脚本 → `/reload` 之后那台机器不再存在。
-
-### 扩展字段现在也能用脚本写了（0.31.0 起）
-
-0.31.0 之前这 11 个字段在脚本里写会**按名报错**（数据包不受影响）。现在它们全部有对应的方法：
-
-| 字段 | 脚本写法 |
-|---|---|
-| `failure-action` | `.failureAction('decrease')` —— `reset` / `still` / `decrease`，名字写错会报错并列出三个取值 |
-| `requires-blueprint` | `.requiresBlueprint(true)` |
-| `max-parallelism` | `.maxParallelism(64)` |
-| `internal-parallelism` | `.internalParallelism(2)` |
-| `parallelizable` | `.parallelizable(true)` |
-| `has-factory` | `.hasFactory(true)` |
-| `factory-only` | `.factoryOnly(false)` |
-| `max-threads` | `.maxThreads(4)` |
-| `modifiers` | `.modifier(x, y, z, 方块, 修改器对象)` |
-| `multi-block-modifiers` | `.multiBlockModifier({ parts: [...], modifier: {...} })` —— 只把对象写进数组，校验归 schema |
-| `smart-interfaces` | `.smartInterface(类型, 默认值, 优先级)` + 可选的第 4 个参数 |
-| `core-threads` | `.coreThread('名字')` 或 `.coreThread('名字', '配方 id', …)` |
-
-**带嵌套结构的几项**（`modifier` 的修改器对象、`multiBlockModifier` 的整项、`smartInterface` / `coreThread` 的第 4 个参数）**两种写法都收**：
-
-```js
-MachineRegistryEvents.registry(event => {
-  event.machine('scripted_alloy')
-    .localizedName('Scripted Alloy')
-    // 结构：控制器上方一格放通风机箱 → 物品产出翻倍
-    .modifier(0, 1, 0, 'modular_machinery_reborn:blockcasing[casing=vent]',
-              { target: 'item', io: 'output', operation: 1, multiplier: 2.0 })
-    // 额外条件：控制器上方两格的那段结构全部命中时，输出再乘 1.5
-    .multiBlockModifier({
-      parts: [{ x: 0, y: 2, z: 0, elements: ['minecraft:stone'] }],
-      modifier: { target: 'item', io: 'output', operation: 1, multiplier: 1.5 },
-      description: '额外结构加成'
+ServerEvents.recipes(event => {
+  event.recipes.modular_machinery_reborn.machine('tutorial:stone_processor')
+    .time(100)
+    .energyInput(20)
+    .itemOutput('minecraft:stone', 1)
+    .requirement({
+      type: 'ingredient_array_input',
+      'io-type': 'input',
+      items: [
+        { item: 'minecraft:cobblestone', amount: 1 },
+        { item: 'minecraft:cobbled_deepslate', amount: 1 }
+      ]
     })
-    .smartInterface('mode', 0, 1000)                       // 类型 / 默认值 / 优先级
-    .smartInterface('temp', 20, 0, { header: 'gui.example.temp' })
-    .coreThread('smelter')                                 // 空槽位：什么配方都能跑
-    .coreThread('pinned', 'alloy_smelter_diamond')         // 钉死一条配方
-    .failureAction('still')
-    .maxParallelism(64)
-    .internalParallelism(2)
-    .hasFactory(true)
-    .maxThreads(4)
-    .requiresBlueprint(false)
-    .part(1, -1, 0, 'minecraft:stone')
-    .register()
+    .id('tutorial:stone_from_either')
 })
 ```
 
-- 嵌套那三项**也可以写成 JSON 字符串**（`'{"target":"item",…}'`），两种写法产出同一份定义；
-- **校验仍然全部由 schema 做**：`operation` 写 9、`failure-action` 拼错、`core-threads` 重名、
-  并行上限互相矛盾——报的句子与数据包里写错时**逐字相同**；
-- **`modifier` 写在 `(0,0,0)`**（控制器自己那格）会被跳过并打一行告警——旧版行为，写相邻格子。
-- **`multiBlockModifier` 的 `parts` 允许 `(0,0,0)`**：它只是额外条件，不替换控制器格；整段每一格都匹配才生效。多块条件**没有名字**，命中几项就叠加几项（旧版 CraftTweaker 按名字覆盖，本版不复刻）。
+机器定义放 `MachineRegistryEvents.registry`，不是配方事件；使用 `event.machine(id)`，末尾 **`.register()` 必需**。完整最小结构见 [使用说明](使用说明.md)。常用字段对应如下：
 
-> `core-threads` 的语义：这条槽位**从成型那一刻就存在、闲置也不回收**（普通槽位闲置 200 tick 回收）。
-> `.coreThread('名字')` 不写配方 = 该槽位可以跑这台机器的任何配方。
-
-## 七、机器定义部分的实机核对步骤（0.28.0 起；0.28.1 修绑定形状；0.28.2 修 `.part`/`.parts` 重载歧义；0.31.0 补扩展字段）
-
-> 按本项目「必查 7」：**在用户确认之前，本版只标记为「已构建、未实机验证」。**
->
-> 0.28.0 的这份清单**实机失败**过——第一行就 `TypeError: Cannot find function registry in object
-> MachineRegistryEvents.`（根因与修法见 [专项/KJS-勘测.md](专项/KJS-勘测.md) §9）；0.28.1 的清单又失败在
-> `.part(1, -1, 0, 'minecraft:stone')` 上，报错来自同名重载里的列表那个（根因与修法见同文 §10）。
-> 0.28.2 修好后请重跑，其中「`/reload` 两次机器还在」与「删脚本 → `/reload` 机器消失」**两条最关键**。
-
-把下面这段存成 `kubejs/server_scripts/mmce_machine_test.js`，然后进游戏 `/reload`：
-
-```js
-MachineRegistryEvents.registry(event => {
-  event.machine('scripted_smoke')
-    .localizedName('Scripted Smoke')
-    .part(1, -1, 0, 'minecraft:stone')
-    .part(-1, -1, 0, 'minecraft:stone')
-    .part(0, -1, 1, 'minecraft:stone')
-    .part(0, -1, -1, 'minecraft:stone')
-    .register()
-})
-```
-
-> **`.register()` 是必需的**（§八详述）：漏了它**不会报错**，机器也不会存在——日志只显示
-> `posted; 0 machine definition(s)`。判据是代码级的：`MachineDefinitions.stage(...)` **只有
-> `MachineBuilderJS.register()` 一个调用点**，所以 0.28.2 实机日志里的 `posted; 1` / `4 parts`
-> 只可能来自带 `.register()` 的脚本。
-
-- [ ] **脚本被加载**：日志出现 `KubeJS machine registry event posted; 1 machine definition(s) were staged`。
-- [ ] **标量 `.part(x, y, z, 方块)` 真的落到标量方法**（0.28.2 的核心一条）：上面那段脚本**必须零报错**，
-      且四个位置就是写的那四个。任何 `Coordinate 'x' was given no value.` 都是这个缺陷复发。
-- [ ] **定义进入注册表**：日志出现 `Loaded N machine definition(s) ...`，其中包含
-      `modular_machinery_reborn:scripted_smoke`；紧随其后有 `scripted_smoke -> 4 parts, size 3x1x3`。
-- [ ] **没有专属控制器，且日志说明了**：同一轮日志里有
-      `machine(s) have no controller block of their own and use the generic machine_controller: …
-      modular_machinery_reborn:scripted_smoke …`，且句尾提到脚本机器拿不到控制器（D8）。
-- [ ] **能用通用控制器成型**：在控制器四周按这个形状摆石头（控制器在中心、`(1,-1,0)` 等四格），
-      用通用 `machine_controller` → 界面「找到结构：Scripted Smoke」。
-- [ ] **蓝图自动有了**：创造栏里出现一个 tooltip 为 `Scripted Smoke` 的蓝图；放控制器槽里不影响成型
-      （该机器没写 `requires-blueprint`）。
-- [ ] **第二次 `/reload` 机器还在**：再执行一次 `/reload` → 上面两条日志**再来一遍**，机器仍能成型。
-      这一条是**合并契约**的实机面（离机复现器已证脚本层不会被数据包 reload 冲掉）。
-- [ ] **删脚本即删机器**：删掉那个 `.js` → `/reload` → 日志里 `scripted_smoke` 不再出现，
-      原本能成型的结构**不再成型**（界面回到「找到结构：无」）。
-- [ ] **数组写法 `.parts([x…], [y…], [z…], 方块)` 也能用**（0.28.2 才真的能用）：另存一个脚本，
-      内容为 `event.machine('scripted_wall').parts([-1, 0, 1], [0], [-1, 0, 1], 'minecraft:iron_block')`
-      → `/reload` → 日志里这台机器是 **9 parts**（3×3 的笛卡尔积），而不是 `ClassCastException`。
-- [ ] **旧的数组写法（`.part([…], […], […], …)`）会被明确拒绝**，不是静默走错方法：同一段改成
-      `.part([-1, 0, 1], [0], [-1, 0, 1], 'minecraft:iron_block')` → KubeJS 报一条类型错误，
-      点名 `part(int, int, int, java.lang.Object[])`；改成 `.parts(…)` 即通过。
-- [ ] **小数坐标被点名拒绝**：写 `.parts([1.5], [0], [0], 'minecraft:stone')` → 报错说明坐标必须是整数，
-      机器**不注册**（不会被悄悄取整成 `1`）。
-- [ ] **同 id 冲突按文档优先级**：把同一台机器同时写进数据包（或配置目录声明文件）和一个脚本，
-      `/reload` → 日志出现一行点名警告，且**脚本的那份生效**（显示名是脚本写的那个）。
-- [ ] **报错质量与数据包一致**：把 `.part(1, -1, 0)` 的方块参数删掉（或写一个不存在的方块 id）→
-      `/reload` → KubeJS 报出**一条**错误，句子与「同一份 JSON 放进数据包」时报的**逐字相同**
-      （例如 `A part of machine 'scripted_smoke' has no 'elements'`）。
-- [ ] **未知字段被拒**：写一个不存在的字段——例如用 fluent API 之外的写法把
-      `event.machine('x').localyzedName('typo')` 之类塞进去（或直接把 `{"registryname":"x","localyzedname":"y","parts":[…]}`
-      交给 `MachineSchema`）→ 报错点名 `localyzedname` 并列出**所有**已知字段，机器**不注册**。
-- [ ] ~~**被推迟的字段被拒**：把 `.part(...)` 之后接一个 `has-factory`（例如用 `.toJson()` 拿到对象后加一个键，
-      再走一遍解析）→ 报错说明该字段尚未在 KubeJS 入口实现。**数据包**里写同一个字段则**不报错**
-      （它照常被求值）——这一条正是「推迟只针对脚本入口」的实机面。~~
-      ⚠️ **本条自 0.31.0 起作废**：11 个字段现在脚本里也能写。**替代它的检查**见
-      [`../迁移日志.md`](../迁移日志.md) 的 **0.31.0** 一节（那 10 条才是本版要看的）。
-- [ ] **顺序无关的坏味道不存在**：脚本里**不要**用 `ServerEvents.loaded` 去定义机器——定义机器的时机是
-      `MachineRegistryEvents.registry`（由 `onServerReload` 触发，刚好在加载器读数据包之前）。
-
-## 八、出问题时看什么
-
-1. 日志里有没有 `KubeJS schema registered`（没有 = 插件没被发现）；
-2. KubeJS 的 `Loaded N/N KubeJS server scripts ... with N errors`；
-3. 配方写错时，本模组会**响亮报错**并告诉你该写什么（例如未知需求类型会列出可用的几种）。
----
-
-## 八、机器定义速查（**含一个易漏点，漏了不报错**）
-
-> **状态：已在游戏里确认**（0.28.2 核心字段；2026-10-01 实测：`posted; 1`、`scripted_smoke -> 4 parts`、结构成型、`/reload` 两次仍在、删脚本后消失。
-> **0.31.0 新增的 11 个扩展字段已离机证明**（真实 Rhino 驱动 + 两条路径逐字段比对），**实机清单见 `交接文档.md` 的 0.31.0 一节**）。
-
-```js
-MachineRegistryEvents.registry(event => {
-  event.machine('scripted_smoke')                    // registryname（裸路径补本模组命名空间）
-    .localizedName('Scripted Smoke')                 // 显示名
-    .part(1, -1, 0, 'minecraft:stone')               // 单坐标：x, y, z, 接受的方块…
-    .parts([-1,0,1], [0], [-1,0,1], 'minecraft:stone') // ★ 数组写法叫 .parts（不是 .part）
-    .register()                                      // ★ 必需
-})
-```
-
-### ★ `.register()` 是必需的——**漏掉它不会报错**
-
-这是本模组里**唯一一处「漏了就静默失效」**的地方（其余地方都响亮报错）。没有它，构建器只是**组装了一个 JSON 对象**：不登记、不报错、日志里只会看到
-
-```
-KubeJS machine registry event posted; 0 machine definition(s) were staged
-```
-
-**判据**：凡是「脚本加载 **0 错误** + **登记数 0**」，**第一个查的就是 `.register()` 有没有漏**，不要去查加载器。
-
-### 两个名字的区别（0.28.2 起）
-
-| 写法 | 用途 |
+| JSON 根字段 | 机器构建器方法 |
 |---|---|
-| `.part(x, y, z, …)` | **单格**，坐标是整数 |
-| `.parts(xs, ys, zs, …)` | **多格**，坐标是数组，展开为笛卡尔积 |
+| `localizedname` / `prefix` | `.localizedName(text)` / `.prefix(text)` |
+| `parts` | `.part(x,y,z,...elements)`；坐标列表用 `.parts(xs,ys,zs,...elements)` |
+| `failure-action` / `requires-blueprint` | `.failureAction(value)` / `.requiresBlueprint(boolean)` |
+| `parallelizable` / `max-parallelism` / `internal-parallelism` | `.parallelizable(boolean)` / `.maxParallelism(n)` / `.internalParallelism(n)` |
+| `has-factory` / `factory-only` / `max-threads` | `.hasFactory(boolean)` / `.factoryOnly(boolean)` / `.maxThreads(n)` |
+| `core-threads` | `.coreThread(name, ...recipeIds)` |
+| `modifiers` | `.modifier(x,y,z,element,modifier[,description])` |
+| `multi-block-modifiers` | `.multiBlockModifier(entry)` |
+| `smart-interfaces` | `.smartInterface(type,defaultValue,priority[,extra])` |
+| `geo-model` | `.geoModel(model,texture[,animation,idle,working])` |
 
-> 0.28.1 及更早：数组形式也叫 `.part(...)`，与单格形式**同名同参数个数**，导致 Rhino 无法区分（候选顺序来自 `Class.getMethods()`，**JVM 规范未定义**）——而且数组写法本身就会抛 `ClassCastException`。**0.28.2 改名并修好。**
+构建器没有通用方法覆盖所有 JSON 字段。复杂的动态结构、根颜色等建议使用完整 JSON；不要因 JSON 支持就假设有同名链式方法。KubeJS 机器与数据包冲突时脚本优先；删除脚本后 `/reload` 不会继续保留那份脚本定义。
 
-### 机器能拿到什么、拿不到什么
+## 七、配方适配器：导入现成配方
 
-- **控制器**：脚本机器**没有专属控制器方块**（方块在模组构造期注册，那时脚本还没跑，D8）。用**通用机器控制器**，日志会明说。
-- **蓝图**：**能拿到**（按 `MachineRegistry` 现做）。
-- **扩展字段**：0.31.0 起**全部可用脚本写**（11 个，写法见 §六 的表）。**不写即取默认**，与「这些字段一个都没写的数据包机器」等价。写错值时由 schema 报错，句子与数据包侧逐字相同。
+配方适配器将已有配方导入目标机器。目前提供**熔炉**和**机器间配方复用**两个入口，尚未提供 IC2、GT、匠魂、核电工艺等第三方适配器。
 
-### 一个可照抄的测试机器
+### 熔炉导入声明
 
+保存为 `data/tutorial/recipes/import_smelting.json`，目标机器须另行定义：
+
+```json
+{
+  "type": "modular_machinery_reborn:machine",
+  "machine": "tutorial:stone_processor",
+  "adapter": "minecraft:furnace",
+  "modifiers": [
+    { "target": "duration", "io": "input", "operation": 1, "multiplier": 0.5 }
+  ]
+}
 ```
-上一层：              [控制器]                 ← 通用机器控制器
-下一层：   石头   石头  ·  石头   石头          ← 十字，中心留空
-                     （正东南西北各隔 1 格）
+
+它在重载时导入当前熔炼配方，生成普通机器配方；不是让机器烧燃料。基础值为 **120 tick、20 FE/t**，示例修改后为 60 tick，输入输出继承熔炼内容；不是继承原熔炉的 cookingTime，也不生成熔炼经验。
+
+这是可选扩展练习，不包含在最小示例包中。导入后可能与手写圆石配方重叠，做实验时先移除手写版本，便于确认实际跑的是哪一条。
+
+### 复用另一台机器的配方
+
+```json
+{
+  "type": "modular_machinery_reborn:machine",
+  "machine": "tutorial:advanced_processor",
+  "adapter": "tutorial:stone_processor",
+  "modifiers": [
+    { "target": "energy", "io": "input", "operation": 1, "multiplier": 2.0 }
+  ]
+}
 ```
 
-对应脚本：
+目标机器为 `advanced_processor`，来源机器为 `stone_processor`，两者 ID 不要写反。给 adapter 写完整命名空间，避免裸名落到 `minecraft`。
+
+声明本身会被生成配方替换。**当前适配器不应用声明里的附加 `requirements`**，会警告；不要把额外输入写进去后以为已经扣料。需要额外成本就显式编写普通配方。生成 ID 根据声明、目标和来源稳定生成；从旧流水号 ID 版本升级前先完成在途合成。
+
+## 八、命令与机器事件
+
+命令适合简单通知；事件适合按机器、位置和阶段做判断。Reborn 使用下面的 `MachineLifecycleEvents` 事件组。
+
+配方根对象片段：
+
+```json
+{
+  "startCommands": ["say processor started"],
+  "processingCommands": [ { "command": "say processor running", "interval": 20 } ],
+  "finishCommands": ["say processor finished"]
+}
+```
+
+命令在服务端以权限 2、控制器位置执行，建议不加前导 `/`。processing 使用成功结算前进度，首次为 0；start / finish 的进度参数为 0。interval 按 `tick % N == 0` 触发，省略或 0 表示每次触发，命令结果不控制合成成功与否。避免给所有机器每 tick 广播消息。
+
+KubeJS 事件完整脚本例子：
 
 ```js
-MachineRegistryEvents.registry(event => {
-  event.machine('scripted_smoke')
-    .localizedName('Scripted Smoke')
-    .part(1, -1, 0, 'minecraft:stone')
-    .part(-1, -1, 0, 'minecraft:stone')
-    .part(0, -1, 1, 'minecraft:stone')
-    .part(0, -1, -1, 'minecraft:stone')
-    .register()
+MachineLifecycleEvents.recipeStart(event => {
+  if (String(event.machine) === 'tutorial:stone_processor') {
+    console.info('圆石加工机开始配方：' + event.recipe)
+  }
 })
 ```
 
-**注意是 `minecraft:stone`（石头）不是圆石**；用错不报错，只是显示「找到结构：无」。
+| 事件名 | 可观察／修改 |
+|---|---|
+| `structureFormed` / `structureUpdated` | 机器 ID、控制器坐标 |
+| `machineTick` | START / END 阶段与控制器信息 |
+| `recipeCheck` | `phase`，可下调 `parallelism`，可 `setFailed(reason)` 否决开工 |
+| `recipeStart` / `recipeFinish` | 配方 ID、进度、时长、并行等只读载荷 |
+| `recipeTick` | START / END，可 `cancel()`；两阶段的资源语义不同 |
+| `recipeFailure` | 原因与 `destructRecipe` |
+| `factoryRecipeStart` / `factoryRecipeTick` / `factoryRecipeFinish` / `factoryRecipeFailure` | 工厂独立事件，另含线程序号 |
 
-### 三条验收（缺一不算通过）
+工厂配方使用对应 factory 事件，不要只监听普通 recipeStart 就认为覆盖所有合成。取消 recipeTick 的 START 会跳过该次结算；取消 END 时本 tick 已结算资源，进度不加，不能当作事务撤销。失败事件也不自动退还已经支付的开工输入。
 
-1. 日志 `posted; 1` + `scripted_smoke -> 4 parts` + `Loaded 2 machine definition(s)`
-2. 结构成型，控制器显示「找到结构：Scripted Smoke」
-3. **`/reload` 两次它仍在**；**删脚本 → `/reload` → 它消失**（这是脚本层与加载器的合并契约）
+这不是旧版脚本全部控制器接口的等量替代；例如任意 customData 与旧 RecipePrimer 回调不能按原代码复制。附属模组 Java 事件与具体时序见 [事件 API](事件API.md)，其中旧阶段描述需要结合当前迁移日志阅读。
+
+## 九、常见错误与验收清单
+
+| 错误 | 修正 |
+|---|---|
+| 写了配方却没机器 | 先定义完整机器结构，`machine` 必须等于机器 `registryname` |
+| 把 `registryName` 当实际配方 ID | JSON 由文件路径决定；KubeJS 用 `.id(...)` |
+| 给 input 写随机数量 | 输入用固定 `amount`，范围数量仅用于物品输出 |
+| 使用 `.gasInput()` 或旧 CrT 方法 | 用当前 typed 表；未提供字段走 `.requirement(...)` 或 raw JSON |
+| 一个材料被普通输入和催化剂重复使用 | 准备两份，或接受没有催化剂增益；不能靠重排骗过共享预留 |
+| 加 `tooltips` 就以为改了数值 | 文案只是展示，数量和效果由需求与修改器决定 |
+| 配方“注册成功”但不运行 | 再查结构、端口、标签／分组、能源速率和输出空间；执行 `/mm-diagnose` |
+| 照搬旧脚本“全部兼容模块” | 核对本版范围；不支持的需求类型会报错，不应删掉需求让配方变成免费 |
+
+每次先保留一条确定配方：记录输入、运行 tick、FE/t、输出、并行数；再逐一加入概率、催化剂、标签、分组、适配器与事件。最后实际检查重载、重登、存档重启、输出堵塞与连续合成。脚本没有语法错误、JEI 能显示、离线测试通过，分别只证明各自覆盖的部分。

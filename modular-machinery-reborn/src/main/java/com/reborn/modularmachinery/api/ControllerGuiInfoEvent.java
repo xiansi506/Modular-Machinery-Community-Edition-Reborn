@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Lets addons add lines to the machine controller screen, posted once per frame while the screen draws.
+ * Lets addons add lines to the machine controller or factory controller screen while its information block draws.
  *
  * <p>This is the 1.20.1 replacement for the original's {@code ControllerGUIRenderEvent}, which served exactly
  * this purpose and was part of the public surface the original exposed to addons. Subscribe on the Forge event

@@ -44,7 +44,7 @@ public final class GeoControllerAnimatable implements GeoAnimatable {
     /** 当前定义的自定义模型；没有定义或没有 {@code geo-model} 时为 {@code null}。 */
     @Nullable
     public GeoModelSpec spec() {
-        return MachineRegistry.byId(this.controller.machineId())
+        return MachineRegistry.clientById(this.controller.machineId())
                 .map(MachineDefinition::geoModel)
                 .orElse(null);
     }

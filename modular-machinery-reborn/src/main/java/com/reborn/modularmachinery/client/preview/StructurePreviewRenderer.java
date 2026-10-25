@@ -3,18 +3,23 @@ package com.reborn.modularmachinery.client.preview;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import com.reborn.modularmachinery.machine.StructurePreview;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Draws a {@link StructurePreview} as blocks inside a GUI.
@@ -57,6 +62,95 @@ public final class StructurePreviewRenderer {
     }
 
     /**
+     * Finds the nearest preview block under a panel-space mouse position.
+     *
+     * <p>The same perspective camera and block-sized bounds as the renderer are used, so selection follows the
+     * rotated, zoomed and panned model instead of a flat screen-space approximation. The preview currently draws
+     * each block through the vanilla model renderer, so picking uses its unit-cell bounds; custom non-cubic model
+     * geometry may therefore have a slightly larger selectable area than its visible faces.
+     */
+    public static StructurePreview.Block pickBlockAt(StructurePreview preview, List<StructurePreview.Block> blocks,
+                                                       double mouseX, double mouseY, double centerX, double centerY,
+                                                       float boxPixels, float yaw, float pitch, float zoom) {
+        if (preview == null || preview.isEmpty() || blocks.isEmpty() || boxPixels <= 0.0F) {
+            return null;
+        }
+        double nx = (mouseX - centerX) * 2.0 / boxPixels;
+        double ny = (centerY - mouseY) * 2.0 / boxPixels;
+        if (nx < -1.0 || nx > 1.0 || ny < -1.0 || ny > 1.0) {
+            return null;
+        }
+
+        BlockPos size = preview.size();
+        float diagonal = (float) Math.sqrt(size.getX() * size.getX()
+                + size.getY() * size.getY() + size.getZ() * size.getZ());
+        float cameraDistance = Math.max(diagonal * 0.55F,
+                Math.max(1.0F, diagonal * 1.18F) / Math.max(0.01F, zoom));
+        Matrix4f perspective = new Matrix4f().perspective((float) Math.toRadians(60.0F), 1.0F,
+                0.05F, Math.max(100.0F, cameraDistance * 8.0F));
+        Matrix4f view = cameraView(cameraDistance, yaw, pitch);
+        Matrix4f inverseViewProjection = perspective.mul(view).invert();
+        Vector3f near = unproject(inverseViewProjection, (float) nx, (float) ny, -1.0F);
+        Vector3f far = unproject(inverseViewProjection, (float) nx, (float) ny, 1.0F);
+        if (near == null || far == null) {
+            return null;
+        }
+
+        Vector3f direction = far.sub(near).normalize();
+        float centerBlockX = (preview.min().getX() + preview.max().getX() + 1.0F) / 2.0F;
+        float centerBlockY = (preview.min().getY() + preview.max().getY() + 1.0F) / 2.0F;
+        float centerBlockZ = (preview.min().getZ() + preview.max().getZ() + 1.0F) / 2.0F;
+        near.add(centerBlockX, centerBlockY, centerBlockZ);
+
+        StructurePreview.Block closest = null;
+        double nearest = Double.POSITIVE_INFINITY;
+        for (StructurePreview.Block block : blocks) {
+            BlockPos pos = block.pos();
+            double distance = rayBox(near, direction, pos.getX(), pos.getY(), pos.getZ(),
+                    pos.getX() + 1.0, pos.getY() + 1.0, pos.getZ() + 1.0);
+            if (distance >= 0.0 && distance < nearest) {
+                nearest = distance;
+                closest = block;
+            }
+        }
+        return closest;
+    }
+
+    private static Vector3f unproject(Matrix4f inverse, float x, float y, float z) {
+        Vector4f point = new Vector4f(x, y, z, 1.0F).mul(inverse);
+        if (Math.abs(point.w) < 1.0E-7F) {
+            return null;
+        }
+        return new Vector3f(point.x / point.w, point.y / point.w, point.z / point.w);
+    }
+
+    private static double rayBox(Vector3f origin, Vector3f direction,
+                                 double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
+        double near = 0.0;
+        double far = Double.POSITIVE_INFINITY;
+        double[] origins = {origin.x, origin.y, origin.z};
+        double[] directions = {direction.x, direction.y, direction.z};
+        double[] mins = {minX, minY, minZ};
+        double[] maxs = {maxX, maxY, maxZ};
+        for (int axis = 0; axis < 3; axis++) {
+            if (Math.abs(directions[axis]) < 1.0E-8) {
+                if (origins[axis] < mins[axis] || origins[axis] > maxs[axis]) {
+                    return -1.0;
+                }
+                continue;
+            }
+            double first = (mins[axis] - origins[axis]) / directions[axis];
+            double second = (maxs[axis] - origins[axis]) / directions[axis];
+            near = Math.max(near, Math.min(first, second));
+            far = Math.min(far, Math.max(first, second));
+            if (near > far) {
+                return -1.0;
+            }
+        }
+        return far < 0.0 ? -1.0 : near;
+    }
+
+    /**
      * Clips drawing to a rectangle given in the <b>caller's own</b> coordinates.
      *
      * <p>{@code GuiGraphics#enableScissor} takes absolute screen coordinates — it does not consult the pose —
@@ -87,7 +181,7 @@ public final class StructurePreviewRenderer {
         if (preview == null) {
             return;
         }
-        render(graphics, preview, preview.blocks(), 0, centerX, centerY, boxPixels, yaw, pitch, zoom);
+        render(graphics, preview, preview.blocks(), 0, centerX, centerY, boxPixels, yaw, pitch, zoom, null);
     }
 
     /**
@@ -101,7 +195,16 @@ public final class StructurePreviewRenderer {
      */
     public static void render(GuiGraphics graphics, StructurePreview preview, List<StructurePreview.Block> blocks,
                               int variant, float centerX, float centerY, float boxPixels,
-                              float yaw, float pitch, float zoom) {
+                              float yaw, float pitch, float zoom, BlockPos selectedBlock) {
+        render(graphics, preview, blocks, variant, centerX, centerY, boxPixels, yaw, pitch, zoom,
+                selectedBlock, Set.of());
+    }
+
+    /** Draws the preview and highlights every position belonging to the selected modifier entry. */
+    public static void render(GuiGraphics graphics, StructurePreview preview, List<StructurePreview.Block> blocks,
+                              int variant, float centerX, float centerY, float boxPixels,
+                              float yaw, float pitch, float zoom, BlockPos selectedBlock,
+                              Set<BlockPos> modifierPositions) {
         if (preview == null || preview.isEmpty() || blocks.isEmpty()) {
             return;
         }
@@ -182,6 +285,26 @@ public final class StructurePreviewRenderer {
                 dispatcher.renderSingleBlock(block.variantState(variant), pose, graphics.bufferSource(),
                         LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
                 pose.popPose();
+            }
+            if (!modifierPositions.isEmpty()) {
+                VertexConsumer lines = graphics.bufferSource().getBuffer(RenderType.lines());
+                for (BlockPos pos : modifierPositions) {
+                    if (blocks.stream().anyMatch(block -> block.pos().equals(pos))) {
+                        LevelRenderer.renderLineBox(pose, lines,
+                                pos.getX() - 0.002, pos.getY() - 0.002, pos.getZ() - 0.002,
+                                pos.getX() + 1.002, pos.getY() + 1.002, pos.getZ() + 1.002,
+                                0.0F, 1.0F, 0.5F, 1.0F);
+                    }
+                }
+                graphics.bufferSource().endBatch(RenderType.lines());
+            }
+            if (selectedBlock != null && blocks.stream().anyMatch(block -> block.pos().equals(selectedBlock))) {
+                VertexConsumer lines = graphics.bufferSource().getBuffer(RenderType.lines());
+                LevelRenderer.renderLineBox(pose, lines,
+                        selectedBlock.getX() - 0.002, selectedBlock.getY() - 0.002, selectedBlock.getZ() - 0.002,
+                        selectedBlock.getX() + 1.002, selectedBlock.getY() + 1.002, selectedBlock.getZ() + 1.002,
+                        0.25F, 0.9F, 1.0F, 1.0F);
+                graphics.bufferSource().endBatch(RenderType.lines());
             }
             graphics.flush();
         } finally {

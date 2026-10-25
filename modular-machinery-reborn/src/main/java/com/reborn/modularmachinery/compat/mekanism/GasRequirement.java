@@ -103,11 +103,16 @@ public final class GasRequirement extends MachineRequirement {
     }
 
     /**
-     * JEI 里占**罐格但只给文字**。
+     * JEI 里占**罐格**，0.100.0 起格内直接画 {@link #describe()} 的文字（E10 文本格）。
      *
      * <p>为什么不是 {@code FLUID}：那条路会让 JEI 去 cast {@code FluidRequirement} 并调它的
-     * {@code fluidType()}——气体不是流体，那条路走不通。而旧版在 JEI 里对气体**本来也只有 tooltip**
-     * （没有贴图），所以「占罐格 + 文字」既是本版能做到的，也是与原版一致的。
+     * {@code fluidType()}——气体不是流体，那条路走不通。
+     *
+     * <p><b>旧版事实修正（0.100.0 勘测）</b>：本注释过去写「旧版在 JEI 里对气体本来也只有 tooltip
+     * （没有贴图）」，这是错的——旧版 {@code JEIComponentGas} → {@code RecipeLayoutPart.GasTank}，
+     * 渲染器是 Mekanism 自带的 {@code GasStackRenderer}（画气体贴图）+ {@code PART_GAS_TANK_SHELL}
+     * 罐壳。本版主模组按 X4 隔离不引用 Mekanism 客户端渲染类，照清点 E10 的拍板降级为文本格，
+     * 作为**记录在案**的与旧版视觉差异。
      *
      * <p>在此之前这里没有覆写，于是走默认的物品格，而物品格的绘制会把需求 cast 成
      * {@code ItemRequirement} —— **打开那个机器的 JEI 页就崩**。这一条同时是那个缺陷的修复。
@@ -210,6 +215,13 @@ public final class GasRequirement extends MachineRequirement {
     /** {@link #tick} 带修改器。 */
     public boolean tick(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
         return transfer(ports, random, modifiers);
+    }
+
+    @Override
+    public boolean reserve(HatchCollection ports, RecipeModifiers modifiers) {
+        int total = Math.multiplyExact(modifiedAmount(modifiers), parallelism());
+        return ioType() == IOType.INPUT ? GasIo.extract(ports.gasInputs(), gas, total)
+                : GasIo.insert(ports.gasOutputs(), gas, total);
     }
 
     private boolean transfer(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {

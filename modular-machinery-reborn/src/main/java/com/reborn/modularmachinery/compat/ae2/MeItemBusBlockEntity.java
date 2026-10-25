@@ -10,6 +10,7 @@ import appeng.api.networking.IManagedGridNode;
 import appeng.api.networking.IInWorldGridNodeHost;
 import appeng.api.networking.security.IActionHost;
 import appeng.api.networking.security.IActionSource;
+import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.storage.StorageHelper;
 import appeng.api.util.AECableType;
@@ -23,6 +24,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.items.ItemStackHandler;
 
@@ -46,6 +48,11 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
 
     private static final String TAG_CONFIG = "configInventory";
     private static final String TAG_NODE = "ae_node";
+    /** C4-II（0.92.0）：统一总线流体半边的 NBT 键。 */
+    private static final String TAG_FLUID_TANKS = "fluidTanks";
+    private static final String TAG_FLUID_CONFIG = "fluidConfig";
+    /** C4-II（0.94.0）：输入侧配置格数（物品 ghost 与流体标记共用这 16 格）。 */
+    public static final int CONFIG_GRID = 16;
 
     private final IManagedGridNode mainNode;
 
@@ -53,7 +60,25 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
     @Nullable
     private final ItemStackHandler config;
 
+    /** C4-II：流体半边的内部罐（9 × 8000 mB，两种总线都有；所有者拍板并入现有总线，不另立方块）。 */
+    private final com.reborn.modularmachinery.block.MeFluidTanks fluidTanks =
+            new com.reborn.modularmachinery.block.MeFluidTanks();
+
+    /**
+     * C4-II（0.94.0 重构，照高版 AE2 接口）：输入总线的**流体标记**——与 16 个配置格一一对应，
+     * 每条是（流体, 目标量 mB）。一格要么是物品 ghost（{@code config}），要么是流体标记
+     * （本数组 + {@code fluidMarkAmounts}），设置其一清另一。
+     *
+     * <p>维持语义随接口模型改为**按目标量**（不再是 0.92.0 的逐槽维持到满）：网络里取到目标量为止，
+     * 多了送回；9 罐是共享池。{@code null} = 该格未标记流体。
+     */
+    @Nullable
+    private final Fluid[] fluidMarks;
+    private final int[] fluidMarkAmounts;
+
     private final int[] failures;
+    /** C4-II：流体半边的失败退避（与物品半边各自独立计数）。 */
+    private final int[] fluidFailures;
     private int ticks;
 
     public MeItemBusBlockEntity(BlockPos pos, BlockState state) {
@@ -61,6 +86,7 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
 
         ItemStackHandler itemHandler = itemHandler();
         this.failures = new int[itemHandler == null ? 0 : itemHandler.getSlots()];
+        this.fluidFailures = new int[com.reborn.modularmachinery.block.MeFluidTanks.SLOTS];
 
         if (kind() == HatchKind.ME_ITEM_INPUT) {
             this.config = new ItemStackHandler(16) {
@@ -70,8 +96,12 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
                     Arrays.fill(MeItemBusBlockEntity.this.failures, 0);
                 }
             };
+            this.fluidMarks = new Fluid[CONFIG_GRID];
+            this.fluidMarkAmounts = new int[CONFIG_GRID];
         } else {
             this.config = null;
+            this.fluidMarks = null;
+            this.fluidMarkAmounts = null;
         }
 
         this.mainNode = GridHelper.createManagedNode(this, new IGridNodeListener<MeItemBusBlockEntity>() {
@@ -119,6 +149,85 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
         return this.mainNode.isActive() && this.mainNode.isOnline();
     }
 
+    /** C4-II（0.93.0）：MeBusAccess 的流体半边——罐给界面显示，配置给 ghost 交互。 */
+    @Override
+    public com.reborn.modularmachinery.block.MeFluidTanks fluidTanks() {
+        return this.fluidTanks;
+    }
+
+    @Override
+    @Nullable
+    public net.minecraft.world.item.ItemStack configItemAt(int slot) {
+        if (this.config == null || slot < 0 || slot >= this.config.getSlots()) {
+            return null;
+        }
+        return this.config.getStackInSlot(slot);
+    }
+
+    @Override
+    @Nullable
+    public Fluid fluidMarkAt(int slot) {
+        if (this.fluidMarks == null || slot < 0 || slot >= this.fluidMarks.length) {
+            return null;
+        }
+        return this.fluidMarks[slot];
+    }
+
+    @Override
+    public int fluidMarkAmount(int slot) {
+        if (this.fluidMarkAmounts == null || slot < 0 || slot >= this.fluidMarkAmounts.length) {
+            return 0;
+        }
+        return this.fluidMarkAmounts[slot];
+    }
+
+    /** C4-II（0.94.0）：配置格写入总入口——物品 ghost / 清除，互斥于流体标记（流体侧见 setConfigFluid）。 */
+    @Override
+    public void setConfigItem(int slot, @Nullable net.minecraft.world.item.ItemStack ghost) {
+        if (this.level == null || this.level.isClientSide || slot < 0 || slot >= CONFIG_GRID) {
+            return;
+        }
+        // 0.94.4 修复：0.94.3 只拆了外层门卫，里面的条件仍是 `ghost != null &&` ——清除（null）
+        // 依旧进不到流体侧，液体标记照旧清不掉（所有者复验报告）。正确的互斥语义是**对称的**：
+        // 写物品 → 清流体；清空 → 物品与流体两侧都清。
+        if (this.config != null) {
+            this.config.setStackInSlot(slot, ghost == null ? net.minecraft.world.item.ItemStack.EMPTY : ghost);
+        }
+        if (this.fluidMarks != null) {
+            this.fluidMarks[slot] = null;
+            this.fluidMarkAmounts[slot] = 0;
+        }
+        this.afterConfigWrite(slot);
+    }
+
+    @Override
+    public void setConfigFluid(int slot, @Nullable Fluid fluid, int amount) {
+        if (this.level == null || this.level.isClientSide || this.fluidMarks == null
+                || slot < 0 || slot >= CONFIG_GRID) {
+            return;
+        }
+        this.fluidMarks[slot] = fluid;
+        this.fluidMarkAmounts[slot] = fluid == null ? 0 : Math.max(1, amount);
+        if (fluid != null && this.config != null) {
+            this.config.setStackInSlot(slot, net.minecraft.world.item.ItemStack.EMPTY);
+        }
+        this.afterConfigWrite(slot);
+    }
+
+    /** 写配置后的公共动作：清该槽物品退避与流体退避、置脏、方块更新（客户端镜像随之刷新）。 */
+    private void afterConfigWrite(int slot) {
+        if (this.failures.length > slot) {
+            this.failures[slot] = 0;
+        }
+        if (this.fluidFailures.length > slot) {
+            this.fluidFailures[slot] = 0;
+        }
+        this.setChanged();
+        this.level.sendBlockUpdated(this.worldPosition, this.getBlockState(), this.getBlockState(),
+                net.minecraft.world.level.block.Block.UPDATE_ALL);
+    }
+
+
     @Nullable
     @Override
     public IGridNode getGridNode(Direction dir) {
@@ -136,11 +245,37 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
         return this.mainNode.getNode();
     }
 
+    /**
+     * 0.97.0：与供应器同修——afterConfigWrite/setFluidConfig 的 sendBlockUpdated 依赖本方法
+     * 才能把配置镜像发到客户端；缺它 = 配置槽/流体标记在**客户端**永远不显示（服务端行为正常，
+     * 所以「清除生效」但界面看不到）。
+     */
+    @Override
+    @Nullable
+    public net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket getUpdatePacket() {
+        return net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket.create(this);
+    }
+
     @Override
     public void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
         if (this.config != null) {
             tag.put(TAG_CONFIG, this.config.serializeNBT());
+        }
+        // C4-II：流体罐进存档也进 update tag（客户端镜像留给界面片用）。
+        tag.put(TAG_FLUID_TANKS, this.fluidTanks.serializeNBT());
+        if (this.fluidMarks != null) {
+            net.minecraft.nbt.ListTag list = new net.minecraft.nbt.ListTag();
+            for (int i = 0; i < this.fluidMarks.length; i++) {
+                net.minecraft.nbt.CompoundTag entry = new net.minecraft.nbt.CompoundTag();
+                if (this.fluidMarks[i] != null) {
+                    entry.putString("fluid",
+                            net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(this.fluidMarks[i]).toString());
+                    entry.putInt("amount", this.fluidMarkAmounts[i]);
+                }
+                list.add(entry);
+            }
+            tag.put(TAG_FLUID_CONFIG, list);
         }
         this.mainNode.saveToNBT(tag);
     }
@@ -164,6 +299,21 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
         super.load(tag);
         if (this.config != null && tag.contains(TAG_CONFIG)) {
             this.config.deserializeNBT(tag.getCompound(TAG_CONFIG));
+        }
+        // C4-II：流体罐与配置。解析不到的流体按「未配置」处理（坏数据包不该让总线拒绝载入）。
+        if (tag.contains(TAG_FLUID_TANKS)) {
+            this.fluidTanks.deserializeNBT(tag.getCompound(TAG_FLUID_TANKS));
+        }
+        if (this.fluidMarks != null && tag.contains(TAG_FLUID_CONFIG)) {
+            net.minecraft.nbt.ListTag list = tag.getList(TAG_FLUID_CONFIG, net.minecraft.nbt.Tag.TAG_COMPOUND);
+            for (int i = 0; i < this.fluidMarks.length && i < list.size(); i++) {
+                String name = list.getCompound(i).getString("fluid");
+                this.fluidMarks[i] = name.isEmpty() ? null
+                        : net.minecraft.core.registries.BuiltInRegistries.FLUID.get(
+                                net.minecraft.resources.ResourceLocation.tryParse(name));
+                this.fluidMarkAmounts[i] = this.fluidMarks[i] == null ? 0
+                        : Math.max(1, list.getCompound(i).getInt("amount"));
+            }
         }
         // 0.73.3: 客户端收到 chunk update tag 时，BlockEntity.onLoad 已经 create 了 node；
         // AE2 的 ManagedGridNode.loadFromNBT 在「节点已初始化」时会抛
@@ -209,7 +359,18 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
         } else {
             moved = MeItemBusLogic.tickOutput(inventory, new NetworkStorage(), this.failures, fullCheck);
         }
-        if (moved) {
+
+        // C4-II（0.92.0）：流体半边与物品半边同一节奏、同一失败退避结构，各自独立计数。
+        boolean fluidMoved;
+        if (input && this.fluidMarks != null) {
+            fluidMoved = com.reborn.modularmachinery.block.MeFluidBusLogic.tickInput(
+                    this.fluidTanks, this.fluidMarks, this.fluidMarkAmounts, new FluidNetworkStorage(),
+                    this.fluidFailures, fullCheck);
+        } else {
+            fluidMoved = com.reborn.modularmachinery.block.MeFluidBusLogic.tickOutput(
+                    this.fluidTanks, new FluidNetworkStorage(), this.fluidFailures, fullCheck);
+        }
+        if (moved || fluidMoved) {
             this.setChanged();
         }
     }
@@ -266,6 +427,65 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
                     IActionSource.ofMachine(MeItemBusBlockEntity.this),
                     Actionable.MODULATE);
             return clamp(moved, amount);
+        }
+    }
+
+    /**
+     * C4-II（0.92.0）：把流体罐作为**机器侧的流体端口**交给端口收集——统一总线的物品半边本来就是
+     * ITEM 家族的物品端口，这里补上流体端口那一半（所有者拍板：并入现有总线，不另立方块）。
+     */
+    @Override
+    public net.minecraftforge.fluids.capability.IFluidHandler extraFluidPort() {
+        return this.fluidTanks;
+    }
+
+    /** {@link MeFluidBusLogic.Storage} 的 AE2 流体适配器：{@code AEFluidKey} 换 {@code AEItemKey}，其余照物品半边。 */
+    private final class FluidNetworkStorage implements com.reborn.modularmachinery.block.MeFluidBusLogic.Storage {
+
+        @Override
+        public int insert(net.minecraftforge.fluids.FluidStack stack) {
+            if (stack.isEmpty()) {
+                return 0;
+            }
+            IGrid grid = mainNode.getGrid();
+            if (grid == null) {
+                return 0;
+            }
+            AEFluidKey key = AEFluidKey.of(stack);
+            if (key == null) {
+                return 0;
+            }
+            long moved = StorageHelper.poweredInsert(
+                    grid.getEnergyService(),
+                    grid.getStorageService().getInventory(),
+                    key,
+                    stack.getAmount(),
+                    IActionSource.ofMachine(MeItemBusBlockEntity.this),
+                    Actionable.MODULATE);
+            return moved <= 0 ? 0 : (int) Math.min(moved, stack.getAmount());
+        }
+
+        @Override
+        public int extract(Fluid fluid, int amount) {
+            if (fluid == null || amount <= 0) {
+                return 0;
+            }
+            IGrid grid = mainNode.getGrid();
+            if (grid == null) {
+                return 0;
+            }
+            AEFluidKey key = AEFluidKey.of(fluid);
+            if (key == null) {
+                return 0;
+            }
+            long moved = StorageHelper.poweredExtraction(
+                    grid.getEnergyService(),
+                    grid.getStorageService().getInventory(),
+                    key,
+                    amount,
+                    IActionSource.ofMachine(MeItemBusBlockEntity.this),
+                    Actionable.MODULATE);
+            return moved <= 0 ? 0 : (int) Math.min(moved, amount);
         }
     }
 

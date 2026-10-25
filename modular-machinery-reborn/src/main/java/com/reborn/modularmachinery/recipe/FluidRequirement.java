@@ -152,6 +152,14 @@ public final class FluidRequirement extends MachineRequirement {
         return transfer(ports, random, modifiers);
     }
 
+    @Override
+    public boolean reserve(HatchCollection ports, RecipeModifiers modifiers) {
+        int total = Math.multiplyExact(modifiedAmount(modifiers), parallelism());
+        return ioType() == IOType.INPUT
+                ? IngredientIo.drainFluid(ports.fluidInputs(), this.fluid, total)
+                : IngredientIo.fillFluid(ports.fluidOutputs(), this.fluid, total);
+    }
+
     private boolean transfer(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
         int total = modifiedAmount(modifiers) * this.parallelism();
         float decidedChance = modifiedChance(modifiers);

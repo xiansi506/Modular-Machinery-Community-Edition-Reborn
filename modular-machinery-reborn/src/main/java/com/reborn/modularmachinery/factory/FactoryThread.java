@@ -122,6 +122,15 @@ public final class FactoryThread {
         return this.coreThread ? 0 : FactoryThreadModel.ordinaryThreadNumber(this.ordinal);
     }
 
+    /**
+     * The slot's ordinal in the engine's own numbering — unique across core and ordinary threads alike
+     * ({@code threadNumber()} cannot serve as an identity: every core thread answers {@code 0}).
+     * The C2 factory events carry this as {@code threadOrdinal()}.
+     */
+    public int ordinal() {
+        return this.ordinal;
+    }
+
     /** A stable label for diagnostics, log lines and NBT: the name for a core thread, {@code #n} otherwise. */
     public String label() {
         return this.coreThread ? "core:" + this.threadName : "#" + threadNumber();
@@ -216,17 +225,18 @@ public final class FactoryThread {
      * answer costs no consumption at all.
      */
     boolean begin(FactoryEngine.ActiveCraft craft, HatchCollection ports, RandomSource random) {
-        RecipeModifiers modifiers = craft.modifiers();
         MachineRecipe recipe = craft.recipe();
         int parallelism = Math.max(1, craft.parallelism());
         recipe.setParallelism(parallelism);
+        MachineRecipe.StartPlan plan = craft.planStart(ports);
+        RecipeModifiers modifiers = plan.modifiers();
         recipe.applyDurationMultiplier(modifiers);
-        if (!recipe.canStart(ports, modifiers) || !recipe.canTick(ports, modifiers)) {
+        if (!recipe.canStart(ports, plan) || !recipe.canTick(ports, modifiers)) {
             return false;
         }
         this.active = craft;
         this.idleTime = 0;
-        if (!recipe.start(ports, random, modifiers)) {
+        if (!recipe.start(ports, random, plan)) {
             this.active = null;
             return false;
         }
@@ -277,6 +287,9 @@ public final class FactoryThread {
             tag.putString(TAG_ACTIVE_RECIPE, this.active.recipeId().toString());
             tag.putInt(TAG_PROGRESS, this.active.progress());
             tag.putInt(TAG_GROUP_ID, this.active.group());
+            tag.putInt("parallelism", this.active.parallelism());
+            tag.putInt("duration", this.active.duration());
+            tag.put("modifiers", this.active.modifiers().save());
         }
         return tag;
     }
@@ -291,11 +304,14 @@ public final class FactoryThread {
         if (id == null) {
             return null;
         }
-        return new SavedCraft(id, Math.max(0, tag.getInt(TAG_PROGRESS)), Math.max(0, tag.getInt(TAG_GROUP_ID)));
+        return new SavedCraft(id, Math.max(0, tag.getInt(TAG_PROGRESS)), Math.max(0, tag.getInt(TAG_GROUP_ID)),
+                Math.max(1, tag.getInt("parallelism")), Math.max(0, tag.getInt("duration")),
+                tag.contains("modifiers") ? RecipeModifiers.load(tag.getList("modifiers", net.minecraft.nbt.Tag.TAG_COMPOUND)) : null);
     }
 
     /** What a saved thread tag carries: which recipe, how far into it, and which port group it pays from. */
-    record SavedCraft(ResourceLocation recipeId, int progress, int group) {
+    record SavedCraft(ResourceLocation recipeId, int progress, int group, int parallelism, int duration,
+                      @Nullable RecipeModifiers modifiers) {
     }
 
     /** Length of the recipe list this thread is restricted to, for diagnostics. */

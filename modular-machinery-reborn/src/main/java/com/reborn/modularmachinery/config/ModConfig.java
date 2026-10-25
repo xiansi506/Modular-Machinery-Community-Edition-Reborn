@@ -127,6 +127,15 @@ public final class ModConfig {
     private static final String DISPLAY_ENERGY_KEY = "Display_Energy_Type";
     /** The original's duration-multiplier switch: general.enable-duration-multiplier. */
     private static final String ENABLE_DURATION_MULTIPLIER = "enable-duration-multiplier";
+    /** The original machine defaults in the general category. */
+    private static final String GENERAL_CASING_COLOR = "general-casing-color";
+    private static final String MACHINE_PARALLELIZE_DEFAULT = "machine-parallelize-enabled-bydefault";
+    private static final String MAX_MACHINE_PARALLELISM = "max-machine-parallelism";
+    /** The original's auto-assembly category: ink/ikx/mmce AssemblyConfig "auto-assembly". */
+    private static final String ASSEMBLY_ROOT = "auto-assembly";
+    private static final String ASSEMBLY_ITEM = "itemName";
+    private static final String ASSEMBLY_TICK = "tickBlock";
+    private static final String ASSEMBLY_NEED_ALL = "needAllBlocks";
 
     private static final Map<ParallelControllerTier, ForgeConfigSpec.IntValue> PARALLELISM =
             new EnumMap<>(ParallelControllerTier.class);
@@ -154,6 +163,12 @@ public final class ModConfig {
      * {@code build()}, and never afterwards.
      */
     private static ForgeConfigSpec.IntValue FACTORY_MAX_THREADS;
+
+    // ---- auto-assembly.* (A8, 0.106.0) -------------------------------------------------------------
+    private static ForgeConfigSpec.ConfigValue<String> ASSEMBLY_ITEM_NAME;
+    private static ForgeConfigSpec.IntValue ASSEMBLY_TICK_BLOCK;
+    private static ForgeConfigSpec.BooleanValue ASSEMBLY_NEED_ALL_BLOCKS;
+
     /**
      * {@code factory-system.enable-factory-controller-bydefault}. Same reasoning as
      * {@link #FACTORY_MAX_THREADS}.
@@ -186,6 +201,12 @@ public final class ModConfig {
     private static ForgeConfigSpec.BooleanValue ENABLE_SECURITY_SYSTEM_VALUE;
     /** general.enable-duration-multiplier. Assigned in build(). */
     private static ForgeConfigSpec.BooleanValue ENABLE_DURATION_MULTIPLIER_VALUE;
+    /** general.general-casing-color, stored as the original six digit RGB string. */
+    private static ForgeConfigSpec.ConfigValue<String> GENERAL_CASING_COLOR_VALUE;
+    /** general.machine-parallelize-enabled-bydefault. */
+    private static ForgeConfigSpec.BooleanValue MACHINE_PARALLELIZE_DEFAULT_VALUE;
+    /** general.max-machine-parallelism. */
+    private static ForgeConfigSpec.IntValue MAX_MACHINE_PARALLELISM_VALUE;
     /**
      * The original warned when structure-check-delay >= max-structure-check-delay and then reset both values
      * (TileMultiblockMachineController.java:184-188). The normalized scheduler applies the same reset; this
@@ -337,6 +358,26 @@ public final class ModConfig {
         ENABLE_DURATION_MULTIPLIER_VALUE = builder.define(
                 List.of(GENERAL_ROOT, ENABLE_DURATION_MULTIPLIER), false);
 
+        // ---- general.*: machine defaults -------------------------------------------------------------
+        // These are the three F1 entries whose defaults and consumers are established in the port: color is
+        // FFFFFF (MachineDefinition.java's existing default), parallelizable is true (its existing default),
+        // and max parallelism is 2048 (the existing constant, matching Config.maxMachineParallelism).
+        // The other four F1 keys are intentionally not declared here: one is known to collide with early block
+        // registration, and the remaining integration/render/recipe semantics do not yet have proven consumers.
+        // An inert toggle would misrepresent the feature as migrated.
+        builder.comment("Default RGB casing tint for machine definitions without an explicit 'color'.",
+                "Six hexadecimal digits, without '#'. Default FFFFFF means no tint.");
+        GENERAL_CASING_COLOR_VALUE = builder.define(List.of(GENERAL_ROOT, GENERAL_CASING_COLOR), "FFFFFF",
+                value -> value instanceof String text && text.matches("[0-9a-fA-F]{6}"));
+        builder.comment("Whether machine definitions without an explicit 'parallelizable' field may run in parallel.",
+                "Default true, matching the original machine default.");
+        MACHINE_PARALLELIZE_DEFAULT_VALUE = builder.define(
+                List.of(GENERAL_ROOT, MACHINE_PARALLELIZE_DEFAULT), true);
+        builder.comment("Default maximum parallelism for machine definitions without 'max-parallelism'.",
+                "Default 2048, matching the original Config.maxMachineParallelism.");
+        MAX_MACHINE_PARALLELISM_VALUE = builder.defineInRange(
+                List.of(GENERAL_ROOT, MAX_MACHINE_PARALLELISM), 2048, 0, Integer.MAX_VALUE);
+
         // ---- Section 6 of 6: display.energy.Display_Energy_Type ---------------------------------------
         // The original's key, in the original's own category and with the original's own spelling and casing
         // (`EnergyDisplayUtil.loadFromConfig`: cfg.getString("Display_Energy_Type", "display.energy", …)), so a
@@ -362,6 +403,19 @@ public final class ModConfig {
         // accessors, and this call is the only place they are attached to the one spec above. Not a separate
         // spec: a second COMMON registration is the startup crash the class comment describes.
         HatchConfig.define(builder);
+
+        // ---- Section 6 of 6: auto-assembly.* (A8) ------------------------------------------------------
+        // The original's AssemblyConfig ("auto-assembly"), with the two keys that have no 1.20.1 meaning left
+        // out: `itemMeta` (metadata does not exist here) and `skipBlockContainNBT` (the pattern's
+        // BlockMatcher carries no tile data, so an ingredient's NBT is always empty and the switch would
+        // never trigger).
+        builder.comment("Defines the auto-assembly defaults (the original's AssemblyConfig).");
+        ASSEMBLY_ITEM_NAME = builder.define(
+                List.of(ASSEMBLY_ROOT, ASSEMBLY_ITEM), "minecraft:stick");
+        ASSEMBLY_TICK_BLOCK = builder.defineInRange(
+                List.of(ASSEMBLY_ROOT, ASSEMBLY_TICK), 5, 1, 1000);
+        ASSEMBLY_NEED_ALL_BLOCKS = builder.define(
+                List.of(ASSEMBLY_ROOT, ASSEMBLY_NEED_ALL), true);
 
         return builder.build();
     }
@@ -389,6 +443,57 @@ public final class ModConfig {
             return tier.defaultMaxParallelism();
         }
         return value.get();
+    }
+
+    // ---- auto-assembly.* (A8, 0.106.0) ---------------------------------------------------------------
+
+    /** The registry id of the item that triggers auto-assembly when used on a controller (default stick). */
+    public static net.minecraft.resources.ResourceLocation assemblyTriggerItem() {
+        String value = ASSEMBLY_ITEM_NAME == null || !SPEC.isLoaded()
+                ? "minecraft:stick" : ASSEMBLY_ITEM_NAME.get();
+        net.minecraft.resources.ResourceLocation parsed =
+                net.minecraft.resources.ResourceLocation.tryParse(value);
+        // An unparseable or unknown id would silently disable the trigger; falling back to the stick keeps the
+        // original's own "getByNameOrId or STICK" fallback (AssemblyEventHandler:140, :186-189).
+        if (parsed == null || !net.minecraftforge.registries.ForgeRegistries.ITEMS.containsKey(parsed)) {
+            return new net.minecraft.resources.ResourceLocation("minecraft", "stick");
+        }
+        return parsed;
+    }
+
+    /** Ticks between two placed blocks while an assembly is running (the original's {@code tickBlock}). */
+    public static int assemblyTickBlock() {
+        return ASSEMBLY_TICK_BLOCK == null || !SPEC.isLoaded() ? 5 : ASSEMBLY_TICK_BLOCK.get();
+    }
+
+    /** Whether assembly refuses to start unless the player carries every ingredient (the original's key). */
+    public static boolean assemblyNeedAllBlocks() {
+        return ASSEMBLY_NEED_ALL_BLOCKS == null || !SPEC.isLoaded() || ASSEMBLY_NEED_ALL_BLOCKS.get();
+    }
+
+    /** The RGB tint assigned to a machine definition that omits its {@code color} field. */
+    public static int generalCasingColor() {
+        String fallback = "FFFFFF";
+        String value = GENERAL_CASING_COLOR_VALUE == null || !SPEC.isLoaded()
+                ? fallback : GENERAL_CASING_COLOR_VALUE.get();
+        try {
+            return Integer.parseInt(value, 16);
+        } catch (NumberFormatException ignored) {
+            // The spec validator rejects malformed persisted values. Keep the runtime fallback defensive too.
+            return 0xFFFFFF;
+        }
+    }
+
+    /** Default for {@code parallelizable} when a machine definition does not specify it. */
+    public static boolean machineParallelizeEnabledByDefault() {
+        return MACHINE_PARALLELIZE_DEFAULT_VALUE == null || !SPEC.isLoaded()
+                ? true : MACHINE_PARALLELIZE_DEFAULT_VALUE.get();
+    }
+
+    /** Default for {@code max-parallelism} when a machine definition does not specify it. */
+    public static int maxMachineParallelism() {
+        return MAX_MACHINE_PARALLELISM_VALUE == null || !SPEC.isLoaded()
+                ? 2048 : MAX_MACHINE_PARALLELISM_VALUE.get();
     }
 
     /**

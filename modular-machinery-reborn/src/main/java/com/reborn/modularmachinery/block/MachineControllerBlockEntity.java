@@ -339,6 +339,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      */
     @Nullable
     private RecipeModifiers activeCraftModifiers;
+    private MachineRecipe executionRecipeSource;
+    private MachineRecipe executionRecipe;
+    private CompoundTag pendingFactoryState;
+    private java.util.Set<BlockPos> formedPartOffsets = java.util.Set.of();
 
     /** The ceiling the last recipe search computed, i.e. what the screen's "max parallelism" line shows. */
     private int parallelCeiling = 1;
@@ -442,6 +446,18 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     private String startFailureKey;
 
     /**
+     * C2b（0.88.0）：**任意字符串**的失败原因（第三方 {@code RecipeCheckEvent.setFailed} 写入），
+     * 与固定失败键并行。菜单整数槽装不下字符串，所以它走方块实体的 update tag
+     * （{@code saveAdditional} → {@code getUpdateTag} 即 {@code saveWithoutMetadata}），客户端在
+     * {@code load} 里镜像到 {@link #clientFailureCause}。
+     */
+    @Nullable
+    private String startFailureCause;
+    /** 客户端镜像；服务端不看它，与 {@link #clientStartFailure} 的分工相同。 */
+    @Nullable
+    private String clientFailureCause;
+
+    /**
      * The client's mirror of {@link #startFailureKey}; see {@code MachineControllerMenu#startFailureOrdinal}.
      *
      * <p>Initialised to {@link #NO_START_FAILURE}, not left at the field's {@code 0}. {@code 0} is a <b>valid</b>
@@ -456,6 +472,59 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 ? controller.boundMachine() : null;
         this.factoryBlock = state.getBlock() instanceof MachineControllerBlock controller && controller.factory();
         this.factoryEngine = new FactoryEngine(new FactoryHostImpl());
+    }
+
+    // ------------------------------------------------------- F3（0.86.0）：已加载控制器名单
+
+    /**
+     * 服务端当前加载的每一个控制器，{@code /mm-performance_report} 枚举用。弱键：区块卸载、世界关闭后
+     * 方块实体可被回收，名单不会把它钉在内存里——静态强引用名单会在单机「退出世界再进另一个世界」时
+     * 永久泄漏上一世界的实体。所有访问都在 {@code synchronized (LOADED_CONTROLLERS)} 下进行：名单基本只在
+     * 服务端线程动，但命令可能在网络线程读，加锁比论证「其实单线程」便宜。
+     */
+    private static final java.util.WeakHashMap<MachineControllerBlockEntity, Boolean> LOADED_CONTROLLERS =
+            new java.util.WeakHashMap<>();
+
+    private static void registerLoaded(MachineControllerBlockEntity controller, boolean add) {
+        synchronized (LOADED_CONTROLLERS) {
+            if (add) {
+                LOADED_CONTROLLERS.put(controller, Boolean.TRUE);
+            } else {
+                LOADED_CONTROLLERS.remove(controller);
+            }
+        }
+    }
+
+    /** F3：当前加载的服务端控制器（快照拷贝）。弱键条目被回收与否由 GC 决定，条数只是下界。 */
+    public static java.util.List<MachineControllerBlockEntity> loadedControllers() {
+        synchronized (LOADED_CONTROLLERS) {
+            return java.util.List.copyOf(LOADED_CONTROLLERS.keySet());
+        }
+    }
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (this.level != null && !this.level.isClientSide) {
+            registerLoaded(this, true);
+        }
+    }
+
+    @Override
+    public void onChunkUnloaded() {
+        // 显式摘除（弱键最终也会被 GC 收走）：刚卸载但引用还在别处的实体，不该出现在下一份报告里。
+        if (this.level == null || !this.level.isClientSide) {
+            registerLoaded(this, false);
+        }
+        super.onChunkUnloaded();
+    }
+
+    @Override
+    public void setRemoved() {
+        if (this.level == null || !this.level.isClientSide) {
+            registerLoaded(this, false);
+        }
+        super.setRemoved();
     }
 
     /** The player who owns this controller, or {@code null} for a save written before A11 or an invalid tag. */
@@ -537,6 +606,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // 波 3b：动态机器要用**有效结构**（基座 + 量出来的各段）来收集端口与控制器，而不是定义里的基座。
             // 没有动态结构的机器，match.pattern() 就是基座本身，所以这段改动对它们没有任何影响。
             MachinePattern effectivePattern = match == null ? null : match.pattern();
+            be.formedPartOffsets = effectivePattern == null ? java.util.Set.of()
+                    : java.util.Set.copyOf(effectivePattern.positions().keySet());
             if (match == null) {
                 // The original incremented structureCheckCounter and cleared the recipe retry counter when a
                 // check failed (TileMultiblockMachineController.java:414 and :409-411, through resetMachine).
@@ -625,6 +696,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // settlements instead. Everything above is shared (structure check, hatches, buses and modifiers, the
         // redstone gate), and everything below belongs to the one-craft-per-machine engine.
         if (be.factoryEnabled) {
+            if (be.pendingFactoryState != null) {
+                CompoundTag pending = be.pendingFactoryState;
+                be.pendingFactoryState = null;
+                be.loadFactoryThreads(pending);
+            }
             be.factoryEngine.tick();
             be.status = be.factoryEngine.isWorking() ? ControllerStatus.CRAFTING : ControllerStatus.IDLE;
             be.parallelCeiling = be.factoryEngine.availableParallelism(null);
@@ -680,7 +756,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // 没有组号的在途合成来自 A2 之前的存档，按旧行为用全部端口，不让升级把正在跑的东西打断。
         HatchCollection scope;
         GroupScope startGroup = null;
-        if (be.progress == 0) {
+        if (be.activeRecipeId == null) {
             startGroup = be.startableGroup(recipe);
             if (startGroup == null) {
                 // 今天不会走到这里（findRecipe 只返回至少有一组能开工的配方），但把「找不到组」说成
@@ -700,30 +776,44 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         }
 
         RecipeModifiers effective;
-        if (be.progress == 0) {
+        if (be.activeRecipeId == null) {
             // B9：催化剂只在**这次开工确实带着**时并入，且一旦并入就冻结到合成结束。不能每 tick 按当前
             // 库存重算——催化剂在 start 时已被消耗，重算会让 modifier 中途消失。
-            effective = startGroup.modifiers();
+            MachineRecipe.StartPlan prepared = recipe.prepareStart(scope, be.modifiers);
+            effective = prepared.modifiers();
             recipe.applyDurationMultiplier(effective);
             be.maxProgress = recipe.duration(effective);
 
-            int parallelism = be.computeParallelism(recipe, scope, effective);
+            int parallelism = be.computeParallelism(recipe, scope, prepared);
             be.parallelCeiling = Math.max(1, parallelism);
             if (parallelism < 1) {
                 // The original fell back to a plain single-copy check when nothing could be parallelised.
                 parallelism = 1;
             }
             recipe.setParallelism(parallelism);
+            prepared = recipe.prepareStart(scope, be.modifiers);
+            effective = prepared.modifiers();
             // C2: the original's RecipeCheckEvent, START half, before canStart/canTick. A listener may lower
             // the parallelism for this start; the event resolves through min(computed, requested) with a floor
             // of one, so it cannot exceed the structure's ceiling or ask for zero copies.
             RecipeCheckEvent startCheck = be.postRecipeCheck(Phase.START, recipe, parallelism);
+            if (startCheck.isCanceled()) {
+                // C2b（0.88.0）：监听器否决开工——理由经字符串通道显示，不问门槛、什么都不扣。
+                be.recordStartFailureCause(startCheck.failureReason());
+                be.status = ControllerStatus.IDLE;
+                be.recordTiming(tickStart, searchNanos);
+                return;
+            }
             int requested = startCheck.resolvedParallelism(parallelism);
             if (requested != parallelism) {
                 parallelism = requested;
                 recipe.setParallelism(parallelism);
+                prepared = recipe.prepareStart(scope, be.modifiers);
+                effective = prepared.modifiers();
             }
-            if (!recipe.canStart(scope, effective) || !recipe.canTick(scope, effective)) {
+            recipe.applyDurationMultiplier(effective);
+            be.maxProgress = recipe.duration(effective);
+            if (!recipe.canStart(scope, prepared) || !recipe.canTick(scope, effective)) {
                 // M6d-b: say *which* start-phase requirement refused, so an interface_number_input mismatch is
                 // reported as the original's own message rather than as a bare "idle".
                 be.recordStartFailure(recipe, scope);
@@ -734,12 +824,23 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // C2: the original's RecipeCheckEvent, END half, after both gates said yes and before the one-shot
             // inputs are paid. A second override still cannot raise the ceiling; the last write wins.
             RecipeCheckEvent endCheck = be.postRecipeCheck(Phase.END, recipe, parallelism);
+            if (endCheck.isCanceled()) {
+                // C2b：END 段否决——门槛已过、一次性输入**尚未支付**，同样不开工、不扣任何东西。
+                be.recordStartFailureCause(endCheck.failureReason());
+                be.status = ControllerStatus.IDLE;
+                be.recordTiming(tickStart, searchNanos);
+                return;
+            }
             int adjusted = endCheck.resolvedParallelism(parallelism);
             if (adjusted != parallelism) {
                 parallelism = adjusted;
                 recipe.setParallelism(parallelism);
+                prepared = recipe.prepareStart(scope, be.modifiers);
+                effective = prepared.modifiers();
+                recipe.applyDurationMultiplier(effective);
+                be.maxProgress = recipe.duration(effective);
             }
-            if (!recipe.start(scope, level.random, effective)) {
+            if (!recipe.start(scope, level.random, prepared)) {
                 be.recordStartFailure(recipe, scope);
                 be.status = ControllerStatus.IDLE;
                 be.recordTiming(tickStart, searchNanos);
@@ -771,8 +872,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.maxProgress = recipe.duration(effective);
         }
 
-        // The craft's parallelism is frozen at start, so re-assert it every tick: the recipe object is shared
-        // with every other controller in the level.
+        // Re-assert this craft's frozen parallelism on its execution copy before settling the tick.
         recipe.setParallelism(be.activeParallelism);
 
         // C2: the original's RecipeTickEvent, START half, before this tick's requirements are paid. Preventing
@@ -793,7 +893,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.recordTiming(tickStart, searchNanos);
             return;
         }
-        if (!recipe.canTick(scope, effective)) {
+        if (!recipe.canTick(scope, effective) || !recipe.tick(scope, level.random, effective)) {
             // A per-tick requirement cannot be served right now: the original's failed ioTick
             // (RecipeCraftingContext:238-298) and the one place failure-action acts.
             be.applyFailureAction(recipe);
@@ -801,7 +901,6 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             be.recordTiming(tickStart, searchNanos);
             return;
         }
-        recipe.tick(scope, level.random, effective);
         // C2: the original's RecipeTickEvent, END half, after the tick's requirements were paid and before the
         // controller counts the tick. A listener that prevents here cannot be refunded — the original could not
         // refund either — so the net effect is one tick of resources for no progress, which the event documents.
@@ -818,7 +917,18 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         be.status = ControllerStatus.CRAFTING;
 
         if (be.progress >= be.maxProgress) {
-            recipe.finish(scope, level.random, effective);
+            // C2 小件（0.91.0）：结算前发 ResultChanceCreateEvent——监听器可替换本次产物掷点的随机源
+            // （旧版替换 ResultChance 的等价物）；不替换时就是 level.random，行为与从前一致。
+            com.reborn.modularmachinery.api.event.ResultChanceCreateEvent chance =
+                    com.reborn.modularmachinery.api.event.MachineEvents.post(
+                            new com.reborn.modularmachinery.api.event.ResultChanceCreateEvent(be, be.machineId,
+                                    recipe, be.progress, be.maxProgress, be.activeParallelism, level.random));
+            if (!recipe.finish(scope, chance.random(), effective)) {
+                be.progress = Math.max(0, be.maxProgress - 1);
+                be.setChanged();
+                be.recordTiming(tickStart, searchNanos);
+                return;
+            }
             // C2: after the outputs were settled and before the craft's state is cleared, so a listener sees the
             // finished craft's recipe, max progress and parallelism rather than the next idle tick.
             be.postRecipeFinish(recipe);
@@ -884,7 +994,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * <p>{@code parallelizable: false} collapses it to 1 exactly as the original's {@code isParallelized} did.
      */
     private int machineCeiling() {
-        MachineDefinition definition = MachineRegistry.byId(this.machineId).orElse(null);
+        MachineDefinition definition = MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide).orElse(null);
         if (definition == null) {
             return 1;
         }
@@ -951,7 +1061,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (!isServerSide()) {
             return Math.max(0, this.clientFactoryMaxThreads);
         }
-        return MachineRegistry.byId(this.machineId)
+        return MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide)
                 .map(FactoryThreadModel::maxThreads)
                 .orElse(FactoryThreadModel.DEFAULT_MAX_THREADS);
     }
@@ -997,6 +1107,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * interface are the only coupling between "the arithmetic" and "the block".
      */
     private final class FactoryHostImpl implements FactoryHost {
+
+        @Override
+        public MachineControllerBlockEntity controller() {
+            return MachineControllerBlockEntity.this;
+        }
 
         @Override
         public RecipeModifiers modifiers() {
@@ -1146,12 +1261,12 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * <p>{@code 0} means "not parallelisable right now", in which case the caller runs a single copy. That is
      * the original's {@code canStartCrafting} fallback.
      */
-    private int computeParallelism(MachineRecipe recipe, HatchCollection scope, RecipeModifiers modifiers) {
+    private int computeParallelism(MachineRecipe recipe, HatchCollection scope, MachineRecipe.StartPlan plan) {
         int machineCeiling = this.machineCeiling();
         if (machineCeiling <= 1) {
             return 0;
         }
-        return recipe.parallelism(scope, modifiers, machineCeiling);
+        return recipe.parallelism(scope, plan, machineCeiling);
     }
 
     /**
@@ -1184,11 +1299,12 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      */
     @Nullable
     private GroupScope startableGroup(MachineRecipe recipe) {
+        recipe.setParallelism(1);
         for (int groupId : this.hatches.groupIds()) {
             HatchCollection scope = this.hatches.withGroup(groupId);
-            RecipeModifiers effective = this.modifiers.andThen(recipe.catalystModifiers(scope));
-            if (recipe.canStart(scope, effective)) {
-                return new GroupScope(groupId, scope, effective);
+            MachineRecipe.StartPlan plan = recipe.prepareStart(scope, this.modifiers);
+            if (recipe.canStart(scope, plan)) {
+                return new GroupScope(groupId, scope, plan.modifiers());
             }
         }
         return null;
@@ -1272,7 +1388,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // Without a bound machine there is no single pattern to test, so the distinction cannot be made.
             return false;
         }
-        MachineDefinition definition = MachineRegistry.byId(this.boundMachine).orElse(null);
+        MachineDefinition definition = MachineRegistry.byId(this.boundMachine, this.level != null && this.level.isClientSide).orElse(null);
         if (definition == null) {
             return false;
         }
@@ -1324,20 +1440,29 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * The recipe-aware form of {@link #applyFailureAction()}: a recipe that sets the original's
      * {@code cancelIfPerTickFails} drops this craft outright on a failed per-tick check.
      *
-     * <p>The original's {@code onFailure} passed the flag into {@code RecipeFailureEvent} and acted on
-     * {@code isDestructRecipe()} by clearing the active recipe and its context
-     * ({@code TileMachineController.java:207-217,282-294}); the inputs paid at start were not refunded. This port
-     * has no failure-event layer yet (C2), so the flag is consumed directly. {@link #abortCraft()} is the same
-     * state reset the event produced: progress, active recipe, group and frozen modifiers all go.
+     * <p><b>0.88.0（C2b）起走事件</b>：默认值仍是配方的 {@code cancelIfPerTickFails}（旧版
+     * {@code recipe.doesCancelRecipeOnPerTickFailure()}），但先发
+     * {@link com.reborn.modularmachinery.api.event.RecipeFailureEvent}，第三方可以按次改写
+     * {@code destructRecipe}——0.75.0–0.87.1 期间直接读字段的差异（见 0.75.0 的交付记录）就此收回。
+     * 旧版行为照搬：{@code true} → 清掉这次合成（进度、激活配方、组、冻结修改器；已付一次性输入
+     * **不返还**）；{@code false} → 走机器的 {@code failure-action}。{@link #abortCraft()} 是与旧版
+     * 事件路径相同的状态复位。
      *
      * <p>No NBT key is added. A cancel can only happen while a craft is in flight, and after a reload the
      * controller re-resolves the recipe by id; the flag lives on that recipe, so the next failed tick reaches
      * this method with the same answer.
      */
     private void applyFailureAction(@Nullable MachineRecipe recipe) {
-        if (recipe != null && recipe.cancelIfPerTickFails()) {
-            this.abortCraft();
-            return;
+        if (recipe != null) {
+            com.reborn.modularmachinery.api.event.RecipeFailureEvent event =
+                    com.reborn.modularmachinery.api.event.MachineEvents.post(
+                            new com.reborn.modularmachinery.api.event.RecipeFailureEvent(this, this.machineId,
+                                    recipe, this.progress, this.maxProgress, this.activeParallelism,
+                                    this.startFailureKey, recipe.cancelIfPerTickFails()));
+            if (event.destructRecipe()) {
+                this.abortCraft();
+                return;
+            }
         }
         this.applyFailureAction();
     }
@@ -1423,7 +1548,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * (a controller between structures, or a data pack whose machine is gone).
      */
     private FailureAction failureAction() {
-        return MachineRegistry.byId(this.machineId)
+        return MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide)
                 .map(MachineDefinition::failureAction)
                 .orElse(MachineDefinition.DEFAULT_FAILURE_ACTION);
     }
@@ -1434,13 +1559,65 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      */
     @Nullable
     private MachineRecipe resolveRecipe(Level level) {
-        if (this.progress > 0 && this.activeRecipeId != null) {
+        if (this.activeRecipeId != null) {
             return level.getRecipeManager().byKey(this.activeRecipeId)
                     .filter(recipe -> recipe instanceof MachineRecipe)
-                    .map(recipe -> (MachineRecipe) recipe)
+                    .map(recipe -> executionCopyOf((MachineRecipe) recipe))
                     .orElse(null);
         }
         return this.findRecipe(level);
+    }
+
+    private MachineRecipe executionCopyOf(MachineRecipe source) {
+        if (executionRecipeSource != source || executionRecipe == null) {
+            executionRecipeSource = source;
+            executionRecipe = source.executionCopy();
+        }
+        return executionRecipe;
+    }
+
+    /**
+     * E9 能量行（0.105.0）：当前合成每 tick 的能量快照，{@code [消耗, 生成]}（FE/t）。
+     *
+     * <p>旧版 {@code MMInfoProvider}（TOP）的能量行：普通机器取当前线程 context 的
+     * {@code RequirementEnergy}（INPUT/OUTPUT 各取第一个），数值 = 需求值 × modifiers ×
+     * durationMul × parallelism（{@code getEnergyRequired :306-320}）。本版同一条链已经住在
+     * {@code EnergyRequirement.perTickDraw} 里——它就是逐 tick 结算用的算式，这里只做聚合展示，
+     * 不另立口径。合成没在跑（或配方/修饰符丢失）时两个数都是 0，Jade 侧就不显示能量行。
+     *
+     * <p><b>范围</b>：单配方引擎。工厂引擎的多线程聚合（旧版把 core 与普通线程逐条加总）是
+     * 另一个口径，留 E9 后续片——这里对工厂控制器返回 0，即不显示，而不是显示一个错的数。
+     */
+    public long[] energySnapshot(@Nullable Level level) {
+        if (level == null || this.status != ControllerStatus.CRAFTING
+                || this.activeRecipeId == null || this.factoryEnabled) {
+            return new long[]{0L, 0L};
+        }
+        MachineRecipe recipe = resolveRecipe(level);
+        if (recipe == null) {
+            return new long[]{0L, 0L};
+        }
+        RecipeModifiers modifiers = this.activeCraftModifiers == null
+                ? RecipeModifiers.EMPTY : this.activeCraftModifiers;
+        recipe.setParallelism(this.activeParallelism);
+        recipe.applyDurationMultiplier(modifiers);
+        long input = 0L;
+        long output = 0L;
+        for (com.reborn.modularmachinery.recipe.MachineRequirement requirement : recipe.requirements()) {
+            if (!(requirement instanceof com.reborn.modularmachinery.recipe.EnergyRequirement energy)) {
+                continue;
+            }
+            long draw = energy.perTickDraw(modifiers);
+            if (draw <= 0L) {
+                continue;
+            }
+            if (energy.ioType() == com.reborn.modularmachinery.recipe.IOType.INPUT) {
+                input += draw;
+            } else {
+                output += draw;
+            }
+        }
+        return new long[]{input, output};
     }
 
     /**
@@ -1501,7 +1678,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // A2：能开工 = 至少有一组能开工。锁定哪一组由 tick 里那次 startableGroup 决定，两步必须
             // 问同一个问题，否则会出现「选出了配方、开工时却找不到组」。
             if (this.startableGroup(recipe) != null) {
-                return recipe;
+                return executionCopyOf(recipe);
             }
         }
         return null;
@@ -1528,6 +1705,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 // Builder 会再按种类归一一次，两层都挡「输出仓被分组」。
                 builder.add(hatch.kind(), hatch.itemHandler(), hatch.fluidTank(), hatch.energyStorage(),
                         effectivePattern.tag(relative), hatch.effectiveGroup());
+                // C4-II（0.92.0，统一总线）：ME 总线的流体半边作为流体端口另入桶（ITEM 家族的分桶
+                // 不会带上它）；普通仓口 extraFluidPort() 为 null，这里什么都不加。
+                net.minecraftforge.fluids.capability.IFluidHandler extraFluid = hatch.extraFluidPort();
+                if (extraFluid != null) {
+                    builder.addFluidPort(extraFluid, hatch.kind().isInput(), effectivePattern.tag(relative),
+                            hatch.kind().canGroupInput() ? hatch.effectiveGroup() : -1);
+                }
                 // 波 5.3：**兼容端口**。主模组不知道那是什么能力（气体？灵气？），所以只把实体交出去，
                 // 由装了相应模组的兼容层回答。没装时这里什么都不加，桶保持为空。
                 builder.gasPorts(hatch, hatch.kind().isInput(), effectivePattern.tag(relative),
@@ -1647,7 +1831,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
     /** The declared interface types of the formed machine, in declaration order. */
     public List<SmartInterfaceType> declaredSmartInterfaces() {
-        MachineDefinition definition = MachineRegistry.byId(this.machineId).orElse(null);
+        MachineDefinition definition = MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide).orElse(null);
         return definition == null ? List.of() : definition.smartInterfaces();
     }
 
@@ -1669,7 +1853,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      */
     @Nullable
     public Float setSmartInterfaceValue(String type, float value) {
-        Float stored = this.smartInterfaces.set(MachineRegistry.byId(this.machineId).orElse(null), type, value);
+        Float stored = this.smartInterfaces.set(MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide).orElse(null), type, value);
         if (stored == null) {
             return null;
         }
@@ -1677,6 +1861,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (this.level != null && !this.level.isClientSide) {
             this.level.sendBlockUpdated(this.worldPosition, this.getBlockState(), this.getBlockState(),
                     Block.UPDATE_ALL);
+            // C2 小件（0.91.0）：成功写入后发事件（写入被拒不发）。所有服务端写入路径都过这里。
+            com.reborn.modularmachinery.api.event.MachineEvents.post(
+                    new com.reborn.modularmachinery.api.event.SmartInterfaceUpdateEvent(this, this.machineId,
+                            type, stored));
         }
         return stored;
     }
@@ -1763,6 +1951,33 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** {@link #recordStartFailure(MachineRecipe)} for the cases with no recipe at all. */
     private void clearStartFailure() {
         recordStartFailureKey(null);
+        recordStartFailureCause(null);
+    }
+
+    /**
+     * C2b（0.88.0）：记录**任意字符串**的失败原因（{@code RecipeCheckEvent.setFailed} 的通道半边），
+     * 与固定失败键并行存在。与 {@link #recordStartFailureKey} 同一套镜像动作：赋值、setChanged、
+     * 服务端发方块更新——字符串走 update tag，客户端在 {@code load} 里镜像。
+     */
+    private void recordStartFailureCause(@Nullable String cause) {
+        if (java.util.Objects.equals(cause, this.startFailureCause)) {
+            return;
+        }
+        this.startFailureCause = cause;
+        this.setChanged();
+        if (this.level != null && !this.level.isClientSide) {
+            this.level.sendBlockUpdated(this.worldPosition, this.getBlockState(), this.getBlockState(),
+                    Block.UPDATE_ALL);
+        }
+    }
+
+    /**
+     * 当前失败原因字符串（C2b 通道），没有则为 {@code null}。客户端读镜像字段——与
+     * {@link #startFailureKey()} 的两侧分工相同。
+     */
+    @Nullable
+    public String failureCauseText() {
+        return isServerSide() ? this.startFailureCause : this.clientFailureCause;
     }
 
     private void recordStartFailureKey(@Nullable String key) {
@@ -1798,7 +2013,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     /** Display name of the formed machine, or {@code null} when the structure does not match anything. */
     @Nullable
     public Component machineName() {
-        return MachineRegistry.byId(this.machineId).map(MachineDefinition::displayName).orElse(null);
+        return MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide).map(MachineDefinition::displayName).orElse(null);
     }
 
     /**
@@ -1813,10 +2028,18 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         return com.reborn.modularmachinery.item.BlueprintItem.machineOf(items.getStackInSlot(BLUEPRINT_SLOT));
     }
 
+    /** 建造/投影也要能在结构尚未成型时确定目标机器。 */
+    @Nullable
+    public ResourceLocation previewMachineId() {
+        if (formed && machineId != null) return machineId;
+        if (boundMachine != null) return boundMachine;
+        return blueprintMachineId();
+    }
+
     /** Display name of the blueprint's machine, or {@code null} when none is slotted or it is unknown here. */
     @Nullable
     public Component blueprintMachineName() {
-        return MachineRegistry.byId(blueprintMachineId()).map(MachineDefinition::displayName).orElse(null);
+        return MachineRegistry.byId(blueprintMachineId(), this.level != null && this.level.isClientSide).map(MachineDefinition::displayName).orElse(null);
     }
 
     public boolean isRedstoneStopped() { return redstoneStopped; }
@@ -1829,10 +2052,19 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * <p>公开它是因为**动态结构的展开依赖朝向**：诊断命令要把「世界里实际生效的位置标签」重新算一遍，
      * 而只按定义展开（朝向 0）会得到一份与实际不同的标签表——那正好会让诊断给出错误答案。
      */
-    public int rotationSteps() { return this.rotationSteps; }
+    public int rotationSteps() {
+        BlockState state = getBlockState();
+        return formed || state == null || !state.hasProperty(MachineControllerBlock.FACING)
+                ? rotationSteps : MachineRegistry.rotationStepsFor(state.getValue(MachineControllerBlock.FACING));
+    }
 
     /** The ports gathered from the formed structure. */
     public HatchCollection hatches() { return this.hatches; }
+
+    /** 真实匹配结构中的成员关系，供应器不能以邻近搜索猜测归属。 */
+    public boolean containsStructurePart(BlockPos part) {
+        return formed && formedPartOffsets.contains(part.subtract(worldPosition));
+    }
 
     /** A2：正在跑的合成锁定的输入组；{@code null} 表示没有合成在跑（或是在途的旧存档）。 */
     @Nullable
@@ -1849,6 +2081,12 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
     public int progress() { return progress; }
     public int maxProgress() { return maxProgress; }
+
+    /** E9（0.99.0）：Jade 信息用的只读访问器——当前并行份数（未开工时为 1）。 */
+    public int activeParallelism() { return this.activeParallelism; }
+
+    /** E9（0.99.0）：Jade 信息用的只读访问器——结构并行上限（delegating 到 machineCeiling）。 */
+    public int parallelCeiling() { return this.machineCeiling(); }
 
     // ------------------------------------------------------- parallelism and timing
 
@@ -1916,6 +2154,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * stale ones to resume.
      */
     public void saveFactoryThreads(CompoundTag tag) {
+        if (pendingFactoryState != null) {
+            if (pendingFactoryState.contains("threadList")) tag.put("threadList", pendingFactoryState.get("threadList").copy());
+            if (pendingFactoryState.contains("coreThreadList")) tag.put("coreThreadList", pendingFactoryState.get("coreThreadList").copy());
+            return;
+        }
         if (this.factoryEnabled && this.formed) {
             this.factoryEngine.save(tag);
         }
@@ -1926,6 +2169,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * re-checked, so the recipe lookup goes through the live recipe manager when the level is available.
      */
     public void loadFactoryThreads(CompoundTag tag) {
+        if (this.level == null) {
+            this.pendingFactoryState = tag.copy();
+            return;
+        }
         this.factoryEngine.load(tag, id -> {
             Level level = this.level;
             if (level == null || id == null) {
@@ -1935,7 +2182,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                     .filter(recipe -> recipe instanceof MachineRecipe)
                     .map(recipe -> (MachineRecipe) recipe)
                     .orElse(null);
-        }, MachineRegistry.byId(this.machineId).map(MachineDefinition::coreThreads).orElse(List.of()));
+        }, MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide).map(MachineDefinition::coreThreads).orElse(List.of()));
     }
 
     /** 动态结构定格值的 NBT 键，与旧版同义（它把一组 {@code DynamicPattern.Status} 存进一个 tag）。 */
@@ -2196,6 +2443,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         tag.putInt("status", status.ordinal());
         tag.putInt("activeParallelism", activeParallelism);
         tag.putInt("activeDuration", activeDuration);
+        if (activeCraftModifiers != null) tag.put("activeModifiers", activeCraftModifiers.save());
         // A2：正在跑的那组。不存的话重进世界会退回「全部端口」，等于中途换料。
         if (activeGroupId != null) {
             tag.putInt("activeGroupId", activeGroupId);
@@ -2205,6 +2453,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         }
         // A11: the original wrote this as a UUID string under "owner" (TileMultiblockMachineController:1415-1417).
         ControllerSecurity.putOwner(tag, this.owner);
+        // C2b：失败原因字符串。既进存档（重进世界后界面仍显示第三方给的理由）也进 update tag（同步）。
+        if (this.startFailureCause != null && !this.startFailureCause.isEmpty()) {
+            tag.putString("failureCause", this.startFailureCause);
+        }
         // 波 6：染色。与 machineId 同路同步到客户端——渲染时的 tint 读的就是它。
         if (machineColor != null) {
             tag.putInt("machineColor", machineColor);
@@ -2242,9 +2494,18 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         status = ControllerStatus.byOrdinal(tag.getInt("status"));
         activeParallelism = Math.max(1, tag.getInt("activeParallelism"));
         activeDuration = Math.max(1, tag.getInt("activeDuration"));
+        activeCraftModifiers = tag.contains("activeModifiers")
+                ? RecipeModifiers.load(tag.getList("activeModifiers", Tag.TAG_COMPOUND)) : null;
+        executionRecipe = null;
+        executionRecipeSource = null;
         // A2：缺这个键的存档（0.63.9 及更早）代表「在途合成没有组」——保持 null，tick 里按全部端口继续。
         activeGroupId = tag.contains("activeGroupId") ? tag.getInt("activeGroupId") : null;
         machineId = tag.contains("machine") ? ResourceLocation.tryParse(tag.getString("machine")) : null;
+        // C2b：失败原因字符串。磁盘加载（服务端）与 update tag 加载（客户端）都会走这里——
+        // 两侧各自要自己的字段，所以两边都写。
+        String loadedCause = tag.contains("failureCause") ? tag.getString("failureCause") : null;
+        this.startFailureCause = loadedCause;
+        this.clientFailureCause = loadedCause;
         // A11: an absent or malformed owner stays null; the original only warned and left the field unset.
         this.owner = ControllerSecurity.ownerOf(tag);
         machineColor = tag.contains("machineColor") ? tag.getInt("machineColor") : null;
@@ -2260,7 +2521,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // engine's thread list must not be read as "single-craft" state in the tick between load and the first
         // structure check.
         this.factoryEnabled = FactoryThreadModel.factoryEnabled(this.factoryBlock,
-                MachineRegistry.byId(this.machineId).orElse(null));
+                MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide).orElse(null));
         loadFactoryThreads(tag);
         // 波 3b：把定格下来的动态结构读回来。它必须在第一次结构核对之前就位，否则那一 tick 里
         // 配方的 selector-tag 会指向一个还不存在的段（读到空端口集合），表现为「重进世界后合成停一下」。

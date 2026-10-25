@@ -1,5 +1,11 @@
 package com.reborn.modularmachinery.factory;
 
+import com.reborn.modularmachinery.api.event.FactoryRecipeFailureEvent;
+import com.reborn.modularmachinery.api.event.FactoryRecipeFinishEvent;
+import com.reborn.modularmachinery.api.event.FactoryRecipeStartEvent;
+import com.reborn.modularmachinery.api.event.FactoryRecipeTickEvent;
+import com.reborn.modularmachinery.api.event.MachineEvents;
+import com.reborn.modularmachinery.api.event.Phase;
 import com.reborn.modularmachinery.machine.HatchCollection;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
 import com.reborn.modularmachinery.recipe.RecipeModifiers;
@@ -278,12 +284,13 @@ public final class FactoryEngine {
             // will keep drawing from for the rest of the settlement.
             for (int group : ports.groupIds()) {
                 HatchCollection groupPorts = ports.withGroup(group);
-                // B9: a catalyst is optional and is counted only where it is present, so the effective
-                // modifiers belong to the (recipe, group) pair. They are frozen into the candidate; the host's
-                // base modifiers stay untouched because every thread shares them.
-                RecipeModifiers effective = modifiers.andThen(recipe.catalystModifiers(groupPorts));
-                if (recipe.canStart(groupPorts, effective)) {
-                    out.add(new Candidate(recipe, group, effective));
+                // A candidate is checked on a single-copy execution view. Its final allocation and catalyst
+                // payments are recomputed when the thread starts; registry definitions remain untouched.
+                MachineRecipe candidate = recipe.executionCopy();
+                candidate.setParallelism(1);
+                MachineRecipe.StartPlan plan = candidate.prepareStart(groupPorts, modifiers);
+                if (candidate.canStart(groupPorts, plan)) {
+                    out.add(new Candidate(recipe, group));
                 }
             }
         }
@@ -291,10 +298,9 @@ public final class FactoryEngine {
     }
 
     /**
-     * One startable pairing of a recipe with the port group it was proved to pay in, plus the modifiers that
-     * pairing froze (B9: catalyst modifiers depend on which group's ports hold the catalyst).
+     * A definition and the port group that can fund one copy. A thread prepares its own final start plan.
      */
-    private record Candidate(MachineRecipe recipe, int group, RecipeModifiers modifiers) {
+    private record Candidate(MachineRecipe recipe, int group) {
     }
 
     /** The slot the next recipe should go to: an idle ordinary thread first, otherwise a new one. */
@@ -335,8 +341,8 @@ public final class FactoryEngine {
             if (thread.accepts(candidate.recipe())) {
                 // The candidate list was built from `canStart` for that group, so the first entry this thread
                 // accepts is startable.
-                return new ActiveCraft(candidate.recipe(), availableParallelism(thread), candidate.group(),
-                        candidate.modifiers());
+                ActiveCraft craft = prepareCraft(candidate.recipe(), candidate.group(), thread);
+                if (craft != null) return craft;
             }
         }
         return null;
@@ -351,9 +357,29 @@ public final class FactoryEngine {
         // The original fired FactoryRecipeStartEvent and called activeRecipe.start(context) here; the start is
         // already done (it is what makes begin() succeed), so only the controller's bookkeeping is left.
         this.host.onThreadStarted(thread);
+        // C2 收尾（0.89.0）：开工成后发事件，与单控制器同一条规矩——只读不可取消（旧版「取消照样开工」
+        // 是 1.12 残留，不复制；要否决开工用 RecipeCheckEvent.setFailed，0.88.0 起可否决）。
+        MachineEvents.post(new FactoryRecipeStartEvent(this.host.controller(), this.host.controller().machineId(),
+                craft.recipe(), craft.progress(), craft.duration(), craft.parallelism(), thread.ordinal()));
         // B8: startCommands run once the craft is really armed for this thread.
         this.host.runRecipeCommands(thread, craft.recipe(), FactoryHost.PHASE_START, 0);
         return true;
+    }
+
+    private ActiveCraft prepareCraft(MachineRecipe definition, int group, FactoryThread thread) {
+        HatchCollection ports = host.ports().withGroup(group);
+        RecipeModifiers base = host.modifiers();
+        MachineRecipe recipe = definition.executionCopy();
+        recipe.setParallelism(1);
+        MachineRecipe.StartPlan plan = recipe.prepareStart(ports, base);
+        if (!recipe.canStart(ports, plan)) return null;
+        recipe.applyDurationMultiplier(plan.modifiers());
+        int parallelism = Math.max(1, recipe.parallelism(ports, plan, availableParallelism(thread)));
+        recipe.setParallelism(parallelism);
+        plan = recipe.prepareStart(ports, base);
+        recipe.applyDurationMultiplier(plan.modifiers());
+        if (!recipe.canStart(ports, plan) || !recipe.canTick(ports, plan.modifiers())) return null;
+        return new ActiveCraft(recipe, parallelism, group, base);
     }
 
     /**
@@ -390,6 +416,15 @@ public final class FactoryEngine {
         craft.recipe().setParallelism(craft.parallelism());
         craft.recipe().applyDurationMultiplier(modifiers);
 
+        // C2 收尾（0.89.0）：本 tick 前发 Tick/START，可取消——取消 = 整 tick 跳过、什么都不扣
+        // （旧版 PreTick 的 isFailure 短路）。
+        FactoryRecipeTickEvent startEvent = MachineEvents.post(new FactoryRecipeTickEvent(
+                this.host.controller(), this.host.controller().machineId(), craft.recipe(), craft.progress(),
+                craft.duration(), craft.parallelism(), thread.ordinal(), Phase.START));
+        if (startEvent.isCanceled()) {
+            return;
+        }
+
         int next = craft.progress() + 1;
         if (next >= craft.duration() && !craft.recipe().canFinish(ports, modifiers)) {
             // The craft would complete but its results do not fit. The original retried every 10 ticks
@@ -397,14 +432,18 @@ public final class FactoryEngine {
             // progress and simply does not advance this tick.
             return;
         }
-        if (!craft.recipe().canTick(ports, modifiers)) {
-            // A per-tick requirement cannot be served. The original's FactoryRecipeFailureEvent carried
-            // `recipe.doesCancelRecipeOnPerTickFailure()` as its destructRecipe default, and
-            // TileFactoryController.java:286-299 cleared the thread when it was true — inputs paid at start
-            // were not refunded. This port has no failure-event layer yet (C2), so the recipe field is read
-            // directly. Clearing the thread returns the slot to idle; the next engine tick may start a fresh
-            // craft, which is the same consequence the original's destruct path had.
-            if (craft.recipe().cancelIfPerTickFails()) {
+        if (!craft.recipe().canTick(ports, modifiers)
+                || !craft.recipe().tick(ports, this.host.random(), modifiers)) {
+            // A per-tick requirement cannot be served. 0.89.0（C2 收尾）起走事件：默认值仍是配方的
+            // cancelIfPerTickFails（旧版 FactoryRecipeFailureEvent 的 destructRecipe 默认，
+            // TileFactoryController:293），监听器可按次改写——0.75.0–0.88.0 期间直接读字段的已记差异
+            // 就此收回。true = 清空槽位（回到空闲，下次可再开工）；false = 走机器 failure-action
+            // （已付一次性输入不返还、槽位保持武装——旧版行为）。
+            FactoryRecipeFailureEvent event = MachineEvents.post(new FactoryRecipeFailureEvent(
+                    this.host.controller(), this.host.controller().machineId(), craft.recipe(), craft.progress(),
+                    craft.duration(), craft.parallelism(), thread.ordinal(),
+                    craft.recipe().startFailure(ports, modifiers), craft.recipe().cancelIfPerTickFails()));
+            if (event.destructRecipe()) {
                 thread.clear();
                 this.dirty = true;
                 this.host.onThreadIdle(thread);
@@ -422,20 +461,38 @@ public final class FactoryEngine {
             }
             return;
         }
-        craft.recipe().tick(ports, this.host.random(), modifiers);
         // B8: same ordering as the single-craft path -- processingCommands see the progress before this
         // successful tick was counted.
         this.host.runRecipeCommands(thread, craft.recipe(), FactoryHost.PHASE_PROCESSING, craft.progress());
+        // C2 收尾：本 tick 资源已扣、进度未加之前发 Tick/END，可取消——取消 = 资源留扣、进度不加
+        // （旧版 preventProgressing 的等价物；本引擎没有「回退已扣资源」的通道，差异只体现在进度上）。
+        FactoryRecipeTickEvent endEvent = MachineEvents.post(new FactoryRecipeTickEvent(
+                this.host.controller(), this.host.controller().machineId(), craft.recipe(), craft.progress(),
+                craft.duration(), craft.parallelism(), thread.ordinal(), Phase.END));
+        if (endEvent.isCanceled()) {
+            return;
+        }
         craft.advance();
         this.dirty = true;
 
         if (!craft.isComplete()) {
             return;
         }
-        craft.recipe().finish(ports, this.host.random(), modifiers);
+        // C2 小件（0.91.0）：结算前发 ResultChanceCreateEvent，与单控制器同一点；不替换时用宿主随机。
+        com.reborn.modularmachinery.api.event.ResultChanceCreateEvent chance =
+                MachineEvents.post(new com.reborn.modularmachinery.api.event.ResultChanceCreateEvent(
+                        this.host.controller(), this.host.controller().machineId(), craft.recipe(),
+                        craft.progress(), craft.duration(), craft.parallelism(), this.host.random()));
+        if (!craft.recipe().finish(ports, chance.random(), modifiers)) {
+            craft.setProgress(Math.max(0, craft.duration() - 1));
+            return;
+        }
         // B8: finishCommands run after the outputs have been settled.
         this.host.runRecipeCommands(thread, craft.recipe(), FactoryHost.PHASE_FINISH, 0);
         this.host.onThreadFinished(thread);
+        // C2 收尾：产物已结算、完成命令已跑，重开工之前发 Finish——只读（旧版 TileFactoryController:305）。
+        MachineEvents.post(new FactoryRecipeFinishEvent(this.host.controller(), this.host.controller().machineId(),
+                craft.recipe(), craft.progress(), craft.duration(), craft.parallelism(), thread.ordinal()));
         tryRestart(thread, craft);
     }
 
@@ -444,22 +501,13 @@ public final class FactoryEngine {
      * ({@code :142-159}): re-arm the same recipe for another settlement, and when it will not take, empty the
      * slot.
      *
-     * <p>The parallelism is <b>not</b> recomputed here. The original called
-     * {@code activeRecipe.setMaxParallelism(factory.getAvailableParallelism())} before re-checking, but the
-     * available parallelism is computed by <i>subtracting</i> what the already-running threads hold — and this
-     * thread has just released its own claim, so the value it would get back is exactly the one it started
-     * with as long as the structure and the other threads have not changed. Keeping the frozen number is both
-     * simpler and identical in every case the harness and the game exercise.
+     * <p>A new settlement re-evaluates current resources and catalyst payments. The finished slot is
+     * excluded from the machine's parallel ledger while computing its new allowance.
      */
     private void tryRestart(FactoryThread thread, ActiveCraft finished) {
         HatchCollection groupPorts = this.host.ports().withGroup(finished.group());
-        // B9: the catalyst was consumed by the previous settlement, so the restart must ask the ports again
-        // instead of inheriting the old snapshot.
-        RecipeModifiers effective = this.host.modifiers().andThen(
-                finished.recipe().catalystModifiers(groupPorts));
-        ActiveCraft again = new ActiveCraft(finished.recipe(), finished.parallelism(), finished.group(),
-                effective);
-        if (thread.begin(again, groupPorts, this.host.random())) {
+        ActiveCraft again = prepareCraft(finished.recipe(), finished.group(), thread);
+        if (again != null && thread.begin(again, groupPorts, this.host.random())) {
             this.dirty = true;
             this.host.onThreadStarted(thread);
             // B8: the re-armed craft counts as a fresh start, so its startCommands run again.
@@ -649,8 +697,10 @@ public final class FactoryEngine {
             return;
         }
         HatchCollection groupPorts = this.host.ports().withGroup(saved.group());
-        RecipeModifiers effective = this.host.modifiers().andThen(recipe.catalystModifiers(groupPorts));
-        ActiveCraft craft = new ActiveCraft(recipe, 1, saved.group(), effective);
+        RecipeModifiers effective = saved.modifiers() != null ? saved.modifiers()
+                : this.host.modifiers().andThen(recipe.catalystModifiers(groupPorts));
+        ActiveCraft craft = new ActiveCraft(recipe, saved.parallelism(), saved.group(), effective);
+        if (saved.duration() > 0) craft.withDuration(saved.duration());
         craft.setProgress(saved.progress());
         thread.restart(craft);
     }
@@ -681,16 +731,18 @@ public final class FactoryEngine {
         private final ResourceLocation recipeId;
         private final int parallelism;
         private final int group;
-        private final RecipeModifiers modifiers;
+        private final RecipeModifiers startBaseModifiers;
+        private RecipeModifiers modifiers;
 
         private int progress;
         private int duration;
 
         ActiveCraft(MachineRecipe recipe, int parallelism, int group, RecipeModifiers modifiers) {
-            this.recipe = recipe;
+            this.recipe = recipe.executionCopy();
             this.recipeId = recipe.getId();
             this.parallelism = Math.max(1, parallelism);
             this.group = group;
+            this.startBaseModifiers = modifiers;
             this.modifiers = modifiers;
             this.duration = Math.max(1, recipe.duration(modifiers));
         }
@@ -723,6 +775,13 @@ public final class FactoryEngine {
          */
         public RecipeModifiers modifiers() {
             return this.modifiers;
+        }
+
+        MachineRecipe.StartPlan planStart(HatchCollection ports) {
+            this.recipe.setParallelism(this.parallelism);
+            MachineRecipe.StartPlan plan = this.recipe.prepareStart(ports, this.startBaseModifiers);
+            this.modifiers = plan.modifiers();
+            return plan;
         }
 
         /** Ticks already settled, the original's {@code ActiveMachineRecipe#getTick}. */

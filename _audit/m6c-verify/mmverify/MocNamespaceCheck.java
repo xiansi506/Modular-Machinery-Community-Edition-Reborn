@@ -612,7 +612,7 @@ final class MocNamespaceCheck {
         // 44 = that plus A10's three structure-check keys and A12's general.enable-full-data-sync.
         // 45 = that plus A11's general.enable-security-system.
         // 46 = that plus B11's general.enable-duration-multiplier.
-        check("the config spec defines this many keys", 46, rendered.size());
+        check("the config spec defines this many keys", 52, rendered.size());
 
         String[][] expected = {
                 {"general.modular-controller-compatible-mode", "false"},
@@ -746,8 +746,8 @@ final class MocNamespaceCheck {
         // 198 from 0.65.0: Q6-B's catalyst JEI tooltip adds the original's two catalyst lines, 196 plus 2.
         // 204 from 0.73.0: C4 adds two ME bus block names and the online/offline screen strings,
         // 200 plus 4.
-        check("en_us.json key count", 204, en.size());
-        check("zh_cn.json key count", 204, zh.size());
+        check("en_us.json key count", 331, en.size());
+        check("zh_cn.json key count", 331, zh.size());
         Set<String> enKeys = new TreeSet<>(en.keySet());
         Set<String> zhKeys = new TreeSet<>(zh.keySet());
         report("the two files carry identical key sets (" + enKeys.size() + " keys each)", enKeys.equals(zhKeys));

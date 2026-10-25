@@ -96,6 +96,32 @@ public final class MachineRecipe implements Recipe<Container> {
     private final RecipeCommands commands;
 
     /**
+     * 配方级作者自定 tooltip 行（0.98.0）：JSON 根字段 {@code tooltips}（字符串或字符串数组）。
+     *
+     * <p>旧版 {\code MachineRecipe#tooltipList} 的对应物——但旧版只有 CraftTweaker 入口
+     * （{\code RecipePrimer.addRecipeTooltip}），JSON 反序列化从不读它；1.20.1 没有 CraftTweaker，
+     * 所以入口改为配方 JSON 字段（「CT 入口 → JSON 等价」移植，同 failure-action 的先例）。
+     * 展示走旧版 {\code getFormattedTooltip} 的同款规则：翻译键则本地化，否则原文。
+     */
+    private final List<String> tooltips;
+
+    /**
+     * 0.107.0（C1 第一纵切）：适配器声明，旧版 {@code RecipeAdapterAccessor} 的对应物。
+     *
+     * <p>非 {@code null} 表示本条配方 JSON 顶层带了 {@code adapter} 字段——它是「声明占位」，
+     * 不是可执行配方：真实配方由 {@code RecipeAdapterLoader}（reload 尾段）从外部配方表
+     * （熔炉 / 父机器）生成后 {@code RecipeManager#replaceRecipes} 回注，占位在回注时被剔除。
+     * 旧版把声明反序列化到独立队列（{@code RecipeLoader.RECIPE_ADAPTER_ACCESSORS}），
+     * 由 {@code RecipeRegistry.reloadAdapters} 在普通配方注册完之后统一生成——两个版本都是
+     * 「声明先占位、生成轮后补」，只是占位的存放处不同（那边是旁路队列，这边是 RecipeManager 本身）。
+     */
+    @javax.annotation.Nullable
+    private final ResourceLocation adapterKey;
+
+    /** 适配器声明的 {@code modifiers} 数组；生成时烘进数值（旧版 {@code RecipeAdapterAccessor#modifiers} 同位）。 */
+    private final List<RecipeModifier> adapterModifiers;
+
+    /**
      * 旧版配方级 {@code priority}：数字小的层先被遍历，同层再按 {@link #buildWeight()} 升序。
      *
      * <p>它不是"权重越大越优先"——旧版把它当 TreeMap 的键，{@code getRecipesFor} 按升序拼接，
@@ -165,6 +191,46 @@ public final class MachineRecipe implements Recipe<Container> {
     public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
                          List<MachineRequirement> requirements, int maxParallelism,
                          boolean cancelIfPerTickFails, RecipeCommands commands, int priority, int sortId) {
+        this(id, machines, registryName, recipeTime, requirements, maxParallelism, cancelIfPerTickFails,
+                commands, priority, sortId, List.of());
+    }
+
+    /** FromJson overload: author tooltips with an auto-allocated sort id (0.98.0). */
+    public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
+                         List<MachineRequirement> requirements, int maxParallelism,
+                         boolean cancelIfPerTickFails, RecipeCommands commands, int priority,
+                         List<String> tooltips) {
+        this(id, machines, registryName, recipeTime, requirements, maxParallelism, cancelIfPerTickFails,
+                commands, priority, nextSortId(), tooltips);
+    }
+
+        /** The same recipe with author tooltip rows (0.98.0); the serializer and the network reader use this one. */
+    public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
+                         List<MachineRequirement> requirements, int maxParallelism,
+                         boolean cancelIfPerTickFails, RecipeCommands commands, int priority, int sortId,
+                         List<String> tooltips) {
+        this(id, machines, registryName, recipeTime, requirements, maxParallelism, cancelIfPerTickFails,
+                commands, priority, sortId, tooltips, null, List.of());
+    }
+
+    /**
+     * 0.107.0：唯一携带适配器声明的构造器——只有序列化器的声明分支会用它
+     * （{@code adapterKey != null}）；其余路径经上一构造器传 {@code null}。
+     */
+    public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
+                         List<MachineRequirement> requirements, int maxParallelism,
+                         boolean cancelIfPerTickFails, RecipeCommands commands, int priority,
+                         List<String> tooltips, @javax.annotation.Nullable ResourceLocation adapterKey,
+                         List<RecipeModifier> adapterModifiers) {
+        this(id, machines, registryName, recipeTime, requirements, maxParallelism, cancelIfPerTickFails,
+                commands, priority, nextSortId(), tooltips, adapterKey, adapterModifiers);
+    }
+
+    public MachineRecipe(ResourceLocation id, List<String> machines, String registryName, int recipeTime,
+                         List<MachineRequirement> requirements, int maxParallelism,
+                         boolean cancelIfPerTickFails, RecipeCommands commands, int priority, int sortId,
+                         List<String> tooltips, @javax.annotation.Nullable ResourceLocation adapterKey,
+                         List<RecipeModifier> adapterModifiers) {
         if (machines.isEmpty()) {
             throw new IllegalArgumentException("A machine recipe needs at least one owning machine");
         }
@@ -183,6 +249,9 @@ public final class MachineRecipe implements Recipe<Container> {
         this.commands = commands == null ? RecipeCommands.EMPTY : commands;
         this.priority = priority;
         this.sortId = sortId;
+        this.tooltips = tooltips == null ? List.of() : List.copyOf(tooltips);
+        this.adapterKey = adapterKey;
+        this.adapterModifiers = adapterModifiers == null ? List.of() : List.copyOf(adapterModifiers);
     }
 
     private static ResourceLocation resolveMachineId(String machine) {
@@ -284,6 +353,30 @@ public final class MachineRecipe implements Recipe<Container> {
      */
     public int sortId() {
         return this.sortId;
+    }
+
+    /**
+     * 配方级作者自定 tooltip 行（0.98.0）。展示规则照旧版 {\code getFormattedTooltip}：
+     * 翻译键则本地化，否则原文——规则在客户端 JEI 侧应用（{\code MachineRecipeText}）。
+     */
+    public List<String> tooltips() {
+        return this.tooltips;
+    }
+
+    /** 本条的适配器声明；{@code null} = 普通配方。见字段 javadoc 的声明占位语义。 */
+    @javax.annotation.Nullable
+    public ResourceLocation adapterKey() {
+        return this.adapterKey;
+    }
+
+    /** 适配器声明的修饰符列表（不可变），生成轮烘进数值。 */
+    public List<RecipeModifier> adapterModifiers() {
+        return this.adapterModifiers;
+    }
+
+    /** 是否为适配器声明占位——占位不进 JEI、不参与匹配、不同步，只被生成轮消费。 */
+    public boolean isAdapterDeclaration() {
+        return this.adapterKey != null;
     }
 
     /**
@@ -392,22 +485,83 @@ public final class MachineRecipe implements Recipe<Container> {
     }
 
     /**
-     * The modifiers the catalysts that <b>are present in these ports</b> contribute, merged.
+     * The modifiers of catalysts payable after ordinary inputs, with no machine base modifiers.
      *
      * <p>A catalyst is an optional input in the original: absent means the craft runs without it and without
      * its modifiers ({@code CraftCheck.skipComponent()} was not an error), present means it is paid once and its
-     * modifiers are folded in. Presence therefore has to be part of this query. The caller freezes the result
+     * modifiers are folded in. Selection uses shared reservations, not independent presence checks. The caller freezes the result
      * for the lifetime of one craft: the catalyst is consumed at start, so re-asking the ports on every tick
      * would silently strip the modifiers half-way through.
      */
     public RecipeModifiers catalystModifiers(HatchCollection ports) {
-        List<RecipeModifier> merged = new ArrayList<>();
-        for (MachineRequirement requirement : this.requirements) {
-            if (requirement instanceof CatalystRequirement catalyst && catalyst.hasCatalyst(ports)) {
-                merged.addAll(catalyst.modifiers());
-            }
+        return prepareStart(ports, RecipeModifiers.EMPTY).catalystModifiers();
+    }
+
+    /** One immutable decision joins catalyst payment with the modifiers frozen for this start. */
+    public record StartPlan(MachineRecipe owner, RecipeModifiers modifiers, RecipeModifiers catalystModifiers,
+                            java.util.Set<Integer> catalysts, int parallelism, boolean feasible) {
+        public StartPlan { catalysts = java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<>(catalysts)); }
+    }
+
+    public StartPlan prepareStart(HatchCollection ports, RecipeModifiers base) {
+        java.util.LinkedHashSet<Integer> selected = new java.util.LinkedHashSet<>();
+        for (int i = 0; i < requirements.size(); i++) {
+            if (requirements.get(i) instanceof CatalystRequirement catalyst
+                    && catalyst.hasCatalyst(catalyst.visiblePorts(ports))) selected.add(i);
         }
-        return RecipeModifiers.of(merged);
+        while (true) {
+            List<RecipeModifier> contributions = new ArrayList<>();
+            for (int index : selected) contributions.addAll(((CatalystRequirement) requirements.get(index)).modifiers());
+            RecipeModifiers catalysts = RecipeModifiers.of(contributions);
+            RecipeModifiers effective = base.andThen(catalysts);
+            HatchCollection snapshot = ports.transactionView(new ResourceTransaction());
+            boolean ordinary;
+            try { ordinary = reserveOrdinaryStart(snapshot, effective); }
+            catch (ArithmeticException tooLarge) { ordinary = false; }
+            if (!ordinary) {
+                if (selected.isEmpty()) return new StartPlan(this, effective, catalysts, selected, parallelism(), false);
+                // Optional costs must not block an otherwise affordable ordinary craft. Earlier entries win ties.
+                selected.remove(new ArrayList<>(selected).get(selected.size() - 1));
+                continue;
+            }
+            Integer unavailable = null;
+            for (int index : selected) {
+                CatalystRequirement catalyst = (CatalystRequirement) requirements.get(index);
+                if (!catalyst.reserveRequired(catalyst.visiblePorts(snapshot))) { unavailable = index; break; }
+            }
+            if (unavailable == null) return new StartPlan(this, effective, catalysts, selected, parallelism(), true);
+            selected.remove(unavailable);
+        }
+    }
+
+    private boolean reserveOrdinaryStart(HatchCollection ports, RecipeModifiers modifiers) {
+        for (MachineRequirement requirement : requirements) {
+            if (requirement.isStartPhase() && !(requirement instanceof CatalystRequirement)
+                    && !requirement.reserve(requirement.visiblePorts(ports), modifiers)) return false;
+        }
+        return true;
+    }
+
+    private boolean reserveStart(HatchCollection ports, RecipeModifiers modifiers, java.util.Set<Integer> selected) {
+        if (!reserveOrdinaryStart(ports, modifiers)) return false;
+        for (int index : selected) {
+            CatalystRequirement catalyst = (CatalystRequirement) requirements.get(index);
+            if (!catalyst.reserveRequired(catalyst.visiblePorts(ports))) return false;
+        }
+        return true;
+    }
+
+    private StartPlan suppliedModifiersPlan(HatchCollection ports, RecipeModifiers modifiers) {
+        HatchCollection snapshot = ports.transactionView(new ResourceTransaction());
+        java.util.Set<Integer> selected = new java.util.LinkedHashSet<>();
+        boolean feasible;
+        try { feasible = reserveOrdinaryStart(snapshot, modifiers); }
+        catch (ArithmeticException tooLarge) { feasible = false; }
+        if (feasible) for (int i = 0; i < requirements.size(); i++) {
+            if (requirements.get(i) instanceof CatalystRequirement catalyst
+                    && catalyst.reserveRequired(catalyst.visiblePorts(snapshot))) selected.add(i);
+        }
+        return new StartPlan(this, modifiers, RecipeModifiers.EMPTY, selected, parallelism(), feasible);
     }
 
     /**
@@ -420,6 +574,16 @@ public final class MachineRecipe implements Recipe<Container> {
      * @param ceiling the machine's own limit, i.e. the original's {@code activeRecipe.getMaxParallelism()}
      */
     public int parallelism(HatchCollection ports, RecipeModifiers modifiers, int ceiling) {
+        return parallelism(ports, modifiers, ceiling, null);
+    }
+
+    public int parallelism(HatchCollection ports, StartPlan plan, int ceiling) {
+        if (plan.owner() != this || !plan.feasible()) return 0;
+        return parallelism(ports, plan.modifiers(), ceiling, plan.catalysts());
+    }
+
+    private int parallelism(HatchCollection ports, RecipeModifiers modifiers, int ceiling,
+                            java.util.Set<Integer> selected) {
         int limit = this.maxParallelism > 0 ? Math.min(ceiling, this.maxParallelism) : ceiling;
         if (limit <= 0) {
             return 0;
@@ -428,12 +592,35 @@ public final class MachineRecipe implements Recipe<Container> {
             if (!requirement.isParallelizable()) {
                 continue;
             }
-            limit = Math.min(limit, requirement.parallelLimit(ports, modifiers, limit));
+            limit = Math.min(limit, requirement.parallelLimit(requirement.visiblePorts(ports), modifiers, limit));
             if (limit <= 0) {
                 return 0;
             }
         }
-        return limit;
+        // 单条需求上界仍可能重复计算相同材料/空间；在共享副本上二分验证整条配方。
+        int low = 0, high = limit;
+        int[] previous = this.requirements.stream().mapToInt(MachineRequirement::parallelism).toArray();
+        try {
+            while (low < high) {
+                int middle = low + (int) (((long) high - low + 1) / 2);
+                setParallelism(middle);
+                boolean canStart = selected == null ? checkPhase(ports, modifiers, 0)
+                        : checkStart(ports, modifiers, selected);
+                if (canStart && checkPhase(ports, modifiers, 1)
+                        && checkPhase(ports, modifiers, 2)) low = middle;
+                else high = middle - 1;
+            }
+            return low;
+        } finally {
+            for (int i = 0; i < previous.length; i++) requirements.get(i).setParallelism(previous[i]);
+        }
+    }
+
+    /** 每次合成持有独立需求状态，注册表对象始终只作为定义使用。 */
+    public MachineRecipe executionCopy() {
+        return new MachineRecipe(id, machines, registryName, recipeTime,
+                requirements.stream().map(MachineRequirementParser::copy).toList(), maxParallelism,
+                cancelIfPerTickFails, commands, priority, sortId, tooltips, adapterKey, adapterModifiers);
     }
 
     /**
@@ -492,15 +679,17 @@ public final class MachineRecipe implements Recipe<Container> {
 
     /** {@link #canStart} with modifiers applied to every requirement. */
     public boolean canStart(HatchCollection ports, RecipeModifiers modifiers) {
-        for (MachineRequirement requirement : this.requirements) {
-            if (!requirement.isStartPhase()) {
-                continue;
-            }
-            if (!canSatisfy(requirement, ports, modifiers)) {
-                return false;
-            }
-        }
-        return true;
+        return checkPhase(ports, modifiers, 0);
+    }
+
+    public boolean canStart(HatchCollection ports, StartPlan plan) {
+        return plan.owner() == this && plan.feasible() && plan.parallelism() == parallelism()
+                && checkStart(ports, plan.modifiers(), plan.catalysts());
+    }
+
+    private boolean checkStart(HatchCollection ports, RecipeModifiers modifiers, java.util.Set<Integer> selected) {
+        try { return reserveStart(ports.transactionView(new ResourceTransaction()), modifiers, selected); }
+        catch (ArithmeticException tooLarge) { return false; }
     }
 
     /**
@@ -517,11 +706,12 @@ public final class MachineRecipe implements Recipe<Container> {
      */
     @javax.annotation.Nullable
     public String startFailure(HatchCollection ports, RecipeModifiers modifiers) {
+        HatchCollection snapshot = ports.transactionView(new ResourceTransaction());
         for (MachineRequirement requirement : this.requirements) {
-            if (!requirement.isStartPhase()) {
+            if (!requirement.isStartPhase() || requirement instanceof CatalystRequirement) {
                 continue;
             }
-            if (canSatisfy(requirement, ports, modifiers)) {
+            if (requirement.reserve(requirement.visiblePorts(snapshot), modifiers)) {
                 continue;
             }
             String message = requirement.startFailure(ports);
@@ -539,15 +729,22 @@ public final class MachineRecipe implements Recipe<Container> {
 
     /** {@link #start} with modifiers applied to every requirement. */
     public boolean start(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
-        for (MachineRequirement requirement : this.requirements) {
-            if (!requirement.isStartPhase()) {
-                continue;
-            }
-            if (!applyPhase(requirement, ports, random, modifiers)) {
-                return false;
-            }
+        return start(ports, random, suppliedModifiersPlan(ports, modifiers));
+    }
+
+    public boolean start(HatchCollection ports, RandomSource random, StartPlan plan) {
+        if (!canStart(ports, plan)) return false;
+        ResourceTransaction transaction = new ResourceTransaction();
+        HatchCollection snapshot = ports.transactionView(transaction);
+        for (MachineRequirement requirement : requirements) {
+            if (requirement.isStartPhase() && !(requirement instanceof CatalystRequirement)
+                    && !requirement.apply(requirement.visiblePorts(snapshot), random, plan.modifiers())) return false;
         }
-        return true;
+        for (int index : plan.catalysts()) {
+            CatalystRequirement catalyst = (CatalystRequirement) requirements.get(index);
+            if (!catalyst.applyRequired(catalyst.visiblePorts(snapshot), random)) return false;
+        }
+        return transaction.commit();
     }
 
     /** Every per-tick requirement can be served this tick. */
@@ -557,15 +754,7 @@ public final class MachineRecipe implements Recipe<Container> {
 
     /** {@link #canTick} with modifiers applied to every requirement. */
     public boolean canTick(HatchCollection ports, RecipeModifiers modifiers) {
-        for (MachineRequirement requirement : this.requirements) {
-            if (!requirement.isTickPhase()) {
-                continue;
-            }
-            if (!canSatisfy(requirement, ports, modifiers)) {
-                return false;
-            }
-        }
-        return true;
+        return checkPhase(ports, modifiers, 1);
     }
 
     /** Runs the per-tick requirements: energy and per-tick fluids. */
@@ -575,15 +764,7 @@ public final class MachineRecipe implements Recipe<Container> {
 
     /** {@link #tick} with modifiers applied to every requirement. */
     public boolean tick(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
-        for (MachineRequirement requirement : this.requirements) {
-            if (!requirement.isTickPhase()) {
-                continue;
-            }
-            if (!applyPhase(requirement, ports, random, modifiers)) {
-                return false;
-            }
-        }
-        return true;
+        return settlePhase(ports, random, modifiers, 1);
     }
 
     /**
@@ -597,15 +778,7 @@ public final class MachineRecipe implements Recipe<Container> {
 
     /** {@link #canFinish} with modifiers applied to every requirement. */
     public boolean canFinish(HatchCollection ports, RecipeModifiers modifiers) {
-        for (MachineRequirement requirement : this.requirements) {
-            if (!requirement.isFinishPhase()) {
-                continue;
-            }
-            if (!canSatisfy(requirement, ports, modifiers)) {
-                return false;
-            }
-        }
-        return true;
+        return checkPhase(ports, modifiers, 2);
     }
 
     /** Produces the outputs, rolling each output requirement's chance on its own. */
@@ -615,23 +788,51 @@ public final class MachineRecipe implements Recipe<Container> {
 
     /** {@link #finish} with modifiers applied to every requirement. */
     public boolean finish(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
-        for (MachineRequirement requirement : this.requirements) {
-            if (!requirement.isFinishPhase()) {
-                continue;
-            }
-            if (!applyPhase(requirement, ports, random, modifiers)) {
+        return settlePhase(ports, random, modifiers, 2);
+    }
+
+    private static boolean inPhase(MachineRequirement requirement, int phase) {
+        return switch (phase) {
+            case 0 -> requirement.isStartPhase();
+            case 1 -> requirement.isTickPhase();
+            case 2 -> requirement.isFinishPhase();
+            default -> throw new IllegalArgumentException("Unknown recipe phase " + phase);
+        };
+    }
+
+    private boolean checkPhase(HatchCollection ports, RecipeModifiers modifiers, int phase) {
+        if (phase == 0) {
+            StartPlan plan = suppliedModifiersPlan(ports, modifiers);
+            return plan.feasible();
+        }
+        HatchCollection snapshot = ports.transactionView(new ResourceTransaction());
+        for (MachineRequirement requirement : requirements) {
+            try {
+                if (inPhase(requirement, phase) && !requirement.reserve(requirement.visiblePorts(snapshot), modifiers))
+                    return false;
+            } catch (ArithmeticException tooLarge) {
                 return false;
             }
         }
         return true;
     }
 
+    private boolean settlePhase(HatchCollection ports, RandomSource random, RecipeModifiers modifiers, int phase) {
+        if (!checkPhase(ports, modifiers, phase)) return false;
+        ResourceTransaction transaction = new ResourceTransaction();
+        HatchCollection snapshot = ports.transactionView(transaction);
+        for (MachineRequirement requirement : requirements) {
+            if (inPhase(requirement, phase) && !applyPhase(requirement, snapshot, random, modifiers)) return false;
+        }
+        return transaction.commit();
+    }
+
     // ------------------------------------------------------------ dispatch
 
     /**
      * Routes a requirement to its modifier-aware method. The original had one implementation per requirement
-     * class reading the context's modifier appliers directly; this mod has to pass the set in, and the
-     * {@code instanceof} ladder here is the single place that knows which overload to call.
+     * class reading the context's modifier appliers directly; this mod passes that set through virtual methods,
+     * including requirements supplied by optional integrations.
      *
      * <p><b>这是 {@code selector-tag} 的落点。</b>每个需求的四个阶段（能不能开工 / 开工结算 / 每 tick 检查 /
      * 结束时结算）都要经过这里或 {@link #applyPhase}，所以在这一处把端口换成
@@ -641,36 +842,16 @@ public final class MachineRecipe implements Recipe<Container> {
     private static boolean canSatisfy(MachineRequirement requirement, HatchCollection ports,
                                       RecipeModifiers modifiers) {
         HatchCollection visible = requirement.visiblePorts(ports);
-        if (requirement instanceof ItemRequirement item) {
-            return item.canSatisfy(visible, modifiers);
-        }
-        if (requirement instanceof FluidRequirement fluid) {
-            return fluid.canSatisfy(visible, modifiers);
-        }
-        if (requirement instanceof EnergyRequirement energy) {
-            return energy.canSatisfy(visible, modifiers);
-        }
-        return requirement.canSatisfy(visible);
+        return requirement.canSatisfy(visible, modifiers);
     }
 
     /** {@link #canSatisfy} 的副作用那一半，所以它同样要把端口筛成需求能看见的那部分。 */
     private static boolean applyPhase(MachineRequirement requirement, HatchCollection ports, RandomSource random,
                                       RecipeModifiers modifiers) {
         HatchCollection visible = requirement.visiblePorts(ports);
-        if (requirement instanceof ItemRequirement item) {
-            return item.apply(visible, random, modifiers);
-        }
-        if (requirement instanceof FluidRequirement fluid) {
-            return requirement.isTickPhase()
-                    ? fluid.tick(visible, random, modifiers)
-                    : fluid.apply(visible, random, modifiers);
-        }
-        if (requirement instanceof EnergyRequirement energy) {
-            return energy.tick(visible, random, modifiers);
-        }
         return requirement.isTickPhase()
-                ? requirement.tick(visible, random)
-                : requirement.apply(visible, random);
+                ? requirement.tick(visible, random, modifiers)
+                : requirement.apply(visible, random, modifiers);
     }
 
     // ------------------------------------------------------------ Recipe<Container>

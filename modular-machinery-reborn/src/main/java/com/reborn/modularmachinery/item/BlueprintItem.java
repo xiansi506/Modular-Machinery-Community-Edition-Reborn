@@ -83,7 +83,7 @@ public final class BlueprintItem extends Item {
             return InteractionResultHolder.pass(stack);
         }
         if (level.isClientSide) {
-            MachineDefinition machine = MachineRegistry.byId(machineId).orElse(null);
+            MachineDefinition machine = MachineRegistry.clientById(machineId).orElse(null);
             if (machine == null) {
                 // The definition is unknown here — on a dedicated-server client nothing is. Say so rather than
                 // opening an empty screen.
@@ -98,7 +98,7 @@ public final class BlueprintItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
         ResourceLocation machineId = machineOf(stack);
-        MachineDefinition machine = MachineRegistry.byId(machineId).orElse(null);
+        MachineDefinition machine = MachineRegistry.byId(machineId, level).orElse(null);
         if (machine == null) {
             tooltip.add(Component.translatable("tooltip.modular_machinery_reborn.blueprint.empty")
                     .withStyle(ChatFormatting.GRAY));

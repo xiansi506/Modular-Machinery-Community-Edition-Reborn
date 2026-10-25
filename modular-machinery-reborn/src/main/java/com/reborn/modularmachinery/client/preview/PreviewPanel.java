@@ -12,9 +12,12 @@ import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
+import net.minecraftforge.fml.ModList;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Everything inside the 184×220 blueprint panel: the 3D/slice preview, the ingredient grid, the title, the
@@ -51,8 +54,22 @@ public final class PreviewPanel {
     private static final long CYCLE_PERIOD_MILLIS = 1500L;
 
     private final MachineDefinition machine;
+    /**
+     * 宿主是不是 JEI 类别（E2，0.101.0）。
+     *
+     * <p>Screen 宿主的材料格是本面板手绘的，点击要接给 JEI 查询；JEI 类别宿主的同一批格子是
+     * <strong>真 JEI 槽位</strong>（R/U 由 JEI 原生处理），面板再接一次就会一格两触发。
+     * 所以材料格的点击与快捷键只在 Screen 宿主生效。
+     */
+    private final boolean jeiHost;
     private StructurePreview preview;
     private List<ItemStack> components;
+    /** 最近一次 render() 收到的面板空间鼠标位置，供 keyPressed 判断悬停格（旧版 mouseOver 的等价物）。 */
+    private double lastMouseX;
+    private double lastMouseY;
+    private final List<StructurePreviews.ModifierIngredient> modifierIngredients;
+    private int selectedModifier = -1;
+    private int modifierScroll;
 
     private final List<PreviewButton> buttons = new ArrayList<>();
     private final PreviewButton layerUp;
@@ -102,15 +119,28 @@ public final class PreviewPanel {
     private boolean draggingLayer;
     /** True when the press that started the current drag landed on the viewport rather than on a button. */
     private boolean draggingView;
+    private boolean viewportClickCandidate;
+    private boolean viewportMoved;
+    private double viewportPressX;
+    private double viewportPressY;
+    /** Relative structure position selected by a click in the 3D preview. */
+    private BlockPos selectedBlockPos;
 
     /** Index into {@link StructurePreview#layers()}, selected index 0 being the lowest level. */
     private int layerIndex;
 
     public PreviewPanel(MachineDefinition machine) {
+        this(machine, false);
+    }
+
+    /** Screen 宿主走这个构造器；JEI 类别宿主传 {@code true}（理由见 {@link #jeiHost}）。 */
+    public PreviewPanel(MachineDefinition machine, boolean jeiHost) {
         this.machine = machine;
+        this.jeiHost = jeiHost;
         this.dynamicPatternSize = StructurePreviews.initialDynamicPatternSize(machine);
         this.preview = StructurePreviews.of(machine, this.dynamicPatternSize);
         this.components = StructurePreviews.components(machine, this.dynamicPatternSize);
+        this.modifierIngredients = StructurePreviews.modifierIngredients(machine);
         this.machineInfoLines = buildMachineInfo(machine, this.dynamicPatternSize);
 
         // The original built its bottom strip as a right-aligned Row and **only** added the two dynamic-size
@@ -372,6 +402,8 @@ public final class PreviewPanel {
     public void render(GuiGraphics graphics, int originX, int originY, double mouseX, double mouseY,
                        boolean drawIngredientItems) {
         Font font = Minecraft.getInstance().font;
+        this.lastMouseX = mouseX;
+        this.lastMouseY = mouseY;
 
         // The structure goes down first, scissored to the viewport, then the buttons and overlays are painted
         // over it: the original's bottom strip sits at y=161, inside the 26..176 viewport band, so it has to be
@@ -391,13 +423,16 @@ public final class PreviewPanel {
         StructurePreviewRenderer.render(graphics, this.preview, blocks, variant,
                 originX + PreviewLayout.PREVIEW_X + PreviewLayout.PREVIEW_WIDTH / 2.0F + this.panX,
                 originY + PreviewLayout.PREVIEW_Y + PreviewLayout.PREVIEW_HEIGHT / 2.0F + this.panY,
-                PreviewLayout.PREVIEW_BOX, this.yaw, this.pitch, this.zoom);
+                PreviewLayout.PREVIEW_BOX, this.yaw, this.pitch, this.zoom, this.selectedBlockPos,
+                selectedModifierPositions());
         graphics.disableScissor();
 
         if (drawIngredientItems) {
             StructurePreviews.drawComponents(graphics, this.components, originX, originY, mouseX, mouseY);
         }
         StructurePreviews.drawComponentOverflow(graphics, this.components, originX, originY);
+        drawSelectedBlock(graphics, originX, originY);
+        drawModifierIngredients(graphics, originX, originY);
 
         drawTitle(graphics, font, originX, originY);
 
@@ -523,7 +558,9 @@ public final class PreviewPanel {
             /** The layer selector's 9x90 scrollbar track. */
             LAYER_TRACK,
             /** The 3D viewport, claimed for rotate (left), pan (right) or the middle-click reset. */
-            VIEWPORT
+            VIEWPORT,
+            /** 材料格的一格（E2，仅 Screen 宿主；JEI 宿主的格子是真槽位，走 JEI 自己的 R/U）。 */
+            MATERIAL
         }
 
         /** Nothing claimed; the host may act on the event itself. */
@@ -532,6 +569,8 @@ public final class PreviewPanel {
         public static final PointerClaim LAYER_TRACK = new PointerClaim(Kind.LAYER_TRACK, "layer-track");
         /** The 3D viewport. */
         public static final PointerClaim VIEWPORT = new PointerClaim(Kind.VIEWPORT, "viewport");
+        /** 材料格的一格（E2；点击已被 JEI 查询消费）。 */
+        public static final PointerClaim MATERIAL = new PointerClaim(Kind.MATERIAL, "ingredient-grid");
 
         static PointerClaim button(PreviewButton button) {
             return new PointerClaim(Kind.BUTTON, button.name());
@@ -557,6 +596,8 @@ public final class PreviewPanel {
                     return "layer-track";
                 case VIEWPORT:
                     return "viewport";
+                case MATERIAL:
+                    return "material-grid";
                 default:
                     return "none";
             }
@@ -588,6 +629,19 @@ public final class PreviewPanel {
         this.layerDown.disarm();
         this.draggingLayer = false;
         this.draggingView = false;
+        this.viewportClickCandidate = false;
+        this.viewportMoved = false;
+
+        // E2（0.101.0）：材料格的 JEI 查询，照旧版 SlotItemVirtualJEI.onMouseClick——
+        // 左键把该物品作为产出查配方、右键作为输入查用途，点击即消费。
+        // 材料格（y≥179）与按钮条（161..174）、视口（26..176）不相交，提前返回不影响其它手势。
+        // JEI 类只在 ModList 确认在场后才被类加载（JEI 是可选依赖，mandatory=false）。
+        if (!this.jeiHost && (button == 0 || button == 1) && ModList.get().isLoaded("jei")) {
+            ItemStack hovered = StructurePreviews.componentAt(this.components, mouseX, mouseY);
+            if (hovered != null && !hovered.isEmpty() && PreviewJeiActions.show(hovered, button == 1)) {
+                return PointerClaim.MATERIAL;
+            }
+        }
 
         if (button == 0) {
             for (PreviewButton candidate : this.buttons) {
@@ -608,7 +662,13 @@ public final class PreviewPanel {
                     return PointerClaim.LAYER_TRACK;
                 }
             }
-            return claimViewport(mouseX, mouseY);
+            PointerClaim claim = claimViewport(mouseX, mouseY);
+            if (claim.claimed()) {
+                this.viewportClickCandidate = true;
+                this.viewportPressX = mouseX;
+                this.viewportPressY = mouseY;
+            }
+            return claim;
         }
         // Right-drag pans, and a middle click over the viewport is the original's reset-center gesture, which is
         // resolved on release. Both claim the press over the viewport so the host does not treat it as a click on
@@ -659,13 +719,27 @@ public final class PreviewPanel {
             }
         }
         boolean endedLayerDrag = this.draggingLayer;
+        boolean selectOnRelease = button == 0 && this.viewportClickCandidate && !this.viewportMoved
+                && Math.abs(mouseX - this.viewportPressX) <= 5.0
+                && Math.abs(mouseY - this.viewportPressY) <= 5.0;
         this.draggingLayer = false;
         this.draggingView = false;
+        this.viewportClickCandidate = false;
+        this.viewportMoved = false;
         if (fired != null) {
             return PointerClaim.button(fired);
         }
         if (endedLayerDrag) {
             return PointerClaim.LAYER_TRACK;
+        }
+        if (selectOnRelease) {
+            int modifier = modifierIngredientAt(mouseX, mouseY);
+            if (modifier >= 0) {
+                this.selectedModifier = this.selectedModifier == modifier ? -1 : modifier;
+            } else {
+                selectBlockAt(mouseX, mouseY);
+            }
+            return PointerClaim.VIEWPORT;
         }
         if (button == 2 && isOverPreview(mouseX, mouseY)) {
             // Middle click is the original's reset gesture as well as its reset button.
@@ -691,6 +765,9 @@ public final class PreviewPanel {
             return false;
         }
         if (button == 0) {
+            if (Math.abs(mouseX - this.viewportPressX) > 5.0 || Math.abs(mouseY - this.viewportPressY) > 5.0) {
+                this.viewportMoved = true;
+            }
             this.pitch += (float) dragX * DRAG_SENSITIVITY;
             this.yaw = Mth.clamp(this.yaw - (float) dragY * DRAG_SENSITIVITY,
                     StructurePreviewRenderer.MIN_YAW, StructurePreviewRenderer.MAX_YAW);
@@ -716,6 +793,11 @@ public final class PreviewPanel {
         if (!isOverPreview(mouseX, mouseY)) {
             return false;
         }
+        if (isOverModifierList(mouseX, mouseY)) {
+            int last = Math.max(0, this.modifierIngredients.size() - 6);
+            this.modifierScroll = Mth.clamp(this.modifierScroll + (delta > 0 ? -1 : 1), 0, last);
+            return true;
+        }
         if (this.layerMode) {
             stepLayer(delta > 0 ? 1 : -1);
         } else {
@@ -730,6 +812,83 @@ public final class PreviewPanel {
                 && mouseX < PreviewLayout.PREVIEW_X + PreviewLayout.PREVIEW_WIDTH
                 && mouseY >= PreviewLayout.PREVIEW_Y
                 && mouseY < PreviewLayout.PREVIEW_Y + PreviewLayout.PREVIEW_HEIGHT;
+    }
+
+    /**
+     * E2（0.101.0）：悬停在材料格上时的 JEI 快捷键（R=查配方、U=查用途），照旧版
+     * {@code SlotItemVirtualJEI.onKeyTyped}——只在悬停于格上时响应。键位本身由 JEI 的
+     * {@code IJeiKeyMappings} 给出（改键跟随 JEI 配置）。旧版的 A 键书签在 JEI 15 的公开
+     * API 里没有编程式入口，有据不移植。Screen 宿主专用（JEI 宿主不转发按键）。
+     */
+    public boolean keyPressed(int keyCode, int scanCode) {
+        if (this.jeiHost || !ModList.get().isLoaded("jei")) {
+            return false;
+        }
+        ItemStack hovered = StructurePreviews.componentAt(this.components, this.lastMouseX, this.lastMouseY);
+        return hovered != null && !hovered.isEmpty() && PreviewJeiActions.keyPressed(hovered, keyCode, scanCode);
+    }
+
+    private List<StructurePreview.Block> visibleBlocks() {
+        if (this.layerMode) {
+            Integer layer = selectedLayerY();
+            return layer == null ? List.of()
+                    : selectBlocks(this.preview, this.formedPreview, this.machine.hideComponentsWhenFormed(), true, layer);
+        }
+        return selectBlocks(this.preview, this.formedPreview, this.machine.hideComponentsWhenFormed(), false, 0);
+    }
+
+    private void selectBlockAt(double mouseX, double mouseY) {
+        StructurePreview.Block hit = StructurePreviewRenderer.pickBlockAt(this.preview, visibleBlocks(), mouseX, mouseY,
+                PreviewLayout.PREVIEW_X + PreviewLayout.PREVIEW_WIDTH / 2.0 + this.panX,
+                PreviewLayout.PREVIEW_Y + PreviewLayout.PREVIEW_HEIGHT / 2.0 + this.panY,
+                PreviewLayout.PREVIEW_BOX, this.yaw, this.pitch, this.zoom);
+        this.selectedBlockPos = hit == null ? null : hit.pos();
+    }
+
+    private void drawSelectedBlock(GuiGraphics graphics, int originX, int originY) {
+        StructurePreview.Block selected = selectedBlock();
+        if (selected == null) {
+            return;
+        }
+        int variant = this.cycleBlocks ? (int) (Util.getMillis() / CYCLE_PERIOD_MILLIS) : 0;
+        ItemStack main = itemFor(selected.variantState(variant));
+        if (main.isEmpty()) {
+            return;
+        }
+        List<ItemStack> alternatives = selected.alternatives().stream()
+                .map(PreviewPanel::itemFor)
+                .filter(stack -> !stack.isEmpty() && !ItemStack.isSameItem(stack, main))
+                .toList();
+        int shown = Math.min(6, alternatives.size());
+        // This is the original selected-block area (main ingredient at 8,28; alternatives below it), drawn over
+        // the viewport only after an explicit block click so it does not obscure the default structure view.
+        graphics.fill(originX + 7, originY + 27, originX + 29, originY + 49 + shown * 18,
+                0xB0202020);
+        graphics.renderItem(main, originX + 10, originY + 30);
+        for (int index = 0; index < shown; index++) {
+            graphics.renderItem(alternatives.get(index), originX + 10, originY + 51 + index * 18);
+        }
+        if (alternatives.size() > shown) {
+            graphics.drawString(Minecraft.getInstance().font, Component.literal("+" + (alternatives.size() - shown)),
+                    originX + 11, originY + 52 + shown * 18, 0xFFFFFFFF, false);
+        }
+    }
+
+    private StructurePreview.Block selectedBlock() {
+        if (this.selectedBlockPos == null) {
+            return null;
+        }
+        for (StructurePreview.Block block : visibleBlocks()) {
+            if (block.pos().equals(this.selectedBlockPos)) {
+                return block;
+            }
+        }
+        return null;
+    }
+
+    private static ItemStack itemFor(net.minecraft.world.level.block.state.BlockState state) {
+        Item item = state.getBlock().asItem();
+        return item == net.minecraft.world.item.Items.AIR ? ItemStack.EMPTY : new ItemStack(item);
     }
 
     private boolean isOverTrack(double mouseX, double mouseY) {
@@ -782,6 +941,15 @@ public final class PreviewPanel {
                         layerStateLine());
             }
         }
+        int modifier = modifierIngredientAt(mouseX, mouseY);
+        if (modifier >= 0) {
+            String description = this.modifierIngredients.get(modifier).description();
+            if (!description.isBlank()) {
+                return List.of(Component.translatable("gui.modular_machinery_reborn.preview.modifier"),
+                        Component.literal(description));
+            }
+            return List.of(Component.translatable("gui.modular_machinery_reborn.preview.modifier"));
+        }
         if (isOverPreview(mouseX, mouseY)) {
             return List.of(Component.translatable("gui.modular_machinery_reborn.preview.hint"));
         }
@@ -791,6 +959,73 @@ public final class PreviewPanel {
     /** The item under a panel-space position in the ingredient grid, or {@code null}. */
     public ItemStack componentAt(double mouseX, double mouseY) {
         return StructurePreviews.componentAt(this.components, mouseX, mouseY);
+    }
+
+    /** The selected block item under a panel-space position, for the blueprint screen's item tooltip. */
+    public ItemStack selectedItemAt(double mouseX, double mouseY) {
+        StructurePreview.Block selected = selectedBlock();
+        if (selected == null) {
+            return ItemStack.EMPTY;
+        }
+        int variant = this.cycleBlocks ? (int) (Util.getMillis() / CYCLE_PERIOD_MILLIS) : 0;
+        ItemStack main = itemFor(selected.variantState(variant));
+        if (insideItem(mouseX, mouseY, 10, 30)) {
+            return main;
+        }
+        List<ItemStack> alternatives = selected.alternatives().stream()
+                .map(PreviewPanel::itemFor)
+                .filter(stack -> !stack.isEmpty() && !ItemStack.isSameItem(stack, main))
+                .limit(6)
+                .toList();
+        for (int index = 0; index < alternatives.size(); index++) {
+            if (insideItem(mouseX, mouseY, 10, 51 + index * 18)) {
+                return alternatives.get(index);
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private void drawModifierIngredients(GuiGraphics graphics, int originX, int originY) {
+        int shown = Math.min(6, this.modifierIngredients.size() - this.modifierScroll);
+        for (int i = 0; i < shown; i++) {
+            int x = originX + 7;
+            int y = originY + 54 + i * 18;
+            int ingredientIndex = this.modifierScroll + i;
+            graphics.fill(x, y, x + 18, y + 18,
+                    this.selectedModifier == ingredientIndex ? 0xC0008050 : 0xB0202020);
+            graphics.renderItem(this.modifierIngredients.get(ingredientIndex).icon(), x + 1, y + 1);
+            if (this.selectedModifier == ingredientIndex) {
+                graphics.fill(x, y, x + 18, y + 1, 0xFF00FF80);
+                graphics.fill(x, y + 17, x + 18, y + 18, 0xFF00FF80);
+            }
+        }
+        if (this.modifierScroll > 0 || this.modifierIngredients.size() > this.modifierScroll + shown) {
+            String more = (this.modifierScroll > 0 ? "↑" : "")
+                    + (this.modifierIngredients.size() > this.modifierScroll + shown ? "↓" : "");
+            graphics.drawString(Minecraft.getInstance().font, Component.literal(more),
+                    originX + 9, originY + 54 + shown * 18, 0xFFFFFFFF, false);
+        }
+    }
+
+    private int modifierIngredientAt(double mouseX, double mouseY) {
+        if (mouseX < 7 || mouseX >= 25 || mouseY < 54) return -1;
+        int visibleIndex = (int) ((mouseY - 54) / 18);
+        int shown = Math.min(6, this.modifierIngredients.size() - this.modifierScroll);
+        return visibleIndex >= 0 && visibleIndex < shown ? this.modifierScroll + visibleIndex : -1;
+    }
+
+    private boolean isOverModifierList(double mouseX, double mouseY) {
+        return !this.modifierIngredients.isEmpty() && mouseX >= 7 && mouseX < 25
+                && mouseY >= 54 && mouseY < 54 + Math.min(6, this.modifierIngredients.size()) * 18;
+    }
+
+    private Set<BlockPos> selectedModifierPositions() {
+        if (this.selectedModifier < 0 || this.selectedModifier >= this.modifierIngredients.size()) return Set.of();
+        return Set.copyOf(this.modifierIngredients.get(this.selectedModifier).positions());
+    }
+
+    private static boolean insideItem(double mouseX, double mouseY, int x, int y) {
+        return mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16;
     }
 
     private List<Component> machineInfoTooltip() {
@@ -884,7 +1119,7 @@ public final class PreviewPanel {
         List<Component> lines = new ArrayList<>();
         lines.add(Component.translatable("gui.preview.button.machine_info"));
         lines.add(Component.translatable("gui.preview.button.machine_info.xyz.0"));
-        MachinePattern shown = StructurePreviews.previewPattern(machine, dynamicPatternSize);
+        MachinePattern shown = StructurePreviews.previewRenderPattern(machine, dynamicPatternSize);
         BlockPos size = shown.size();
         lines.add(Component.translatable("gui.preview.button.machine_info.xyz.1",
                 size.getX(), size.getY(), size.getZ()));

@@ -46,7 +46,7 @@ public final class MachineControllerGeoRenderer extends GeoObjectRenderer<GeoCon
     @Override
     public void render(MachineControllerBlockEntity controller, float partialTick, PoseStack poseStack,
                        MultiBufferSource bufferSource, int packedLight, int packedOverlay) {
-        MachineDefinition definition = MachineRegistry.byId(controller.machineId()).orElse(null);
+        MachineDefinition definition = MachineRegistry.clientById(controller.machineId()).orElse(null);
         if (definition == null || definition.geoModel() == null) {
             return;
         }

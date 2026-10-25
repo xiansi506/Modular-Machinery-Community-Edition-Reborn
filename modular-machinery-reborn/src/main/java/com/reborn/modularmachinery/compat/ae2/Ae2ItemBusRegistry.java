@@ -18,6 +18,19 @@ public final class Ae2ItemBusRegistry {
     private Ae2ItemBusRegistry() {
     }
 
+    /**
+     * C4-II（0.95.0）：样板供应器的方块实体类型——与总线同一条隔离规矩：工厂在 AE2 存在时才被
+     * 调用，MePatternProviderBlockEntity 里的 appeng 类型不会在无 AE2 的包里被解析。
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static RegistryObject<BlockEntityType<?>> registerPatternProvider(
+            DeferredRegister<BlockEntityType<?>> register, RegistryObject<Block> block) {
+        RegistryObject<BlockEntityType<MePatternProviderBlockEntity>> registered = register.register(
+                "me_pattern_provider",
+                () -> BlockEntityType.Builder.of(MePatternProviderBlockEntity::new, block.get()).build(null));
+        return (RegistryObject) registered;
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static RegistryObject<BlockEntityType<?>> register(DeferredRegister<BlockEntityType<?>> register,
                                                               RegistryObject<Block> input,

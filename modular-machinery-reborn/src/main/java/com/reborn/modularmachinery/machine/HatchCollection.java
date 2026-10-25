@@ -178,6 +178,18 @@ public final class HatchCollection {
         this.machine = machine;
     }
 
+    /** 所有标签与组保留，仅把存储换成同一次事务的副本。 */
+    public HatchCollection transactionView(com.reborn.modularmachinery.recipe.ResourceTransaction transaction) {
+        return new HatchCollection(
+                itemInputs.stream().map(transaction::items).toList(), itemOutputs.stream().map(transaction::items).toList(),
+                fluidInputs.stream().map(transaction::fluids).toList(), fluidOutputs.stream().map(transaction::fluids).toList(),
+                energyInputs.stream().map(transaction::energy).toList(), energyOutputs.stream().map(transaction::energy).toList(),
+                gasInputs.stream().map(transaction::opaque).toList(), gasOutputs.stream().map(transaction::opaque).toList(),
+                itemInputTags, itemOutputTags, fluidInputTags, fluidOutputTags, energyInputTags, energyOutputTags,
+                gasInputTags, gasOutputTags, itemInputGroups, itemOutputGroups, fluidInputGroups, fluidOutputGroups,
+                energyInputGroups, energyOutputGroups, gasInputGroups, gasOutputGroups, smartInterfaces, machine);
+    }
+
     private static List<String> checkedTags(List<String> tags, int ports, String bucket) {
         if (tags.size() != ports) {
             throw new IllegalStateException("HatchCollection." + bucket + " has " + ports + " ports but "
@@ -257,6 +269,8 @@ public final class HatchCollection {
      * @param selectorTag 要筛的标签名，或 {@code null} 表示只看无标签的端口
      */
     public HatchCollection withTag(@javax.annotation.Nullable String selectorTag) {
+        // 旧版 getComponentsFor：未指定标签时不增加限制。
+        if (selectorTag == null || selectorTag.isEmpty()) return this;
         String wanted = (selectorTag == null || selectorTag.isEmpty()) ? UNTAGGED : selectorTag;
         return new HatchCollection(
                 filter(this.itemInputs, this.itemInputTags, wanted),
@@ -611,6 +625,21 @@ public final class HatchCollection {
         public Builder add(com.reborn.modularmachinery.block.HatchKind kind,
                            IItemHandler items, IFluidHandler fluids, IEnergyStorage energy) {
             return add(kind, items, fluids, energy, null, -1);
+        }
+
+        /**
+         * C4-II（0.92.0，统一总线）：把一个额外的**流体端口**入流体桶——供 {@code extraFluidPort()}
+         * 路径使用（ME 总线的流体半边：物品半边已按 ITEM 家族入桶，流体半边从这里补）。
+         * 输入性由调用者给（跟随该仓口种类的输入性），标签与组号与主端口一致。
+         */
+        public Builder addFluidPort(IFluidHandler fluids, boolean input,
+                                    @javax.annotation.Nullable String selectorTag, int groupId) {
+            String tag = (selectorTag == null || selectorTag.isEmpty()) ? UNTAGGED : selectorTag;
+            int group = Math.max(-1, groupId);
+            (input ? this.fluidInputs : this.fluidOutputs).add(fluids);
+            (input ? this.fluidInputTags : this.fluidOutputTags).add(tag);
+            (input ? this.fluidInputGroups : this.fluidOutputGroups).add(group);
+            return this;
         }
 
         /**

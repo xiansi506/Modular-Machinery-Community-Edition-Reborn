@@ -408,6 +408,32 @@ public final class ModBlocks {
             AE2_LOADED ? Ae2ItemBusRegistry.register(BLOCK_ENTITIES, ME_ITEM_INPUT_BLOCK,
                     ME_ITEM_OUTPUT_BLOCK) : null;
 
+    // ------------------------------------------------------- C4-II（0.95.0）: ME pattern provider
+
+    /**
+     * C4-II：AE2 样板供应器（首片）。独立方块——供应器不是总线，不受「统一总线」拍板影响。
+     * 只在 AE2 在场时注册（BE 类引用 appeng 类型，隔离规矩与总线相同）。
+     */
+    public static final RegistryObject<Block> ME_PATTERN_PROVIDER_BLOCK;
+    public static final RegistryObject<Item> ME_PATTERN_PROVIDER_ITEM;
+    public static final RegistryObject<BlockEntityType<?>> ME_PATTERN_PROVIDER_ENTITY;
+
+    static {
+        if (AE2_LOADED) {
+            ME_PATTERN_PROVIDER_BLOCK = BLOCKS.register("me_pattern_provider",
+                    () -> new com.reborn.modularmachinery.compat.ae2.MePatternProviderBlock(BlockBehaviour.Properties.of().strength(3.5f).requiresCorrectToolForDrops()));
+            ME_PATTERN_PROVIDER_ITEM = ITEMS.register("me_pattern_provider",
+                    () -> new net.minecraft.world.item.BlockItem(ME_PATTERN_PROVIDER_BLOCK.get(),
+                            new Item.Properties()));
+            ME_PATTERN_PROVIDER_ENTITY = Ae2ItemBusRegistry.registerPatternProvider(BLOCK_ENTITIES,
+                    ME_PATTERN_PROVIDER_BLOCK);
+        } else {
+            ME_PATTERN_PROVIDER_BLOCK = null;
+            ME_PATTERN_PROVIDER_ITEM = null;
+            ME_PATTERN_PROVIDER_ENTITY = null;
+        }
+    }
+
     // ------------------------------------------------------- M6d: parallel controller
 
     /**
@@ -485,7 +511,7 @@ public final class ModBlocks {
                 // The original listed one blueprint per registered machine rather than one unbound item. When
                 // no definitions are known here — a dedicated-server client never receives them — fall back to
                 // a single empty blueprint so the item is still reachable.
-                var blueprints = com.reborn.modularmachinery.machine.MachineRegistry.all();
+                var blueprints = com.reborn.modularmachinery.machine.MachineRegistry.clientAll();
                 if (blueprints.isEmpty()) {
                     output.accept(ModItems.BLUEPRINT.get());
                 } else {
@@ -493,6 +519,10 @@ public final class ModBlocks {
                         output.accept(com.reborn.modularmachinery.item.BlueprintItem.forMachine(
                                 ModItems.BLUEPRINT.get(), definition.id()));
                     }
+                }
+                // C4-II（0.95.0）：样板供应器进创造栏（仅 AE2 在场时注册）。
+                if (ME_PATTERN_PROVIDER_ITEM != null) {
+                    output.accept(ME_PATTERN_PROVIDER_ITEM.get());
                 }
                 output.accept(ModItems.MODULARIUM.get());
                 output.accept(ModItems.CONSTRUCT_TOOL.get());

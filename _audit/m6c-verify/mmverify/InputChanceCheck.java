@@ -193,6 +193,7 @@ final class InputChanceCheck {
     private static void gasSource() {
         try {
             String gas = source("compat/mekanism/GasRequirement.java");
+            gas = gas.substring(gas.indexOf("private boolean transfer("));
             report("the gas input uses its chance instead of returning 1 for inputs",
                     !gas.contains("if (this.ioType() != IOType.OUTPUT) {")
                             && gas.contains("float decidedChance = modifiedChance(modifiers);"));
