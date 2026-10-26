@@ -1,0 +1,34 @@
+{
+  "registryname": "preview_nbt:showcase",
+  "localizedname": "预览 NBT 展示 / Preview NBT Showcase",
+  "parts": [
+    {
+      "x": [-1, 0, 1], "y": -1, "z": [-1, 0],
+      "elements": "minecraft:stone"
+    },
+    {
+      "x": 1, "y": 0, "z": 0,
+      "elements": "minecraft:chest[facing=north]",
+      "preview-nbt": {
+        "CustomName": "{\"text\":\"Preview chest\"}",
+        "Items": [{"Slot": "0b", "id": "minecraft:diamond", "Count": "3b"}]
+      }
+    },
+    {
+      "x": 0, "y": 0, "z": -1,
+      "elements": "minecraft:white_banner[rotation=0]",
+      "preview-nbt": {"Patterns": [{"Pattern": "bs", "Color": 14}]}
+    },
+    {
+      "x": -1, "y": 0, "z": 0,
+      "elements": "minecraft:oak_sign[rotation=0]",
+      "preview-nbt": {
+        "front_text": {
+          "messages": ["{\"text\":\"NBT Preview\"}", "\"Line two\"", "\"\"", "\"\""],
+          "color": "red",
+          "has_glowing_text": true
+        }
+      }
+    }
+  ]
+}

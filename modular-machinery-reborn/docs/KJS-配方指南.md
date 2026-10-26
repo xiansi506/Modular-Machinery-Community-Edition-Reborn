@@ -1,10 +1,20 @@
 # 配方指南：JSON、KubeJS 与高级加工
 
-适用于 **Reborn 0.107.3 / Minecraft 1.20.1 / Forge**，更新于 2026-10-25。保留原文件名，本文同时介绍 JSON 和 KubeJS；先完成 [使用说明](使用说明.md) 的圆石加工机，再添加高级需求。
+0.118.0 新增 `mana`、`aura`、`lifeessence`、`will` 需求及对应 KubeJS 方法，完整字段、单位、血球绑定和上下限见 [魔法资源](魔法资源.md)。当前通信协议 **7**。
+
+long 能量仓与指定能源连接见 [能源与特殊渲染](能源与特殊渲染.md)。普通 JavaScript Number 在超过 `9007199254740991` 后可能丢失整数精度；要求逐位精确的大额能量需求请使用 JSON 数字，仓口容量用 TOML long 配置。
+
+成型后的自定义模型与结构隐藏使用 `hide-components-when-formed`／`.hideComponentsWhenFormed(true)`，显示与回退规则见 [世界模型隐藏](世界模型隐藏.md)。
+
+适用于 **Reborn 0.118.0 / Minecraft 1.20.1 / Forge**，更新于 2026-10-27。保留原文件名，本文同时介绍 JSON 和 KubeJS；先完成 [使用说明](使用说明.md) 的圆石加工机，再添加高级需求。
 
 本文从基础配方开始，依次介绍高级需求、修改器、并行、配方适配器与机器事件。示例使用 Reborn 当前的解析规则和 JSON／KubeJS 接口。
 
 **验证口径**：示例按当前实现核对；本轮未在游戏中逐段执行脚本。代码块标作“片段”时，需要放入指定数组／对象，不能单独当完整配方安装。
+
+0.111.0 的机器／配方／升级专属回调、控制器持久数据、运行时修改器、物品改写与延迟需求见 [高级脚本指南](高级脚本指南.md)。本轮验证直接驱动生产逻辑和实际 Rhino 函数；结果见项目同级 `_audit/scripts-0.111.0/高级脚本更新.md`。0.112.0 新增结构预览 NBT 实体渲染，见 [预览 NBT 示例](../examples/preview-nbt/README.md)。当前通信协议 **7**；未实机、未部署、未提交／推送。
+
+客户端 GUI 信息、模型选择与动画回调放在 `kubejs/client_scripts/`，见 [客户端脚本指南](客户端脚本指南.md)。
 
 ## 一、选一种配方入口
 
@@ -173,7 +183,9 @@ typed API 会生成根 `type`；`event.custom` 和手写 JSON 需要自己写。
 }
 ```
 
-`gas` 是一次性气体需求，`gas_pertick` 是逐 tick。使用完整、已注册的气体 ID；旧 `oxygen` 不直接等于 `mekanism:oxygen`。气体使用流体仓的气体存储侧，正常气液传输互斥：仓内有流体时拒绝气体，排空后才能切换。JEI 气体格目前以文本显示，不能据此判断配方未加载。
+`gas` 是一次性气体需求，`gas_pertick` 是逐 tick。使用完整、已注册的气体 ID；旧 `oxygen` 不直接等于 `mekanism:oxygen`。气体使用流体仓的气体存储侧，正常气液传输互斥：仓内有流体时拒绝气体，排空后才能切换。JEI 气体格显示气体贴图、颜色与罐壳，缺少贴图时回退文字；悬停信息保留。
+
+0.109.0 起，结构中的统一 ME 总线也可以提供气体端口：输入总线按标记目标量从 ME 补气，输出总线回送产气，样板供应器支持带气体的混合加工样板。网络气体通道需要 **AE2＋Mekanism＋Applied Mekanistics 1.4.3**；配方仍写上面的 `gas`／`gas_pertick`，不增加新的需求种类。ME 总线的气体池和流体池分开，单池气体容量 72000 mB；供应器把样板的全部成分存入自身持久缓冲，机器结算使用共享事务；隔离模式按样板槽分组，不能跨槽拼料。这里仅支持 Mekanism **气体**，不把灌注物、颜料、浆液当作气体接收。两端模组需同时更新至通信协议 **6**。
 
 ## 四、备选原料、催化剂、NBT 与端口选择
 
@@ -229,7 +241,7 @@ typed API 会生成根 `type`；`event.custom` 和手写 JSON 需要自己写。
 }
 ```
 
-这里需要物品确实携带相应自定义 NBT，普通钻石没有。本版 NBT 模板中的数字使用字符串，例如 `"1000"` 为 int、`"1000L"` 为 long；比较还区分实际 NBT 数值类型。`nbt-display` 是显示模板，不替代真实输入条件；单独写而不写 `nbt` 不生效。不要把比较表达式用作期望生成的输出数值。独立 `item_durability` 需求类型没有实现，不能照搬旧脚本耐久 API。
+这里需要物品确实携带相应自定义 NBT，普通钻石没有。本版 NBT 模板中的数字使用字符串，例如 `"1000"` 为 int、`"1000L"` 为 long；比较还区分实际 NBT 数值类型。`nbt-display` 是显示模板，不替代真实输入条件；原始 JSON 单独写而不写 `nbt` 不生效，typed `.previewNBT()` 会补空模板以支持单独设置显示。不要把比较表达式用作期望生成的输出数值。耐久消耗通过物品输入后的 `.consumeDurability()` 提供，不使用独立 `item_durability` 类型，详见 [高级脚本指南](高级脚本指南.md)。
 
 ### 只访问指定端口
 
@@ -319,6 +331,12 @@ typed API 会生成根 `type`；`event.custom` 和手写 JSON 需要自己写。
 | `.itemOutput(id, min, max, chance)` | 物品范围产出 |
 | `.fluidInput(id, amount[, perTick])` / `.fluidOutput(...)` | 一次性或逐 tick 流体 |
 | `.energyInput(perTick)` / `.energyOutput(perTick)` | 每 tick 能源 |
+| `.gasInput(id, amount)` / `.gasOutput(id, amount)` / `.gasPerTick(id, amount, io)` | 气体需求；需要 Mekanism |
+| `.fuelInput(burnTicks)` / `.ingredientArray(entries)` / `.smartInterface(type, value)` | 燃料时间、备选原料组、数值接口 |
+| `.chance(n)` / `.nbt(object)` / `.previewNBT(object)` / `.selectorTag(tag)` / `.parallelizeUnaffected(boolean)` | 修饰最近一条需求 |
+| `.itemChecker(fn)` / `.itemModifier(fn)` / `.consumeDurability()` / `.triggerTime(tick)` | 物品谓词／改写、耐久点与延迟触发 |
+| `.tooltip(text...)` / `.requirementTooltip(text)` / `.on(event, fn)` | 配方／需求说明与配方专属回调 |
+| `.adapter(id)` / `.adapterModifiers(array)` | 适配器声明与修改器 |
 | `.catalyst(id, amount[, chance])` | 新建一组催化剂 |
 | `.catalystEntry(id, amount)` | 为最近一组催化剂增加备选 |
 | `.catalystChance(chance)` / `.catalystModifier(target, io, operation, value)` / `.catalystTooltip(text)` | 修改最近一组催化剂 |
@@ -327,7 +345,7 @@ typed API 会生成根 `type`；`event.custom` 和手写 JSON 需要自己写。
 | `.startCommand(cmd[, interval])` / `.processingCommand(...)` / `.finishCommand(...)` | 追加阶段命令 |
 | `.id('namespace:path')` | KubeJS 配方 ID |
 
-typed API 未列出的字段可用 raw JSON；不要猜 `.gasInput()`、`.tooltips()` 等未提供方法。原始需求例子（完整脚本）：
+typed API 未列出的字段可用 raw JSON，或按 [高级脚本指南](高级脚本指南.md) 使用受支持的扩展入口。配方说明方法为 `.tooltip()`，不要误写为 `.tooltips()`。原始需求例子（完整脚本）：
 
 ```js
 ServerEvents.recipes(event => {
@@ -439,10 +457,12 @@ MachineLifecycleEvents.recipeStart(event => {
 | `recipeTick` | START / END，可 `cancel()`；两阶段的资源语义不同 |
 | `recipeFailure` | 原因与 `destructRecipe` |
 | `factoryRecipeStart` / `factoryRecipeTick` / `factoryRecipeFinish` / `factoryRecipeFailure` | 工厂独立事件，另含线程序号 |
+| `resultChance` | 结算随机源；`setSeed(seed)`、`random`、`setRandom(source)`，另含 `thread` |
+| `smartInterfaceUpdate` | 成功写入的接口 `type` 与 `value` |
 
-工厂配方使用对应 factory 事件，不要只监听普通 recipeStart 就认为覆盖所有合成。取消 recipeTick 的 START 会跳过该次结算；取消 END 时本 tick 已结算资源，进度不加，不能当作事务撤销。失败事件也不自动退还已经支付的开工输入。
+工厂配方使用对应 factory 事件，不要只监听普通 recipeStart 就认为覆盖所有合成。0.111.0 的 `recipeCheck` 同时覆盖普通控制器和工厂，在一次性输入支付前执行两阶段检查，并携带 `thread`。取消 recipeTick 的 START 会跳过该次结算；取消 END 时本 tick 已结算资源，进度不加，不能当作事务撤销。失败事件也不自动退还已经支付的开工输入。
 
-这不是旧版脚本全部控制器接口的等量替代；例如任意 customData 与旧 RecipePrimer 回调不能按原代码复制。附属模组 Java 事件与具体时序见 [事件 API](事件API.md)，其中旧阶段描述需要结合当前迁移日志阅读。
+0.111.0 已提供 `event.controller.customData`、具名修改器、状态文字、线程进度和配方列表控制，以及机器／配方／升级方法链上的 `.on()`；完整写法和事务约束见 [高级脚本指南](高级脚本指南.md)。旧 CraftTweaker 文件仍需改写，不能将旧方法名逐字复制为 KubeJS。客户端 GUI／geo 脚本钩子和未移植的第三方后端仍不在本轮范围内。附属模组 Java 事件见 [事件 API](事件API.md)。
 
 ## 九、常见错误与验收清单
 
@@ -458,3 +478,5 @@ MachineLifecycleEvents.recipeStart(event => {
 | 照搬旧脚本“全部兼容模块” | 核对本版范围；不支持的需求类型会报错，不应删掉需求让配方变成免费 |
 
 每次先保留一条确定配方：记录输入、运行 tick、FE/t、输出、并行数；再逐一加入概率、催化剂、标签、分组、适配器与事件。最后实际检查重载、重登、存档重启、输出堵塞与连续合成。脚本没有语法错误、JEI 能显示、离线测试通过，分别只证明各自覆盖的部分。
+
+供应器可作为结构输入部件，也可通过同维度的影子方块共享输入。五种工作模式、手动辅助输入、退回行为及存储卡绑定步骤见 [使用说明的供应器小节](使用说明.md)。配方字段保持不变，隔离组仍服从机器已有的输入组规则；手动辅助输入对全部隔离样板槽共用。

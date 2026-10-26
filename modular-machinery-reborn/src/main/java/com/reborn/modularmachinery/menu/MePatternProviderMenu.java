@@ -10,11 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 
-/**
- * C4-II（0.96.0）：样板供应器的容器——9 个样板格 + 玩家背包。样板格是**只读显示**：放入/取出
- * 走窗口侧拦截 + 服务端方法（与总线配置格的 ghost 交互同一套架构，交互细节在屏幕类），
- * 菜单只占位对齐索引。
- */
+/** Thirty-six pattern placeholders, two real manual input slots, and a server-owned paged buffer snapshot. */
 public final class MePatternProviderMenu extends AbstractContainerMenu {
 
     public static final String TITLE_KEY = "block.modular_machinery_reborn.me_pattern_provider";
@@ -24,6 +20,14 @@ public final class MePatternProviderMenu extends AbstractContainerMenu {
     private final MePatternProviderBlockEntity provider;
     private final Inventory inventory;
     private String lastSnapshot = "";
+    private int bufferPage;
+    private boolean clientBufferView;
+    public void setClientBufferView(boolean visible) { clientBufferView = visible; }
+    public void setBufferPage(int page) { bufferPage = Math.max(0, page); }
+    public net.minecraft.nbt.CompoundTag bufferSummary() { return provider.summary(bufferPage); }
+    private net.minecraft.nbt.CompoundTag clientSummary = new net.minecraft.nbt.CompoundTag();
+    public void setClientSummary(net.minecraft.nbt.CompoundTag tag) { clientSummary = tag.copy(); }
+    public net.minecraft.nbt.CompoundTag clientSummary() { return clientSummary; }
 
     /**
      * C4-II（0.97.2）：客户端持有的样板列表镜像——服务端经 MePatternSyncPacket 推送，
@@ -42,12 +46,15 @@ public final class MePatternProviderMenu extends AbstractContainerMenu {
         // 客户端构造（网络侧）从 chunk 数据镜像初始化；服务端构造读权威列表。两端同源。
         this.clientPatterns = new java.util.ArrayList<>(provider.patternsView());
         this.clientWorkMode = provider.workMode();
+        this.clientSummary = provider.summary();
         // C4-II（0.96.7）：照旧版 ContainerMEPatternProvider（:47-53）——36 格 4×9、8/28 起，
         // 只收编码样板（限制在包与窗口两端的 isEncodedPattern 里）。
+        var placeholders = new net.minecraft.world.SimpleContainer(PATTERN_SLOTS);
         for (int row = 0; row < 4; row++) {
             for (int col = 0; col < 9; col++) {
-                this.addSlot(new Slot(new net.minecraft.world.SimpleContainer(PATTERN_SLOTS),
-                        col + row * 9, 8 + col * 18, 28 + row * 18) {
+                this.addSlot(new Slot(placeholders,
+                        col + row * 9, ProviderScreenLayout.GRID_X + col * 18, ProviderScreenLayout.GRID_Y + row * 18) {
+                    @Override public boolean isActive() { return !clientBufferView; }
                     @Override
                     public boolean mayPlace(ItemStack stack) {
                         return false;
@@ -60,6 +67,10 @@ public final class MePatternProviderMenu extends AbstractContainerMenu {
                 });
             }
         }
+        for (int i = 0; i < 2; i++) this.addSlot(new net.minecraftforge.items.SlotItemHandler(provider.storage().manualItems, i, ProviderScreenLayout.MANUAL_X + i * 18, ProviderScreenLayout.MANUAL_Y) {
+            @Override public boolean mayPlace(ItemStack stack) { return !provider.storage().pending(); }
+            @Override public boolean mayPickup(Player player) { return !provider.storage().pending(); }
+        });
         this.addPlayerSlots(inventory, 114);
     }
 
@@ -102,8 +113,14 @@ public final class MePatternProviderMenu extends AbstractContainerMenu {
 
     @Override
     public ItemStack quickMoveStack(Player player, int index) {
-        // 样板格只读；背包内整理没有意义（9 格全是占位），quickMove 直接空操作。
-        return ItemStack.EMPTY;
+        // Shift-click moves real manual inputs; encoded patterns use the dedicated pattern interaction.
+        if (index < 36 || index >= slots.size()) return ItemStack.EMPTY;
+        var slot = slots.get(index); if (!slot.hasItem() || !slot.mayPickup(player)) return ItemStack.EMPTY;
+        var stack = slot.getItem(); var original = stack.copy();
+        if (index < 38) { if (!moveItemStackTo(stack, 38, slots.size(), true)) return ItemStack.EMPTY; }
+        else { if (!moveItemStackTo(stack, 36, 38, false)) return ItemStack.EMPTY; }
+        if (stack.isEmpty()) slot.set(ItemStack.EMPTY); else slot.setChanged();
+        slot.onTake(player, stack); return original;
     }
 
     @Override
@@ -119,7 +136,7 @@ public final class MePatternProviderMenu extends AbstractContainerMenu {
         if (inventory.player instanceof net.minecraft.server.level.ServerPlayer player) {
             String snapshot = provider.patternsView().stream()
                     .map(stack -> stack.save(new net.minecraft.nbt.CompoundTag()).toString())
-                    .collect(java.util.stream.Collectors.joining(";")) + provider.workMode().ordinal();
+                    .collect(java.util.stream.Collectors.joining(";")) + provider.workMode().ordinal() + bufferSummary().toString();
             if (!snapshot.equals(lastSnapshot)) {
                 lastSnapshot = snapshot;
                 com.reborn.modularmachinery.network.MePatternSyncPacket.sendTo(player, provider.getBlockPos(),

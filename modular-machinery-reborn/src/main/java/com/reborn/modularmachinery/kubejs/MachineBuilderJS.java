@@ -48,6 +48,35 @@ public final class MachineBuilderJS extends EventJS {
     private final String where;
     private JsonArray parts;
     private JsonObject currentPart;
+    private final ScriptCallbacksJS callbacks = new ScriptCallbacksJS();
+    private final java.util.Map<String, com.reborn.modularmachinery.script.ScriptHooks.BlockChecker> blockCheckers = new java.util.LinkedHashMap<>();
+
+    public MachineBuilderJS on(String event, java.util.function.Consumer<LifecycleEventsJS.ControllerEventJS> callback) {
+        callbacks.add(event, callback); return this;
+    }
+    public MachineBuilderJS field(String key, Object value) { json.add(key, JsonIO.of(value)); return this; }
+    public MachineBuilderJS color(int rgb) {
+        if (rgb < 0 || rgb > 0xFFFFFF) throw new IllegalArgumentException("color must be an RGB value from 0x000000 to 0xFFFFFF");
+        json.addProperty("color", String.format(java.util.Locale.ROOT, "%06X", rgb)); return this;
+    }
+    public MachineBuilderJS hideComponentsWhenFormed(boolean hide) { json.addProperty("hide-components-when-formed", hide); return this; }
+    public MachineBuilderJS controllerBoundingBox(Object box) { json.add("controller-bounding-box", JsonIO.of(box)); return this; }
+    public MachineBuilderJS dynamicPattern(Object pattern) {
+        JsonArray entries = json.getAsJsonArray("dynamic-patterns");
+        if (entries == null) { entries = new JsonArray(); json.add("dynamic-patterns", entries); }
+        entries.add(requireObject(pattern, "dynamic pattern")); return this;
+    }
+    private JsonObject requirePart() {
+        if (currentPart == null) throw new IllegalStateException("Call part() or parts() first");
+        return currentPart;
+    }
+    public MachineBuilderJS selectorTag(String tag) { requirePart().addProperty("selector-tag", tag); return this; }
+    public MachineBuilderJS nbt(Object nbt) { requirePart().add("nbt", requireObject(nbt, "nbt")); return this; }
+    public MachineBuilderJS previewNBT(Object nbt) { requirePart().add("preview-nbt", requireObject(nbt, "preview-nbt")); return this; }
+    public MachineBuilderJS blockChecker(com.reborn.modularmachinery.script.ScriptHooks.BlockChecker checker) {
+        String key = json.get("registryname").getAsString() + "/part/" + (parts.size() - 1);
+        blockCheckers.put(key, checker); requirePart().addProperty("script-checker", key); return this;
+    }
 
     private MachineBuilderJS(MachineRegistryEventJS owner, String where) {
         this.owner = owner;
@@ -554,6 +583,8 @@ public final class MachineBuilderJS extends EventJS {
         // 波 4：把**这份 JSON 本身**一起 stage。客户端就是靠它重建同一批定义的，
         // 而这里传的是「刚刚被 read 的那一个对象」——不是解析之后反向生成的一份。
         MachineDefinitions.stage(definition, this.json);
+        callbacks.bind(false, definition.id());
+        blockCheckers.forEach(com.reborn.modularmachinery.script.ScriptHooks::blockChecker);
         this.owner.countRegistered(definition);
         return definition;
     }

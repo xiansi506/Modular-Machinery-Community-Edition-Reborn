@@ -61,6 +61,9 @@ public final class LifecycleEventsJS {
     public static final String GROUP_NAME = "MachineLifecycleEvents";
 
     private static final EventGroup GROUP = EventGroup.of(GROUP_NAME);
+    private static boolean bridgeRegistered;
+    private static final EventHandler RESULT_CHANCE = GROUP.server("resultChance", () -> ResultChanceEventJS.class);
+    private static final EventHandler SMART_INTERFACE = GROUP.server("smartInterfaceUpdate", () -> SmartInterfaceEventJS.class);
 
     private static final EventHandler STRUCTURE_FORMED = GROUP.server("structureFormed",
             () -> ControllerEventJS.class);
@@ -104,6 +107,12 @@ public final class LifecycleEventsJS {
      * The Forge-bus bridge. Registered by the plugin (so it only exists when KubeJS does), server events only.
      */
     public static void registerBridge() {
+        if (bridgeRegistered) return;
+        bridgeRegistered = true;
+        MinecraftForge.EVENT_BUS.addListener((com.reborn.modularmachinery.api.event.ResultChanceCreateEvent event) ->
+                RESULT_CHANCE.post((ScriptTypeHolder) ScriptType.SERVER, new ResultChanceEventJS(event)));
+        MinecraftForge.EVENT_BUS.addListener((com.reborn.modularmachinery.api.event.SmartInterfaceUpdateEvent event) ->
+                SMART_INTERFACE.post((ScriptTypeHolder) ScriptType.SERVER, new SmartInterfaceEventJS(event)));
         MinecraftForge.EVENT_BUS.addListener((MachineStructureFormedEvent event) ->
                 STRUCTURE_FORMED.post((ScriptTypeHolder) ScriptType.SERVER,
                         new ControllerEventJS(event)));
@@ -152,6 +161,22 @@ public final class LifecycleEventsJS {
 
         public BlockPos getPos() {
             return this.backing.controller().getBlockPos();
+        }
+
+        public com.reborn.modularmachinery.script.MachineControllerAccess getController() {
+            return new com.reborn.modularmachinery.script.MachineControllerAccess(backing.controller());
+        }
+        public net.minecraft.world.level.Level getWorld() { return backing.controller().getLevel(); }
+
+        /** Safe for scoped callbacks too: mark the underlying event without throwing EventExit. */
+        public void prevent() {
+            if (backing instanceof RecipeTickEvent tick) { tick.preventProgressing("Script prevented progress"); return; }
+            if (!backing.isCancelable()) throw new IllegalStateException("This machine event cannot be canceled");
+            backing.setCanceled(true);
+        }
+        @Override public Object cancel() throws EventExit {
+            prevent();
+            return super.cancel();
         }
 
         @Nullable
@@ -203,6 +228,8 @@ public final class LifecycleEventsJS {
         public Phase getPhase() {
             return ((RecipeCheckEvent) this.backing).phase();
         }
+        @Override public int getParallelism() { return ((RecipeCheckEvent) backing).requestedParallelism(); }
+        public int getThread() { return ((RecipeCheckEvent) backing).threadOrdinal(); }
 
         /** 脚本属性写法：{@code event.parallelism = n}（控制器仍会夹到 1..上限）。 */
         public void setParallelism(int parallelism) {
@@ -231,7 +258,7 @@ public final class LifecycleEventsJS {
          */
         @Override
         public Object cancel() throws EventExit {
-            ((RecipeTickEvent) this.backing).setCanceled(true);
+            ((RecipeTickEvent) this.backing).preventProgressing("Script canceled progress");
             super.cancel();
             return null;
         }
@@ -307,5 +334,24 @@ public final class LifecycleEventsJS {
         public void setDestructRecipe(boolean destruct) {
             ((FactoryRecipeFailureEvent) this.backing).setDestructRecipe(destruct);
         }
+    }
+
+    public static class ResultChanceEventJS extends RecipeEventJS {
+        public ResultChanceEventJS(com.reborn.modularmachinery.api.event.ResultChanceCreateEvent backing) { super(backing); }
+        public int getThread() { return ((com.reborn.modularmachinery.api.event.ResultChanceCreateEvent) backing).threadOrdinal(); }
+        public void setSeed(long seed) {
+            ((com.reborn.modularmachinery.api.event.ResultChanceCreateEvent) backing).setRandom(net.minecraft.util.RandomSource.create(seed));
+        }
+        public net.minecraft.util.RandomSource getRandom() {
+            return ((com.reborn.modularmachinery.api.event.ResultChanceCreateEvent) backing).random();
+        }
+        public void setRandom(net.minecraft.util.RandomSource random) {
+            ((com.reborn.modularmachinery.api.event.ResultChanceCreateEvent) backing).setRandom(random);
+        }
+    }
+    public static class SmartInterfaceEventJS extends ControllerEventJS {
+        public SmartInterfaceEventJS(com.reborn.modularmachinery.api.event.SmartInterfaceUpdateEvent backing) { super(backing); }
+        public String getType() { return ((com.reborn.modularmachinery.api.event.SmartInterfaceUpdateEvent) backing).type(); }
+        public float getValue() { return ((com.reborn.modularmachinery.api.event.SmartInterfaceUpdateEvent) backing).newValue(); }
     }
 }

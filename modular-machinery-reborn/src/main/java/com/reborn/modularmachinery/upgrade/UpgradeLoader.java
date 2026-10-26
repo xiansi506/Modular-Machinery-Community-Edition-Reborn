@@ -69,12 +69,14 @@ public final class UpgradeLoader extends SimpleJsonResourceReloadListener {
         // The config directory is merged last so an author's file wins over a data pack file with the same name.
         Map<ResourceLocation, JsonElement> all = new LinkedHashMap<>(files);
         all.putAll(UpgradeDirectory.readAll());
+        all.putAll(com.reborn.modularmachinery.script.ScriptUpgradeDefinitions.files());
 
         // Pass 1: types, seeded from the previous load and overwritten by whatever this load declares. Seeding
         // is deliberate: it lets one pack declare an upgrade and another pack map an item to it, and it means
         // editing a mapping while its type file is being edited does not fail. Marking what this load produced
         // keeps a plain reload from being mistaken for two files colliding.
         Map<ResourceLocation, UpgradeType> loadedTypes = new LinkedHashMap<>(UpgradeRegistry.all());
+        com.reborn.modularmachinery.script.ScriptUpgradeDefinitions.previousTypes().forEach(loadedTypes::remove);
         List<String> typeFailures = new ArrayList<>();
         Set<ResourceLocation> seenThisLoad = new LinkedHashSet<>();
         int declarations = 0;
@@ -180,7 +182,7 @@ public final class UpgradeLoader extends SimpleJsonResourceReloadListener {
 
     // ------------------------------------------------------------------- types
 
-    private static UpgradeType readType(ResourceLocation fileId, JsonElement element) {
+    public static UpgradeType readType(ResourceLocation fileId, JsonElement element) {
         JsonObject root = asObject(element, fileId);
 
         String rawName = requireString(root, "name", fileId);

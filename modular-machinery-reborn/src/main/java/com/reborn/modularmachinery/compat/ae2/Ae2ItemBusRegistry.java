@@ -15,6 +15,10 @@ import net.minecraftforge.registries.RegistryObject;
  */
 public final class Ae2ItemBusRegistry {
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static RegistryObject<BlockEntityType<?>> registerPatternMirror(DeferredRegister<BlockEntityType<?>> register, RegistryObject<Block> block) {
+        return (RegistryObject) register.register("me_pattern_mirror", () -> BlockEntityType.Builder.of(MePatternMirrorBlockEntity::new, block.get()).build(null));
+    }
     private Ae2ItemBusRegistry() {
     }
 

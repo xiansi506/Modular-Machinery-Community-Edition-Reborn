@@ -1,0 +1,24 @@
+{
+  "type": "modular_machinery_reborn:machine",
+  "machine": "magic_demo:botania",
+  "recipeTime": 100,
+  "requirements": [
+    {
+      "type": "item",
+      "io-type": "input",
+      "item": "minecraft:cobblestone",
+      "amount": 1
+    },
+    {
+      "type": "mana",
+      "io-type": "input",
+      "amount": 1000
+    },
+    {
+      "type": "item",
+      "io-type": "output",
+      "item": "minecraft:stone",
+      "amount": 1
+    }
+  ]
+}

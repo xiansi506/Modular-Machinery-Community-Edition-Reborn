@@ -27,6 +27,9 @@ public final class RecipeCheckEvent extends RecipeEvent {
 
     private final Phase phase;
     private int parallelism;
+    private int threadOrdinal = -1;
+    public int threadOrdinal() { return threadOrdinal; }
+    public RecipeCheckEvent forThread(int ordinal) { threadOrdinal = ordinal; return this; }
     @Nullable
     private String failureReason;
 

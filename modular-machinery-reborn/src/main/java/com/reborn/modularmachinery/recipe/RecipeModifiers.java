@@ -192,4 +192,12 @@ public final class RecipeModifiers {
         combined.addAll(other.modifiers);
         return new RecipeModifiers(combined);
     }
+
+    /** Remove exactly one contribution for each saved script rule before applying current runtime rules. */
+    public RecipeModifiers without(RecipeModifiers other) {
+        if (other.isEmpty()) return this;
+        List<RecipeModifier> remaining = new java.util.ArrayList<>(modifiers);
+        for (RecipeModifier rule : other.modifiers) remaining.remove(rule);
+        return of(remaining);
+    }
 }

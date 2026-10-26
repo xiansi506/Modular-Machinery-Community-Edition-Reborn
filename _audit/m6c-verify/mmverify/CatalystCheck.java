@@ -287,7 +287,7 @@ final class CatalystCheck {
         try {
             String controller = source("block/MachineControllerBlockEntity.java");
             report("the controller folds catalyst modifiers in per candidate group",
-                    controller.contains("recipe.prepareStart(scope, this.modifiers)"));
+                    controller.contains("recipe.prepareStart(scope, this.scriptBaseModifiers())"));
             report("...and uses that set when checking a start",
                     controller.contains("recipe.canStart(scope, prepared)"));
             report("...and when computing parallelism",

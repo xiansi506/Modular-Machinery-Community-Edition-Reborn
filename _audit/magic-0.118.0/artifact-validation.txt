@@ -1,0 +1,7 @@
+Archive: C:/mmwork/releases/modular-machinery-reborn/v0.118.0/modular-machinery-reborn-0.118.0.jar
+SHA256: 1B70C2C6703414FD55FC52958AD5B8413127DCEF14213C91EE39D04129B5399F
+Bytes: 1435821
+PASS 205 JSON; en/zh 424 matched keys; 0.118.0 metadata and AppMek dependency
+PASS provider/mirror classes and resources; optional mining tags; no bundled optional APIs
+PASS magic classes/resources/dynamic loot isolation; no bundled optional APIs
+PASS SRG creative-tab registry and protocol 7

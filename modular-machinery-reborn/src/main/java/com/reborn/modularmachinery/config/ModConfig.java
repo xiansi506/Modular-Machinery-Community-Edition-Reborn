@@ -40,9 +40,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>{@code fluidhatch.size.<TIER>}, {@code energyhatch.size.<TIER>} and {@code energyhatch.limit.<TIER>} — the
  *       original's hatch keys, kept in the original's categories and with the enum constant as the upper-case key
  *       ({@code FluidHatchSize#loadFromConfig}, {@code :43-47}; {@code EnergyHatchData#loadFromConfig},
- *       {@code :67-85}). Defaults come from {@code HatchTier}; the energy keys' upper bound is
- *       {@code Integer.MAX_VALUE} instead of the original's {@code Long.MAX_VALUE} because this port's energy
- *       buffer is int-backed (item F7). See {@link HatchConfig}.</li>
+ *       {@code :67-85}). Defaults come from {@code HatchTier}; energy storage and transfer use the original long ranges. See {@link HatchConfig}.</li>
  *   <li>{@code factory-system.enable-factory-controller-bydefault} — default {@code false}
  *       ({@code Config.java:41} field initialiser and {@code :120-121} the config default);
  *       {@code factory-system.default-factory-max-thread} — default <b>10</b>, range {@code 1 .. 100}
@@ -201,6 +199,7 @@ public final class ModConfig {
     private static ForgeConfigSpec.BooleanValue ENABLE_SECURITY_SYSTEM_VALUE;
     /** general.enable-duration-multiplier. Assigned in build(). */
     private static ForgeConfigSpec.BooleanValue ENABLE_DURATION_MULTIPLIER_VALUE;
+    private static ForgeConfigSpec.BooleanValue ENABLE_FLUXNETWORKS_INTEGRATION;
     /** general.general-casing-color, stored as the original six digit RGB string. */
     private static ForgeConfigSpec.ConfigValue<String> GENERAL_CASING_COLOR_VALUE;
     /** general.machine-parallelize-enabled-bydefault. */
@@ -355,6 +354,8 @@ public final class ModConfig {
                 "(the original's enable-duration-multiplier). Default false, the value the original's",
                 "config file actually used. When false, a duration modifier still changes how many ticks",
                 "the craft takes, but the energy drawn per tick is not scaled to keep the total constant.");
+        ENABLE_FLUXNETWORKS_INTEGRATION = builder.comment("Expose Flux Networks long-energy capabilities. Requires a world restart.")
+                .worldRestart().define(List.of(GENERAL_ROOT, "enable-fluxnetworks-integration"), true);
         ENABLE_DURATION_MULTIPLIER_VALUE = builder.define(
                 List.of(GENERAL_ROOT, ENABLE_DURATION_MULTIPLIER), false);
 
@@ -403,6 +404,7 @@ public final class ModConfig {
         // accessors, and this call is the only place they are attached to the one spec above. Not a separate
         // spec: a second COMMON registration is the startup crash the class comment describes.
         HatchConfig.define(builder);
+        com.reborn.modularmachinery.magic.MagicConfig.define(builder);
 
         // ---- Section 6 of 6: auto-assembly.* (A8) ------------------------------------------------------
         // The original's AssemblyConfig ("auto-assembly"), with the two keys that have no 1.20.1 meaning left
@@ -725,6 +727,10 @@ public final class ModConfig {
             return false;
         }
         return ENABLE_DURATION_MULTIPLIER_VALUE.get();
+    }
+
+    public static boolean enableFluxNetworksIntegration() {
+        return ENABLE_FLUXNETWORKS_INTEGRATION == null || !SPEC.isLoaded() || ENABLE_FLUXNETWORKS_INTEGRATION.get();
     }
 
     /**

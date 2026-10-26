@@ -65,7 +65,7 @@ public final class MachineHatchMenu extends AbstractContainerMenu {
     private final ContainerData data = new ContainerData() {
         @Override public int get(int index) { return hatch.menuValue(index); }
         @Override public void set(int index, int value) { hatch.setMenuValue(index, value); }
-        @Override public int getCount() { return 6; }
+        @Override public int getCount() { return 14; }
     };
 
     public MachineHatchMenu(int id, Inventory inv, MachineHatchBlockEntity hatch) {
@@ -93,8 +93,14 @@ public final class MachineHatchMenu extends AbstractContainerMenu {
 
     public MachineHatchBlockEntity hatch() { return hatch; }
 
-    public int energyStored() { return data.get(DATA_ENERGY_STORED); }
-    public int energyCapacity() { return Math.max(1, data.get(DATA_ENERGY_CAPACITY)); }
+    public long energyStoredLong() {
+        return com.reborn.modularmachinery.energy.EnergyMenuValues.combine(data.get(6), data.get(7), data.get(8), data.get(9));
+    }
+    public long energyCapacityLong() {
+        return Math.max(1L, com.reborn.modularmachinery.energy.EnergyMenuValues.combine(data.get(10), data.get(11), data.get(12), data.get(13)));
+    }
+    public int energyStored() { return com.reborn.modularmachinery.energy.EnergyAccess.asInt(energyStoredLong()); }
+    public int energyCapacity() { return com.reborn.modularmachinery.energy.EnergyAccess.asInt(energyCapacityLong()); }
     public int fluidAmount() { return data.get(DATA_FLUID_AMOUNT); }
     public int fluidCapacity() { return Math.max(1, data.get(DATA_FLUID_CAPACITY)); }
     /** 气体那一半的量（mB）；没装 Mekanism 或仓里没有气体那一半时是 0。 */

@@ -59,6 +59,12 @@ public final class MachineRequirementParser {
         // 含义完全相同——把同一条规则写进十来个 parse 分支，就会有一份迟早分叉的副本。
         requirement.setSelectorTag(readSelectorTag(requirementJson, recipeId));
         readParallelizeUnaffected(requirementJson, requirement, recipeId);
+        JsonObject options = new JsonObject();
+        for (String key : java.util.List.of("script-checker", "script-modifiers", "consume-durability", "fuel-time",
+                "ignore-output-check", "trigger-time", "trigger-repeatable", "script-tooltip")) {
+            if (requirementJson.has(key)) options.add(key, requirementJson.get(key));
+        }
+        requirement.setScriptOptions(options);
         return requirement;
     }
 
@@ -188,6 +194,7 @@ public final class MachineRequirementParser {
         // 而「没有标签」是这个字段的常态。
         buf.writeUtf(requirement.selectorTag() == null ? "" : requirement.selectorTag());
         buf.writeBoolean(requirement.isParallelizeUnaffected());
+        buf.writeUtf(requirement.scriptOptions().toString());
     }
 
     /**
@@ -213,6 +220,7 @@ public final class MachineRequirementParser {
         String selectorTag = buf.readUtf();
         requirement.setSelectorTag(selectorTag.isEmpty() ? null : selectorTag);
         requirement.setParallelizeUnaffected(buf.readBoolean());
+        requirement.setScriptOptions(com.google.gson.JsonParser.parseString(buf.readUtf()).getAsJsonObject());
         return requirement;
     }
 

@@ -1,4 +1,42 @@
-# 生命周期事件 API（0.79.0 首切片）
+# 机器事件 API（0.113.0）
+
+## 当前接口（2026-10-26）
+
+0.113.0 新增客户端组 `MachineClientEvents`，放在 `kubejs/client_scripts/`。以下事件同样经过 Forge 总线，且可按机器 ID 过滤；KubeJS 先执行匹配 ID 的监听器，再执行全局监听器。客户端控制器视图只读，详见 [客户端脚本指南](客户端脚本指南.md)。
+
+| Java 事件 | 客户端 KubeJS 名称 | 用途 |
+|---|---|---|
+| `ControllerGuiInfoEvent` | `guiRender` | 普通／工厂控制器 GUI 附加文字 |
+| `ControllerModelGetEvent` | `modelGet` | 选择具名或直接指定的完整模型资源组 |
+| `ControllerModelAnimationEvent` | `modelAnimation` | 序列、循环、速度、过渡时间、播放状态与帧信息 |
+
+下面为继续保留的服务端生命周期接口。
+
+事件仍发到 **Forge 总线**；KubeJS 全局订阅使用 `MachineLifecycleEvents`，机器和配方专属订阅使用 `.on()`，升级使用 `.on(event, (event, upgrade) => ...)`。脚本包装均提供 `controller`、`world`、`pos` 与机器 id，完整方法见 [高级脚本指南](高级脚本指南.md)。
+
+| Java 事件 | KubeJS 名称 | 当前语义 |
+|---|---|---|
+| `MachineStructureFormedEvent` / `MachineStructureUpdateEvent` | `structureFormed` / `structureUpdated` | 成型／成功更新结构后通知 |
+| `MachineTickEvent` | `machineTick` | 服务端 tick 的 START／END |
+| `RecipeCheckEvent` | `recipeCheck` | **普通控制器和工厂开工**的两阶段检查；可下调并行、`setFailed(reason)` 否决，均发生在一次性输入支付前 |
+| `RecipeStartEvent` / `RecipeFinishEvent` | `recipeStart` / `recipeFinish` | 普通控制器支付成功且武装后／产物结算成功后 |
+| `RecipeTickEvent` | `recipeTick` | 普通控制器逐 tick；Java 使用 `preventProgressing(reason)`，脚本使用 `prevent()` 或 `cancel()` |
+| `RecipeFailureEvent` | `recipeFailure` | 失败原因与可改写的 `destructRecipe` |
+| `FactoryRecipeStartEvent` / `FactoryRecipeTickEvent` / `FactoryRecipeFinishEvent` / `FactoryRecipeFailureEvent` | 对应 `factoryRecipeStart/Tick/Finish/Failure` | 工厂线程事件；含 `thread` 标识，逐批开工均发通知 |
+| `ResultChanceCreateEvent` | `resultChance` | 结算前替换随机源；脚本可 `setSeed(seed)`、`setRandom(source)`，含 `thread` |
+| `SmartInterfaceUpdateEvent` | `smartInterfaceUpdate` | 接口数值成功写入后；脚本读 `type` 与 `value` |
+
+工厂及 `recipeCheck/resultChance` 的 `thread`：-1 表示普通控制器，非负数表示普通工厂线程，-2 以下表示核心线程。它是事件标识，不能当 GUI 行号；用 `controller.getRecipeThread(ordinal)` 定位。
+
+配方事件中的 `recipe()` 是该次执行的配方视图；第三方应通过事件开放的写入方法或脚本运行时视图修改，不应自行改需求或跨 tick 持有事件。普通开工通知已在控制器设置 active 状态之后，完成通知在清空状态之前。Tick START 阻止时不扣当前 tick 的资源，END 阻止时资源已支付、进度不增；阻止不会退款。
+
+服务端分发顺序为 Forge／全局监听、机器专属、配方专属、兼容升级。全局 KubeJS `cancel()` 还会中断相应脚本监听器链；专属回调建议使用 `prevent()`。新增持久数据和运行时修改器不会改变已支付催化剂的冻结贡献，实际资源改写仍受共享事务约束。
+
+服务端高级接口验证见项目同级 `_audit/scripts-0.111.0/高级脚本更新.md`；客户端 GUI／模型／动画验证见 `_audit/client-scripts-0.113.0/客户端脚本更新.md`。两轮均直接执行生产逻辑及实际 Rhino 函数；**未实机、未部署、未提交／推送**。通信协议仍为 **5**，第三方后端按既有暂缓范围处理。
+
+## 历史：0.79.0 首切片说明
+
+> 以下保留当时的接口、行号与范围记录，**不代表 0.111.0 当前缺口**；与上面的当前总表冲突时，以当前总表及高级脚本指南为准。
 
 > **面向用 Java 写附属模组（addon）的作者。**
 >

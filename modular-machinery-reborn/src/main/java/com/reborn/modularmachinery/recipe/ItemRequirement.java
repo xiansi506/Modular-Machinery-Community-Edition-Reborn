@@ -53,6 +53,68 @@ public final class ItemRequirement extends MachineRequirement {
     @Nullable private final NbtPredicate nbt;
     /** The original's {@code nbt-display}, shown by JEI instead of the parsed tag. */
     @Nullable private final CompoundTag displayTag;
+    private java.util.function.Predicate<ItemStack> extraCheck;
+    private boolean scriptResolved;
+    private java.util.function.IntUnaryOperator resolvedOutputAmount;
+
+    private boolean hasScripts() {
+        return !scriptResolved && (!scriptKey("script-checker").isEmpty() || scriptOptions().has("script-modifiers"));
+    }
+    /** Resolve on copies for each simulation/settlement, so scripts cannot mutate inventories during checks. */
+    private ItemRequirement resolve(HatchCollection ports, RecipeModifiers modifiers) {
+        var controller = com.reborn.modularmachinery.script.MachineControllerAccess.from(ports);
+        ItemStack template = ioType() == IOType.OUTPUT ? stack.copyWithCount(1)
+                : LegacyIngredients.firstStack(ingredient).copyWithCount(modifiedAmount(modifiers));
+        if (ioType() == IOType.INPUT) {
+            outer: for (var handler : ports.itemInputs()) for (int slot = 0; slot < handler.getSlots(); slot++) {
+                ItemStack candidate = handler.getStackInSlot(slot);
+                if (inputMatches(candidate) && (scriptKey("script-checker").isEmpty() || com.reborn.modularmachinery.script.ScriptHooks.checkItem(scriptKey("script-checker"), controller, candidate))) { template = candidate.copyWithCount(modifiedAmount(modifiers)); break outer; }
+            }
+        }
+        ItemStack originalTemplate = template.copy();
+        boolean transformed = scriptOptions().has("script-modifiers");
+        if (transformed) for (var key : scriptOptions().getAsJsonArray("script-modifiers")) {
+            template = com.reborn.modularmachinery.script.ScriptHooks.modifyItem(key.getAsString(), controller, template);
+            if (template == null) return null;
+        }
+        int min = Math.max(0, (int) Math.floor(modifiers.apply(this, minAmount, false)));
+        int max = modifiedAmount(modifiers);
+        if (transformed) {
+            if (ioType() == IOType.INPUT) min = max = Math.max(0, template.getCount());
+            else { min = Math.multiplyExact(min, template.getCount()); max = Math.multiplyExact(max, template.getCount()); }
+        }
+        ItemRequirement resolved = new ItemRequirement(ioType(), ingredient,
+                ioType() == IOType.OUTPUT ? template : null, Math.max(1, min), Math.max(1, max), modifiedChance(modifiers), nbt, displayTag);
+        resolved.zeroAmount = max == 0;
+        resolved.scriptResolved = true;
+        if (ioType() == IOType.OUTPUT) {
+            int multiplier = transformed ? template.getCount() : 1;
+            resolved = new ItemRequirement(ioType(), ingredient, template, minAmount, maxAmount,
+                    modifiedChance(modifiers), nbt, displayTag);
+            resolved.scriptResolved = true;
+            // Preserve the original draw distribution: round each rolled amount before scaling it.
+            resolved.resolvedOutputAmount = amount -> Math.multiplyExact(
+                    (int) Math.max(0, Math.floor(modifiers.apply(this, amount, false))), multiplier);
+        }
+        var options = scriptOptions(); options.remove("script-checker"); options.remove("script-modifiers");
+        resolved.setScriptOptions(options);
+        if (transformed && ioType() == IOType.INPUT && !ItemStack.isSameItemSameTags(originalTemplate, template)) {
+            ItemStack expected = template.copyWithCount(1);
+            resolved = new ItemRequirement(ioType(), Ingredient.of(expected), null,
+                    Math.max(1, min), Math.max(1, max), modifiedChance(modifiers), null, displayTag);
+            resolved.zeroAmount = max == 0; resolved.scriptResolved = true; resolved.setScriptOptions(options);
+            resolved.extraCheck = actual -> ItemStack.isSameItemSameTags(expected, actual);
+        }
+        String checker = scriptKey("script-checker");
+        if (!checker.isEmpty()) {
+            var previous = resolved.extraCheck;
+            resolved.extraCheck = actual -> (previous == null || previous.test(actual))
+                    && com.reborn.modularmachinery.script.ScriptHooks.checkItem(checker, controller, actual);
+        }
+        resolved.setParallelizeUnaffected(isParallelizeUnaffected()); resolved.setParallelism(parallelism());
+        return resolved;
+    }
+    private boolean zeroAmount;
 
     private ItemRequirement(IOType ioType, @Nullable Ingredient ingredient, @Nullable ItemStack stack,
                             int minAmount, int maxAmount, float chance, @Nullable NbtPredicate nbt,
@@ -177,8 +239,9 @@ public final class ItemRequirement extends MachineRequirement {
      * machine reports and the items it actually takes cannot diverge.
      */
     public boolean inputMatches(ItemStack stack) {
-        return !stack.isEmpty() && this.ingredient != null && this.ingredient.test(stack)
-                && (this.nbt == null || this.nbt.matches(stack.getTag()));
+        boolean accepts = option("fuel-time") ? burnTime(stack) > 0 : this.ingredient != null && this.ingredient.test(stack);
+        return !stack.isEmpty() && accepts && (!option("consume-durability") || stack.isDamageableItem())
+                && (this.nbt == null || this.nbt.matches(stack.getTag())) && (extraCheck == null || extraCheck.test(stack));
     }
 
     /** The output stack at its maximum amount, or an empty stack for inputs. */
@@ -211,6 +274,8 @@ public final class ItemRequirement extends MachineRequirement {
 
     /** The amount one copy consumes or produces, after this requirement's modifiers. */
     public int modifiedAmount(RecipeModifiers modifiers) {
+        if (zeroAmount) return 0;
+        if (resolvedOutputAmount != null) return resolvedOutputAmount.applyAsInt(maxAmount);
         double modified = modifiers.apply(this, (double) this.maxAmount, false);
         return (int) Math.max(0.0, Math.floor(modified));
     }
@@ -234,14 +299,18 @@ public final class ItemRequirement extends MachineRequirement {
 
     /** {@link #canSatisfy} for an explicit number of copies. */
     public boolean canSatisfy(HatchCollection ports, RecipeModifiers modifiers, int copies) {
+        if (hasScripts()) {
+            ItemRequirement resolved = resolve(ports, modifiers);
+            return resolved != null && resolved.canSatisfy(ports, RecipeModifiers.EMPTY, copies);
+        }
         int perCopy = modifiedAmount(modifiers);
         if (perCopy == 0) return true;
         if (this.ioType() == IOType.INPUT) {
             return this.ingredient != null && perCopy > 0
-                    && IngredientIo.count(ports.itemInputs(), this::inputMatches) >= perCopy * copies;
+                    && inputCapacity(ports) >= Math.multiplyExact(perCopy, copies);
         }
         // Space is checked for the guaranteed maximum, so a craft cannot end when the result would not fit.
-        return this.stack != null && IngredientIo.canInsertItems(ports.itemOutputs(), this.stack, perCopy * copies);
+        return this.stack != null && IngredientIo.canInsertItems(ports.itemOutputs(), this.stack, Math.multiplyExact(perCopy, copies));
     }
 
     /**
@@ -261,6 +330,10 @@ public final class ItemRequirement extends MachineRequirement {
 
     @Override
     public int parallelLimit(HatchCollection ports, RecipeModifiers modifiers, int ceiling) {
+        if (hasScripts()) {
+            ItemRequirement resolved = resolve(ports, modifiers);
+            return resolved == null ? 0 : resolved.parallelLimit(ports, RecipeModifiers.EMPTY, ceiling);
+        }
         if (!isParallelizable()) {
             return 1;
         }
@@ -273,7 +346,7 @@ public final class ItemRequirement extends MachineRequirement {
             if (this.ingredient == null) {
                 return 0;
             }
-            return Math.min(ceiling, IngredientIo.count(ports.itemInputs(), this::inputMatches) / perCopy);
+            return (int) Math.min(ceiling, inputCapacity(ports) / perCopy);
         }
         if (this.stack == null) {
             return ceiling;
@@ -283,10 +356,14 @@ public final class ItemRequirement extends MachineRequirement {
 
     @Override
     public boolean reserve(HatchCollection ports, RecipeModifiers modifiers) {
+        if (hasScripts()) {
+            ItemRequirement resolved = resolve(ports, modifiers);
+            return resolved != null && resolved.reserve(ports, RecipeModifiers.EMPTY);
+        }
         int total = Math.multiplyExact(modifiedAmount(modifiers), parallelism());
         if (total == 0) return true;
         return ioType() == IOType.INPUT
-                ? IngredientIo.extract(ports.itemInputs(), this::inputMatches, total)
+                ? extractInput(ports, total)
                 : IngredientIo.insertItems(ports.itemOutputs(), this.stack, total);
     }
 
@@ -297,10 +374,14 @@ public final class ItemRequirement extends MachineRequirement {
 
     /** {@link #apply} with modifiers, moving {@code parallelism} copies per settlement. */
     public boolean apply(HatchCollection ports, RandomSource random, RecipeModifiers modifiers) {
+        if (hasScripts()) {
+            ItemRequirement resolved = resolve(ports, modifiers);
+            return resolved != null && resolved.apply(ports, random, RecipeModifiers.EMPTY);
+        }
         int perCopy = modifiedAmount(modifiers);
         int copies = this.parallelism();
         if (this.ioType() == IOType.INPUT) {
-            int total = perCopy * copies;
+            int total = Math.multiplyExact(perCopy, copies);
             if (total <= 0) {
                 return true;
             }
@@ -310,7 +391,7 @@ public final class ItemRequirement extends MachineRequirement {
             if (decidedChance < 1.0F && random.nextFloat() >= decidedChance) {
                 return true;
             }
-            return this.ingredient != null && IngredientIo.extract(ports.itemInputs(), this::inputMatches, total);
+            return this.ingredient != null && extractInput(ports, total);
         }
         if (this.stack == null || perCopy <= 0 || copies <= 0) {
             return true;
@@ -325,10 +406,13 @@ public final class ItemRequirement extends MachineRequirement {
             if (rollChance && random.nextFloat() >= decidedChance) {
                 continue;
             }
-            int rolled = this.hasAmountRange()
-                    ? (int) Math.max(0, Math.floor(modifiers.apply(this,
-                            this.minAmount + random.nextInt(this.maxAmount - this.minAmount + 1), false)))
-                    : perCopy;
+            int rolled = perCopy;
+            if (this.hasAmountRange()) {
+                int amount = this.minAmount + random.nextInt(this.maxAmount - this.minAmount + 1);
+                rolled = resolvedOutputAmount == null
+                        ? (int) Math.max(0, Math.floor(modifiers.apply(this, amount, false)))
+                        : resolvedOutputAmount.applyAsInt(amount);
+            }
             total = Math.addExact(total, rolled);
         }
         if (total <= 0) {
@@ -342,6 +426,58 @@ public final class ItemRequirement extends MachineRequirement {
     @Override
     public boolean tick(HatchCollection ports, RandomSource random) {
         return true;
+    }
+
+    private static int burnTime(ItemStack stack) {
+        return net.minecraftforge.common.ForgeHooks.getBurnTime(stack, net.minecraft.world.item.crafting.RecipeType.SMELTING);
+    }
+    private long inputCapacity(HatchCollection ports) {
+        if (!option("consume-durability") && !option("fuel-time")) return IngredientIo.count(ports.itemInputs(), this::inputMatches);
+        long count = 0;
+        for (var handler : ports.itemInputs()) for (int slot = 0; slot < handler.getSlots(); slot++) {
+            ItemStack item = handler.getStackInSlot(slot);
+            if (inputMatches(item)) count += option("fuel-time") ? (long) burnTime(item) * item.getCount()
+                    : (long) (item.getMaxDamage() - item.getDamageValue()) * item.getCount();
+        }
+        return count;
+    }
+    private boolean extractInput(HatchCollection ports, int total) {
+        if (!option("consume-durability") && !option("fuel-time")) return IngredientIo.extract(ports.itemInputs(), this::inputMatches, total);
+        ResourceTransaction transaction = new ResourceTransaction();
+        return extractSpecial(ports.transactionView(transaction), total) && transaction.commit();
+    }
+    private boolean extractSpecial(HatchCollection ports, int total) {
+        for (var handler : ports.itemInputs()) for (int slot = 0; slot < handler.getSlots() && total > 0; slot++) {
+            ItemStack item = handler.getStackInSlot(slot);
+            if (!inputMatches(item)) continue;
+            int value = option("fuel-time") ? burnTime(item) : item.getMaxDamage() - item.getDamageValue();
+            if (value <= 0) continue;
+            while (total > 0) {
+                ItemStack before = handler.getStackInSlot(slot).copy();
+                ItemStack taken = before.copyWithCount(1);
+                if (taken.isEmpty() || !inputMatches(taken)) break;
+                int paid = Math.min(total, value); total -= paid;
+                ItemStack replacement = before.copyWithCount(before.getCount() - 1);
+                if (option("consume-durability") && paid < value) {
+                    taken.setDamageValue(taken.getDamageValue() + paid);
+                    if (!replacement.isEmpty()) {
+                        if (!ResourceTransaction.replaceItem(handler, slot, before, replacement)
+                                || !IngredientIo.insertItems(ports.itemInputs(), taken, 1)) return false;
+                        continue;
+                    }
+                    replacement = taken;
+                } else if (option("fuel-time") && taken.hasCraftingRemainingItem()) {
+                    if (!replacement.isEmpty()) return false;
+                    replacement = taken.getCraftingRemainingItem();
+                }
+                if (!ResourceTransaction.replaceItem(handler, slot, before, replacement)) return false;
+                item = handler.getStackInSlot(slot);
+                if (!inputMatches(item)) break;
+                value = option("fuel-time") ? burnTime(item) : item.getMaxDamage() - item.getDamageValue();
+                if (value <= 0) break;
+            }
+        }
+        return total <= 0;
     }
 
     @Override

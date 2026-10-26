@@ -2,6 +2,7 @@ package com.reborn.modularmachinery.recipe;
 
 import com.reborn.modularmachinery.block.MeFluidTanks;
 import net.minecraft.nbt.IntTag;
+import com.reborn.modularmachinery.energy.*;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.energy.EnergyStorage;
 import net.minecraftforge.energy.IEnergyStorage;
@@ -18,6 +19,11 @@ import java.util.function.BooleanSupplier;
 public final class ResourceTransaction {
     /** 可选集成自己实现副本，主模块不引用其 API。 */
     public interface OpaquePort { Object transactionView(ResourceTransaction transaction); }
+    private final Map<Object,Object> shared = new HashMap<>();
+    @SuppressWarnings("unchecked")
+    public <T> T shared(Object key, java.util.function.Supplier<T> factory) {
+        return (T) shared.computeIfAbsent(key, ignored -> factory.get());
+    }
     private final IdentityHashMap<Object,Object> views = new IdentityHashMap<>();
     private final IdentityHashMap<IFluidHandler, BooleanSupplier> fluidBlockers = new IdentityHashMap<>();
     private final List<BooleanSupplier> validations = new ArrayList<>(), operations = new ArrayList<>();
@@ -37,8 +43,14 @@ public final class ResourceTransaction {
         return true;
     }
     private void rollback() { for (int i=restores.size()-1;i>=0;i--) restores.get(i).run(); }
-    public IItemHandler items(IItemHandler source) { return (IItemHandler)views.computeIfAbsent(source,k->new Items(source)); }
-    public IFluidHandler fluids(IFluidHandler source) { return (IFluidHandler)views.computeIfAbsent(source,k->new Fluids(source)); }
+    public IItemHandler items(IItemHandler source) {
+        return source instanceof OpaquePort ? (IItemHandler) opaque(source)
+                : (IItemHandler) views.computeIfAbsent(source,k->new Items(source));
+    }
+    public IFluidHandler fluids(IFluidHandler source) {
+        return source instanceof OpaquePort ? (IFluidHandler) opaque(source)
+                : (IFluidHandler) views.computeIfAbsent(source,k->new Fluids(source));
+    }
     /**
      * A compat port shares this native tank with another medium. Its virtual occupancy replaces the
      * live tank's occupancy gate during planning; storage capacity and fluid validation still apply.
@@ -53,6 +65,11 @@ public final class ResourceTransaction {
             if (source instanceof OpaquePort port) return port.transactionView(this);
             throw new IllegalStateException("Opaque recipe port must implement ResourceTransaction.OpaquePort: "+source.getClass().getName());
         });
+    }
+    /** Replace a paid tool/container in a transaction view. Simulation must use the slot after extraction,
+     * rather than asking the live occupied slot whether it could accept a differently tagged replacement. */
+    public static boolean replaceItem(IItemHandler handler, int slot, ItemStack expected, ItemStack replacement) {
+        return handler instanceof ResourceTransaction.Items view && view.replace(slot, expected, replacement);
     }
     private final class Items extends ItemStackHandler {
         final IItemHandler source;
@@ -89,6 +106,19 @@ public final class ResourceTransaction {
             ItemStack result=super.extractItem(slot,Math.min(amount,allowed),simulate);
             if(!simulate&&!result.isEmpty()){ItemStack exact=result.copy();record(()->ItemStack.matches(exact,source.extractItem(slot,exact.getCount(),false)));}
             return result;
+        }
+        boolean replace(int slot, ItemStack expected, ItemStack replacement) {
+            if (!ItemStack.matches(getStackInSlot(slot), expected)
+                    || !ItemStack.matches(source.extractItem(slot, expected.getCount(), true), expected)) return false;
+            if (!replacement.isEmpty() && (!source.isItemValid(slot, replacement)
+                    || replacement.getCount() > Math.min(source.getSlotLimit(slot), replacement.getMaxStackSize()))) return false;
+            super.setStackInSlot(slot, replacement.copy());
+            record(() -> {
+                if (source instanceof ResourceTransaction.Items view) return view.replace(slot, expected, replacement);
+                if (!ItemStack.matches(source.extractItem(slot, expected.getCount(), false), expected)) return false;
+                return replacement.isEmpty() || source.insertItem(slot, replacement.copy(), false).isEmpty();
+            });
+            return true;
         }
     }
     private final class Fluids implements IFluidHandler {
@@ -148,20 +178,37 @@ public final class ResourceTransaction {
         }
         @Override public FluidStack drain(int amount,FluidAction action){for(FluidTank tank:working)if(!tank.isEmpty())return drain(new FluidStack(tank.getFluid(),amount),action);return FluidStack.EMPTY;}
     }
-    private final class Energy implements IEnergyStorage {
-        final IEnergyStorage source;final int before;int stored;
-        Energy(IEnergyStorage source){
-            this.source=source;before=stored=source.getEnergyStored();
-            enlist(()->source.getEnergyStored()==before,()->{
-                if(source instanceof EnergyStorage mutable)mutable.deserializeNBT(IntTag.valueOf(before));
-                else{int delta=before-source.getEnergyStored();int changed=delta>0?source.receiveEnergy(delta,false):-source.extractEnergy(-delta,false);if(changed!=delta)throw new IllegalStateException("Energy rollback refused");}
+    private final class Energy implements LongEnergyAccess {
+        final IEnergyStorage source;
+        final long before;
+        long stored;
+        Energy(IEnergyStorage source) {
+            this.source = source;
+            before = stored = EnergyAccess.stored(source);
+            enlist(() -> EnergyAccess.stored(source) == before, () -> {
+                if (source instanceof LongEnergyStorage wide) wide.setStored(before);
+                else if (source instanceof EnergyStorage mutable) mutable.deserializeNBT(IntTag.valueOf((int) before));
+                else {
+                    long current = EnergyAccess.stored(source);
+                    long delta = before - current;
+                    long changed = delta > 0 ? EnergyAccess.receive(source, delta, false) : -EnergyAccess.extract(source, -delta, false);
+                    if (changed != delta) throw new IllegalStateException("Energy rollback refused");
+                }
             });
         }
-        @Override public int receiveEnergy(int amount,boolean simulate){int n=Math.max(0,Math.min(Math.min(amount,getMaxEnergyStored()-stored),source.receiveEnergy(amount,true)));if(!simulate&&n>0){stored+=n;record(()->source.receiveEnergy(n,false)==n);}return n;}
-        @Override public int extractEnergy(int amount,boolean simulate){int n=Math.max(0,Math.min(Math.min(amount,stored),source.extractEnergy(amount,true)));if(!simulate&&n>0){stored-=n;record(()->source.extractEnergy(n,false)==n);}return n;}
-        @Override public int getEnergyStored(){return stored;}
-        @Override public int getMaxEnergyStored(){return source.getMaxEnergyStored();}
-        @Override public boolean canExtract(){return source.canExtract();}
-        @Override public boolean canReceive(){return source.canReceive();}
+        @Override public long receiveEnergyL(long amount, boolean simulate) {
+            long n = Math.max(0, Math.min(Math.min(amount, getMaxEnergyStoredL() - stored), EnergyAccess.receive(source, amount, true)));
+            if (!simulate && n > 0) { stored += n; record(() -> EnergyAccess.receive(source, n, false) == n); }
+            return n;
+        }
+        @Override public long extractEnergyL(long amount, boolean simulate) {
+            long n = Math.max(0, Math.min(Math.min(amount, stored), EnergyAccess.extract(source, amount, true)));
+            if (!simulate && n > 0) { stored -= n; record(() -> EnergyAccess.extract(source, n, false) == n); }
+            return n;
+        }
+        @Override public long getEnergyStoredL() { return stored; }
+        @Override public long getMaxEnergyStoredL() { return EnergyAccess.capacity(source); }
+        @Override public boolean canExtract() { return source.canExtract(); }
+        @Override public boolean canReceive() { return source.canReceive(); }
     }
 }

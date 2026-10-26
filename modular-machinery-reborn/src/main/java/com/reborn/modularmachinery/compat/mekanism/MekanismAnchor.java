@@ -122,6 +122,9 @@ final class MekanismAnchor {
                 MekanismProbe.map("not mine", entity);
                 return null;
             }
+            if (entity instanceof com.reborn.modularmachinery.block.MeBusAccess bus && bus.gasTanks() != null) {
+                return LazyOptional.of(() -> (IGasHandler) bus.gasTanks().handler());
+            }
             HybridGasTank tank = tankOf(entity);
             if (tank == null) {
                 MekanismProbe.map("mine, but this entity has no gas side", entity);
@@ -142,6 +145,9 @@ final class MekanismAnchor {
         public java.util.List<?> handlers(Object entity, @Nullable String family) {
             if (family != null && !GAS_FAMILY.equals(family)) {
                 return java.util.List.of();
+            }
+            if (entity instanceof com.reborn.modularmachinery.block.MeBusAccess bus && bus.gasTanks() != null) {
+                return java.util.List.of(bus.gasTanks().handler());
             }
             HybridGasTank tank = tankOf(entity);
             MekanismProbe.handlers(entity, tank == null ? 0 : 1);

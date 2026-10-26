@@ -279,12 +279,26 @@ public final class StructurePreviewRenderer {
             RenderSystem.enableDepthTest();
             RenderSystem.depthMask(true);
             BlockRenderDispatcher dispatcher = minecraft.getBlockRenderer();
+            PreviewBlockEntities entities = minecraft.level == null ? null
+                    : PreviewBlockEntities.prepare(preview, blocks, variant, minecraft.level);
+            var entityDispatcher = minecraft.getBlockEntityRenderDispatcher();
             for (StructurePreview.Block block : blocks) {
                 pose.pushPose();
-                pose.translate(block.pos().getX(), block.pos().getY(), block.pos().getZ());
-                dispatcher.renderSingleBlock(block.variantState(variant), pose, graphics.bufferSource(),
-                        LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
-                pose.popPose();
+                try {
+                    pose.translate(block.pos().getX(), block.pos().getY(), block.pos().getZ());
+                    var state = block.variantState(variant);
+                    // Animated blocks already have an item-render fallback in renderSingleBlock. Skip that
+                    // fallback when drawing the actual preview entity, otherwise chests are rendered twice.
+                    if (state.getRenderShape() != net.minecraft.world.level.block.RenderShape.ENTITYBLOCK_ANIMATED
+                            || entities == null || !entities.hasRenderer(block.pos(), entityDispatcher)) {
+                        dispatcher.renderSingleBlock(state, pose, graphics.bufferSource(),
+                                LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY,
+                                entities == null ? net.minecraftforge.client.model.data.ModelData.EMPTY
+                                        : entities.modelData(block.pos()), null);
+                    }
+                    if (entities != null) entities.render(block.pos(), pose, graphics.bufferSource(),
+                            LightTexture.FULL_BRIGHT, entityDispatcher);
+                } finally { pose.popPose(); }
             }
             if (!modifierPositions.isEmpty()) {
                 VertexConsumer lines = graphics.bufferSource().getBuffer(RenderType.lines());

@@ -81,7 +81,7 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
 
     /** The original drew the fill from the bottom up: v runs from {@code 61 - pxFilled} to 61. */
     private void drawEnergyBar(GuiGraphics graphics) {
-        int filled = filledPixels((float) menu.energyStored() / menu.energyCapacity());
+        int filled = filledPixels((float) ((double) menu.energyStoredLong() / menu.energyCapacityLong()));
         if (filled <= 0) {
             return;
         }
@@ -189,9 +189,9 @@ public final class MachineHatchScreen extends AbstractContainerScreen<MachineHat
                     com.reborn.modularmachinery.config.ModConfig.energyDisplay();
             return List.of(Component.translatable("tooltip.modular_machinery_reborn.energyhatch.charge",
                     com.reborn.modularmachinery.config.DisplayNumbers.abbreviated(
-                            display.display(menu.energyStored())),
+                            display.display(menu.energyStoredLong())),
                     com.reborn.modularmachinery.config.DisplayNumbers.abbreviated(
-                            display.display(menu.energyCapacity())),
+                            display.display(menu.energyCapacityLong())),
                     display.labelComponent()));
         }
         // 工具提示的形态**由所有者定**（2026-10-20 实测截图）：气体仓与液体仓一样，三行——

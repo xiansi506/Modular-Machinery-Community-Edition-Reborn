@@ -64,6 +64,13 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
     private final com.reborn.modularmachinery.block.MeFluidTanks fluidTanks =
             new com.reborn.modularmachinery.block.MeFluidTanks();
 
+    @Nullable private final com.reborn.modularmachinery.block.MeGasStorage gasTanks =
+            net.minecraftforge.fml.ModList.get().isLoaded("mekanism")
+                    ? new com.reborn.modularmachinery.compat.mekanism.MeGasTanks(this::markStorageChanged) : null;
+    // Keep gas data intact if Mekanism is temporarily absent.
+    private CompoundTag deferredGas = new CompoundTag();
+    @Nullable private com.reborn.modularmachinery.block.MeGasStorage.Network gasNetwork;
+
     /**
      * C4-II（0.94.0 重构，照高版 AE2 接口）：输入总线的**流体标记**——与 16 个配置格一一对应，
      * 每条是（流体, 目标量 mB）。一格要么是物品 ghost（{@code config}），要么是流体标记
@@ -197,6 +204,7 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
             this.fluidMarks[slot] = null;
             this.fluidMarkAmounts[slot] = 0;
         }
+        if (this.gasTanks != null) this.gasTanks.setMark(slot, null, 0);
         this.afterConfigWrite(slot);
     }
 
@@ -208,10 +216,26 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
         }
         this.fluidMarks[slot] = fluid;
         this.fluidMarkAmounts[slot] = fluid == null ? 0 : Math.max(1, amount);
+        if (this.gasTanks != null) this.gasTanks.setMark(slot, null, 0);
         if (fluid != null && this.config != null) {
             this.config.setStackInSlot(slot, net.minecraft.world.item.ItemStack.EMPTY);
         }
         this.afterConfigWrite(slot);
+    }
+
+    @Override public com.reborn.modularmachinery.block.MeGasStorage gasTanks() { return this.gasTanks; }
+    @Override public boolean gasNetworkAvailable() { return net.minecraftforge.fml.ModList.get().isLoaded("appmek"); }
+    @Override public void setConfigGas(int slot, @Nullable net.minecraft.resources.ResourceLocation gas, int amount) {
+        if (this.level == null || this.level.isClientSide || this.config == null || this.gasTanks == null
+                || slot < 0 || slot >= CONFIG_GRID || !this.gasTanks.setMark(slot, gas, amount)) return;
+        this.config.setStackInSlot(slot, ItemStack.EMPTY);
+        this.fluidMarks[slot] = null;
+        this.fluidMarkAmounts[slot] = 0;
+        this.afterConfigWrite(slot);
+    }
+    @Override public com.reborn.modularmachinery.block.MeGasStorage.Entry encodedGas(ItemStack stack) {
+        return net.minecraftforge.fml.ModList.get().isLoaded("appmek")
+                ? AppMekGasBridge.encodedGas(stack) : null;
     }
 
     /** 写配置后的公共动作：清该槽物品退避与流体退避、置脏、方块更新（客户端镜像随之刷新）。 */
@@ -264,6 +288,7 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
         }
         // C4-II：流体罐进存档也进 update tag（客户端镜像留给界面片用）。
         tag.put(TAG_FLUID_TANKS, this.fluidTanks.serializeNBT());
+        tag.put("meGas", this.gasTanks == null ? this.deferredGas.copy() : this.gasTanks.save());
         if (this.fluidMarks != null) {
             net.minecraft.nbt.ListTag list = new net.minecraft.nbt.ListTag();
             for (int i = 0; i < this.fluidMarks.length; i++) {
@@ -304,6 +329,8 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
         if (tag.contains(TAG_FLUID_TANKS)) {
             this.fluidTanks.deserializeNBT(tag.getCompound(TAG_FLUID_TANKS));
         }
+        this.deferredGas = tag.getCompound("meGas").copy();
+        if (this.gasTanks != null) this.gasTanks.load(this.deferredGas);
         if (this.fluidMarks != null && tag.contains(TAG_FLUID_CONFIG)) {
             net.minecraft.nbt.ListTag list = tag.getList(TAG_FLUID_CONFIG, net.minecraft.nbt.Tag.TAG_COMPOUND);
             for (int i = 0; i < this.fluidMarks.length && i < list.size(); i++) {
@@ -370,7 +397,12 @@ public final class MeItemBusBlockEntity extends MachineHatchBlockEntity
             fluidMoved = com.reborn.modularmachinery.block.MeFluidBusLogic.tickOutput(
                     this.fluidTanks, new FluidNetworkStorage(), this.fluidFailures, fullCheck);
         }
-        if (moved || fluidMoved) {
+        boolean gasMoved = false;
+        if (this.gasTanks != null && net.minecraftforge.fml.ModList.get().isLoaded("appmek")) {
+            if (this.gasNetwork == null) this.gasNetwork = AppMekGasBridge.network(this.mainNode, this);
+            gasMoved = this.gasTanks.tick(input, this.gasNetwork);
+        }
+        if (moved || fluidMoved || gasMoved) {
             this.setChanged();
         }
     }

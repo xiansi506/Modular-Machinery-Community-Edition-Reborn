@@ -323,7 +323,8 @@ public final class IngredientArrayParser {
         Set<String> unknown = new LinkedHashSet<>();
         for (String key : json.keySet()) {
             String normalised = key.toLowerCase(Locale.ROOT);
-            if (!allowed.contains(normalised) && !normalised.equals("type") && !normalised.equals("io-type")) {
+            if (!allowed.contains(normalised) && !normalised.equals("type") && !normalised.equals("io-type")
+                    && !Set.of("selector-tag", "parallelize-unaffected", "trigger-time", "trigger-repeatable", "script-tooltip", "ignore-output-check").contains(normalised)) {
                 unknown.add(key);
             }
         }

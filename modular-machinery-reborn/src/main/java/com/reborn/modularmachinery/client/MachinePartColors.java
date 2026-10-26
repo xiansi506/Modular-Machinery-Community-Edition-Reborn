@@ -54,6 +54,7 @@ public final class MachinePartColors implements BlockColor {
         // 控制器（含数据化控制器：它们共用同一个方块实体类型）。
         // 全部控制器（普通 / 工厂 / 每台机器自己那两个）——它们共用同一个方块实体与同一个模型。
         event.register(handler, com.reborn.modularmachinery.block.ModBlocks.controllerBlocks());
+        event.register(handler, com.reborn.modularmachinery.magic.MagicBlocks.blocks());
         // 六种外壳共用一个方块与一个颜色存储实体。
         event.register(handler, com.reborn.modularmachinery.block.ModBlocks.BLOCK_CASING.get());
         // 六个仓族各一个方块（等级由 blockstate 的 size 属性决定，所以一族一个块）。
@@ -76,6 +77,7 @@ public final class MachinePartColors implements BlockColor {
         if (entity instanceof MachineHatchBlockEntity hatch && hatch.machineColor() != null) {
             return hatch.machineColor();
         }
+        if (entity instanceof com.reborn.modularmachinery.magic.MagicHatchBlockEntity magic && magic.machineColor() != null) return magic.machineColor();
         // 控制器自己那一份由 MachineControllerBlockEntity 提供（它不属于上一种类型）。
         if (entity instanceof com.reborn.modularmachinery.block.MachineControllerBlockEntity controller
                 && controller.machineColor() != null) {

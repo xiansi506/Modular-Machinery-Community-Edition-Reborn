@@ -359,8 +359,8 @@ public final class EventLayerCheck {
         report("开工检查 START 在 canStart 之前", checkStart >= 0 && checkStart < canStart);
         report("开工检查 END 在 canStart 之后、start 之前",
                 checkEnd > canStart && checkEnd < start);
-        report("RecipeStartEvent 在 start() 成功之后、清理失败之前",
-                postStart > start && postStart < clear);
+        report("RecipeStartEvent 在 start() 成功和控制器武装之后",
+                postStart > start && postStart > clear && source.indexOf("be.activeRecipeId = recipe.getId()") < postStart);
         report("检查事件解析后的并行度会写回配方",
                 source.contains("parallelism = requested; recipe.setParallelism(parallelism);")
                         && source.contains("parallelism = adjusted; recipe.setParallelism(parallelism);"));
@@ -369,7 +369,7 @@ public final class EventLayerCheck {
         int next = source.indexOf("int nextProgress = be.progress + 1;");
         int recipeTick = source.indexOf("recipe.tick(scope, level.random, effective);");
         int tickEnd = source.indexOf("be.postRecipeTick(Phase.END");
-        int progress = source.indexOf("be.progress = nextProgress;");
+        int progress = source.indexOf("be.progress = be.progress < Integer.MAX_VALUE ? be.progress + 1 : Integer.MAX_VALUE;");
         report("配方 tick START 在计进度之前", tickStart >= 0 && tickStart < next);
         report("配方 tick END 在 recipe.tick 之后、写进度之前",
                 tickEnd > recipeTick && tickEnd < progress);

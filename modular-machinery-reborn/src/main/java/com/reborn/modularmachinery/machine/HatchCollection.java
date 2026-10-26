@@ -179,6 +179,14 @@ public final class HatchCollection {
     }
 
     /** 所有标签与组保留，仅把存储换成同一次事务的副本。 */
+    public record MagicEntry(com.reborn.modularmachinery.magic.MagicPort port, String tag) {}
+    private List<MagicEntry> magic = List.of();
+    private boolean transactional;
+    public boolean isTransactionView() { return transactional; }
+    private HatchCollection withTransactionFlag(boolean flag) { transactional = flag; return this; }
+    private HatchCollection withMagic(List<MagicEntry> values) { this.magic = List.copyOf(values); return this; }
+    public List<com.reborn.modularmachinery.magic.MagicPort> magicPorts() { return magic.stream().map(MagicEntry::port).toList(); }
+
     public HatchCollection transactionView(com.reborn.modularmachinery.recipe.ResourceTransaction transaction) {
         return new HatchCollection(
                 itemInputs.stream().map(transaction::items).toList(), itemOutputs.stream().map(transaction::items).toList(),
@@ -187,7 +195,7 @@ public final class HatchCollection {
                 gasInputs.stream().map(transaction::opaque).toList(), gasOutputs.stream().map(transaction::opaque).toList(),
                 itemInputTags, itemOutputTags, fluidInputTags, fluidOutputTags, energyInputTags, energyOutputTags,
                 gasInputTags, gasOutputTags, itemInputGroups, itemOutputGroups, fluidInputGroups, fluidOutputGroups,
-                energyInputGroups, energyOutputGroups, gasInputGroups, gasOutputGroups, smartInterfaces, machine);
+                energyInputGroups, energyOutputGroups, gasInputGroups, gasOutputGroups, smartInterfaces, machine).withMagic(magic.stream().map(e -> new MagicEntry(e.port().transactionView(transaction), e.tag())).toList()).withTransactionFlag(true);
     }
 
     private static List<String> checkedTags(List<String> tags, int ports, String bucket) {
@@ -298,7 +306,7 @@ public final class HatchCollection {
                 filterGroups(this.gasInputTags, this.gasInputGroups, wanted),
                 filterGroups(this.gasOutputTags, this.gasOutputGroups, wanted),
                 this.smartInterfaces,
-                this.machine);
+                this.machine).withMagic(magic.stream().filter(e -> wanted.equals(e.tag())).toList()).withTransactionFlag(transactional);
     }
 
     /**
@@ -343,7 +351,7 @@ public final class HatchCollection {
                 filterByGroup(this.gasInputGroups, this.gasInputGroups, groupId),
                 filterByGroup(this.gasOutputGroups, this.gasOutputGroups, groupId),
                 this.smartInterfaces,
-                this.machine);
+                this.machine).withMagic(magic).withTransactionFlag(transactional);
     }
 
     /**
@@ -486,20 +494,20 @@ public final class HatchCollection {
     public boolean isEmpty() {
         return this.itemInputs.isEmpty() && this.itemOutputs.isEmpty() && this.fluidInputs.isEmpty()
                 && this.fluidOutputs.isEmpty() && this.energyInputs.isEmpty() && this.energyOutputs.isEmpty()
-                && this.gasInputs.isEmpty() && this.gasOutputs.isEmpty();
+                && this.gasInputs.isEmpty() && this.gasOutputs.isEmpty() && this.magic.isEmpty();
     }
 
     public int hatchCount() {
         return this.itemInputs.size() + this.itemOutputs.size() + this.fluidInputs.size()
                 + this.fluidOutputs.size() + this.energyInputs.size() + this.energyOutputs.size()
-                + this.gasInputs.size() + this.gasOutputs.size();
+                + this.gasInputs.size() + this.gasOutputs.size() + this.magic.size();
     }
 
     /** Total FE currently held by the structure's energy input hatches. */
     public long storedEnergy() {
         long total = 0L;
         for (IEnergyStorage storage : this.energyInputs) {
-            total += storage.getEnergyStored();
+            total = com.reborn.modularmachinery.energy.EnergyAccess.add(total, com.reborn.modularmachinery.energy.EnergyAccess.stored(storage));
         }
         return total;
     }
@@ -508,7 +516,7 @@ public final class HatchCollection {
     public long storedEnergyCapacity() {
         long total = 0L;
         for (IEnergyStorage storage : this.energyInputs) {
-            total += storage.getMaxEnergyStored();
+            total = com.reborn.modularmachinery.energy.EnergyAccess.add(total, com.reborn.modularmachinery.energy.EnergyAccess.capacity(storage));
         }
         return total;
     }
@@ -518,6 +526,10 @@ public final class HatchCollection {
     }
 
     public static final class Builder {
+        private final List<MagicEntry> magic = new ArrayList<>();
+        public Builder addMagicPort(com.reborn.modularmachinery.magic.MagicPort port, String tag) {
+            magic.add(new MagicEntry(port, tag == null || tag.isEmpty() ? UNTAGGED : tag)); return this;
+        }
 
         private final List<IItemHandler> itemInputs = new ArrayList<>();
         private final List<IItemHandler> itemOutputs = new ArrayList<>();
@@ -642,6 +654,22 @@ public final class HatchCollection {
             return this;
         }
 
+        public Builder addItemPort(IItemHandler items, boolean input, String selectorTag, int groupId) {
+            String tag = selectorTag == null || selectorTag.isEmpty() ? UNTAGGED : selectorTag;
+            (input ? itemInputs : itemOutputs).add(items);
+            (input ? itemInputTags : itemOutputTags).add(tag);
+            (input ? itemInputGroups : itemOutputGroups).add(Math.max(-1, groupId));
+            return this;
+        }
+
+        public Builder addGasPort(Object gas, boolean input, String selectorTag, int groupId) {
+            String tag = selectorTag == null || selectorTag.isEmpty() ? UNTAGGED : selectorTag;
+            (input ? gasInputs : gasOutputs).add(gas);
+            (input ? gasInputTags : gasOutputTags).add(tag);
+            (input ? gasInputGroups : gasOutputGroups).add(Math.max(-1, groupId));
+            return this;
+        }
+
         /**
          * 把某个方块实体的**兼容能力**也收成端口（波 5.3 起）。
          *
@@ -726,7 +754,7 @@ public final class HatchCollection {
                     this.energyInputTags, this.energyOutputTags, this.gasInputTags, this.gasOutputTags,
                     this.itemInputGroups, this.itemOutputGroups, this.fluidInputGroups, this.fluidOutputGroups,
                     this.energyInputGroups, this.energyOutputGroups, this.gasInputGroups, this.gasOutputGroups,
-                    () -> this.smartInterfaces, this.machine);
+                    () -> this.smartInterfaces, this.machine).withMagic(this.magic);
         }
     }
 }

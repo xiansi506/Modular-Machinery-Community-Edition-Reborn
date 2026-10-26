@@ -38,6 +38,93 @@ public final class MachineRecipeJS extends RecipeJS {
     private static final String RECIPE_TYPE = ModularMachineryReborn.MOD_ID + ":machine";
 
     private final MachineRecipeJsonBuilder builder = new MachineRecipeJsonBuilder();
+    private final ScriptCallbacksJS callbacks = new ScriptCallbacksJS();
+    private final java.util.Map<Integer, com.reborn.modularmachinery.script.ScriptHooks.ItemChecker> checkers = new java.util.LinkedHashMap<>();
+    private final java.util.Map<Integer, java.util.List<com.reborn.modularmachinery.script.ScriptHooks.ItemModifier>> itemModifiers = new java.util.LinkedHashMap<>();
+
+    public MachineRecipeJS on(String event, java.util.function.Consumer<LifecycleEventsJS.ControllerEventJS> callback) {
+        callbacks.add(event, callback); return this;
+    }
+    public MachineRecipeJS itemChecker(com.reborn.modularmachinery.script.ScriptHooks.ItemChecker checker) {
+        checkers.put(builder.lastRequirementIndex(), checker); return this;
+    }
+    public MachineRecipeJS itemModifier(com.reborn.modularmachinery.script.ScriptHooks.ItemModifier modifier) {
+        itemModifiers.computeIfAbsent(builder.lastRequirementIndex(), ignored -> new java.util.ArrayList<>()).add(modifier); return this;
+    }
+    public MachineRecipeJS field(String key, Object value) {
+        builder.field(key, dev.latvian.mods.kubejs.util.JsonIO.of(value)); return this;
+    }
+    public MachineRecipeJS requirementOption(String key, Object value) {
+        builder.requirementOption(key, dev.latvian.mods.kubejs.util.JsonIO.of(value)); return this;
+    }
+    public MachineRecipeJS chance(float chance) {
+        if (!Float.isFinite(chance) || chance < 0 || chance > 1) throw new IllegalArgumentException("chance must be in [0,1]");
+        return requirementOption("chance", chance);
+    }
+    public MachineRecipeJS selectorTag(String tag) { return requirementOption("selector-tag", tag); }
+    public MachineRecipeJS parallelizeUnaffected(boolean unaffected) { return requirementOption("parallelize-unaffected", unaffected); }
+    public MachineRecipeJS nbt(Object nbt) { return requirementOption("nbt", nbt); }
+    public MachineRecipeJS previewNBT(Object nbt) {
+        builder.requirementOptionIfAbsent("nbt", new JsonObject());
+        return requirementOption("nbt-display", nbt);
+    }
+    public MachineRecipeJS adapter(String id) { return field("adapter", id); }
+    public MachineRecipeJS adapterModifiers(Object modifiers) { return field("modifiers", modifiers); }
+    public MachineRecipeJS consumeDurability() { return requirementOption("consume-durability", true); }
+    public MachineRecipeJS ignoreOutputCheck() { return requirementOption("ignore-output-check", true); }
+    public MachineRecipeJS triggerTime(int tick) { return requirementOption("trigger-time", tick); }
+    public MachineRecipeJS triggerRepeatable(boolean repeat) { return requirementOption("trigger-repeatable", repeat); }
+    public MachineRecipeJS requirementTooltip(String text) { return requirementOption("script-tooltip", text); }
+    public MachineRecipeJS tooltip(String... text) {
+        com.google.gson.JsonArray lines = new com.google.gson.JsonArray();
+        for (String line : text) lines.add(line);
+        builder.field("tooltips", lines); return this;
+    }
+    public MachineRecipeJS gasInput(String gas, long amount) { return gas(gas, amount, "input", false); }
+    public MachineRecipeJS gasOutput(String gas, long amount) { return gas(gas, amount, "output", false); }
+    public MachineRecipeJS gasPerTick(String gas, long amount, String io) { return gas(gas, amount, io, true); }
+    private MachineRecipeJS gas(String gas, long amount, String io, boolean perTick) {
+        if (amount <= 0 || amount > Integer.MAX_VALUE) throw new IllegalArgumentException("gas amount must be in 1..2147483647");
+        JsonObject req = new JsonObject(); req.addProperty("type", perTick ? "gas_pertick" : "gas"); req.addProperty("io-type", io);
+        req.addProperty("gas", gas); req.addProperty("amount", amount); req.addProperty("perTick", perTick);
+        builder.requirement(req); return this;
+    }
+    public MachineRecipeJS manaInput(int amount) { return manaInput(amount,false); }
+    public MachineRecipeJS manaInput(int amount, boolean perTick) { return magic("MANA","input",amount,"",0,Integer.MAX_VALUE,perTick); }
+    public MachineRecipeJS manaOutput(int amount) { return manaOutput(amount,false); }
+    public MachineRecipeJS manaOutput(int amount, boolean perTick) { return magic("MANA","output",amount,"",0,Integer.MAX_VALUE,perTick); }
+    public MachineRecipeJS lifeEssenceInput(int amount) { return lifeEssenceInput(amount,false); }
+    public MachineRecipeJS lifeEssenceInput(int amount, boolean perTick) { return magic("LIFEESSENCE","input",amount,"",0,Integer.MAX_VALUE,perTick); }
+    public MachineRecipeJS lifeEssenceOutput(int amount) { return lifeEssenceOutput(amount,false); }
+    public MachineRecipeJS lifeEssenceOutput(int amount, boolean perTick) { return magic("LIFEESSENCE","output",amount,"",0,Integer.MAX_VALUE,perTick); }
+    public MachineRecipeJS auraInput(String type, int amount, int minimum) { return magic("AURA","input",amount,type,minimum,Integer.MAX_VALUE,false); }
+    public MachineRecipeJS auraOutput(String type, int amount, int maximum) { return magic("AURA","output",amount,type,Integer.MIN_VALUE,maximum,false); }
+    public MachineRecipeJS auraPerTick(String type, int amount, String io, int minimum, int maximum) { return magic("AURA",io,amount,type,minimum,maximum,true); }
+    public MachineRecipeJS willInput(String type, double amount, double minimum) { return magic("WILL","input",amount,type,minimum,100,false); }
+    public MachineRecipeJS willOutput(String type, double amount, double maximum) { return magic("WILL","output",amount,type,0,maximum,false); }
+    public MachineRecipeJS willPerTick(String type, double amount, String io, double minimum, double maximum) { return magic("WILL",io,amount,type,minimum,maximum,true); }
+    private MachineRecipeJS magic(String family, String io, double amount, String variant, double min, double max, boolean perTick) {
+        var kind = com.reborn.modularmachinery.magic.MagicFamily.valueOf(family);
+        if (kind == com.reborn.modularmachinery.magic.MagicFamily.WILL) variant = variant.toLowerCase(java.util.Locale.ROOT);
+        new com.reborn.modularmachinery.magic.MagicRequirement(com.reborn.modularmachinery.recipe.IOType.valueOf(io.toUpperCase(java.util.Locale.ROOT)),kind,amount,variant,min,max,perTick);
+        JsonObject req = new JsonObject(); req.addProperty("type",kind.path()); req.addProperty("io-type",io); req.addProperty("amount",amount); req.addProperty("perTick",perTick);
+        if (kind == com.reborn.modularmachinery.magic.MagicFamily.AURA) { req.addProperty("aura-type",variant); req.addProperty("min-aura",min); req.addProperty("max-aura",max); }
+        if (kind == com.reborn.modularmachinery.magic.MagicFamily.WILL) { req.addProperty("will-type",variant); req.addProperty("min",min); req.addProperty("max",max); }
+        builder.requirement(req); return this;
+    }
+    public MachineRecipeJS ingredientArray(Object entries) {
+        JsonObject req = new JsonObject(); req.addProperty("type", "ingredient_array_input"); req.addProperty("io-type", "input");
+        req.add("items", dev.latvian.mods.kubejs.util.JsonIO.of(entries)); builder.requirement(req); return this;
+    }
+    public MachineRecipeJS smartInterface(String type, float value) {
+        JsonObject req = new JsonObject(); req.addProperty("type", "interface_number_input"); req.addProperty("io-type", "input");
+        req.addProperty("interface", type); req.addProperty("value", value); builder.requirement(req); return this;
+    }
+    public MachineRecipeJS fuelInput(int burnTicks) {
+        JsonObject req = new JsonObject(); req.addProperty("type", "item"); req.addProperty("io-type", "input");
+        req.addProperty("item", "minecraft:coal"); req.addProperty("amount", burnTicks); req.addProperty("fuel-time", true);
+        builder.requirement(req); return this;
+    }
 
     public MachineRecipeJS() {
     }
@@ -67,6 +154,22 @@ public final class MachineRecipeJS extends RecipeJS {
             output.addProperty("type", RECIPE_TYPE);
         }
         this.json = output;
+        if (callbacks.isEmpty() && checkers.isEmpty() && itemModifiers.isEmpty()) return;
+        net.minecraft.resources.ResourceLocation id = getOrCreateId();
+        callbacks.bind(true, id);
+        checkers.forEach((index, checker) -> {
+            String key = id + "/item/" + index + "/checker";
+            com.reborn.modularmachinery.script.ScriptHooks.itemChecker(key, checker);
+            output.getAsJsonArray("requirements").get(index).getAsJsonObject().addProperty("script-checker", key);
+        });
+        itemModifiers.forEach((index, modifiers) -> {
+            com.google.gson.JsonArray keys = new com.google.gson.JsonArray();
+            for (int n = 0; n < modifiers.size(); n++) {
+                String key = id + "/item/" + index + "/modifier/" + n;
+                keys.add(key); com.reborn.modularmachinery.script.ScriptHooks.itemModifier(key, modifiers.get(n));
+            }
+            output.getAsJsonArray("requirements").get(index).getAsJsonObject().add("script-modifiers", keys);
+        });
     }
 
     public MachineRecipeJS time(int ticks) {

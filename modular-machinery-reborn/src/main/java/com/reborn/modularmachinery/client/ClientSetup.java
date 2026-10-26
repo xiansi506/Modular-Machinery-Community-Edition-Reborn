@@ -16,6 +16,8 @@ public final class ClientSetup {
         event.enqueueWork(() -> {
             MenuScreens.register(ModMenus.MACHINE_CONTROLLER.get(), MachineControllerScreen::new);
             MenuScreens.register(ModMenus.MACHINE_HATCH.get(), MachineHatchScreen::new);
+            MenuScreens.register(ModMenus.MAGIC_HATCH.get(), MagicHatchScreen::new);
+            for (var block : com.reborn.modularmachinery.magic.MagicBlocks.blocks()) ItemBlockRenderTypes.setRenderLayer(block, RenderType.cutout());
             // C4（0.73.0）：AE2 ME 物品总线。这个屏幕类不引用任何 appeng 类型，所以即使没装 AE2
             // 也可以安全注册；方块与方块实体只在 AE2 存在时才注册。
             MenuScreens.register(ModMenus.ME_ITEM_BUS.get(), MeItemBusScreen::new);
@@ -48,6 +50,7 @@ public final class ClientSetup {
                 // 0.96.5（C4-II）：样板供应器同病第四例——overlay_mepatternprovider 44% 全透明
                 // （16×16 里 112 像素），solid 层画成黑块。名单与测量见迁移日志。
                 ItemBlockRenderTypes.setRenderLayer(ModBlocks.ME_PATTERN_PROVIDER_BLOCK.get(), RenderType.cutout());
+                ItemBlockRenderTypes.setRenderLayer(ModBlocks.ME_PATTERN_MIRROR_BLOCK.get(), RenderType.cutout());
             }
             // 0.29.0: the construct tool's selection highlight, which is drawn in the world. It is a FORGE-bus
             // listener rather than a mod-lifecycle one (world rendering is not a lifecycle event), and it is
@@ -62,6 +65,13 @@ public final class ClientSetup {
                     WorldGhostPreview::onRenderLevelStage);
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(WorldGhostPreview::onClientTick);
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(WorldGhostPreview::onLoggingOut);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.client.preview.PreviewDebugOverlay::onDebugText);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.client.preview.PreviewDebugOverlay::onLoggingOut);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.client.preview.PreviewBlockEntities::onLoggingOut);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(WorldComponentHider::onClientTick);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(WorldComponentHider::onLoggingOut);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(MachineBloom::onRenderLevelStage);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(MachineBloom::onLoggingOut);
         });
     }
 

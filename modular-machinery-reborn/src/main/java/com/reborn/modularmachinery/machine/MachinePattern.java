@@ -37,15 +37,21 @@ public final class MachinePattern {
      * 让它们共享同一个不可变空映射比到处判空干净。
      */
     private final Map<BlockPos, String> tags;
+    private final Map<BlockPos, com.google.gson.JsonObject> rules;
+    public com.google.gson.JsonObject rule(BlockPos pos) {
+        return rules.containsKey(pos) ? rules.get(pos).deepCopy() : new com.google.gson.JsonObject();
+    }
 
     private final BlockPos min;
     private final BlockPos max;
     private final BlockPos size;
 
     private MachinePattern(Map<BlockPos, List<BlockMatcher>> positions, Map<BlockPos, String> tags,
+                          Map<BlockPos, com.google.gson.JsonObject> rules,
                           BlockPos min, BlockPos max, BlockPos size) {
         this.positions = Collections.unmodifiableMap(positions);
         this.tags = Collections.unmodifiableMap(tags);
+        this.rules = Collections.unmodifiableMap(rules);
         this.min = min;
         this.max = max;
         this.size = size;
@@ -107,6 +113,8 @@ public final class MachinePattern {
         for (Map.Entry<BlockPos, String> entry : other.tags.entrySet()) {
             builder.tag(entry.getKey(), entry.getValue());
         }
+        rules.forEach(builder::rule);
+        other.rules.forEach(builder::rule);
         return builder.build();
     }
 
@@ -129,7 +137,17 @@ public final class MachinePattern {
     /** {@code true} when every pattern position holds one of its accepted blocks. */
     public boolean matches(Level level, BlockPos controller) {
         return matches(controller, (at, accepted) -> level.isLoaded(at)
-                && anyMatches(level.getBlockState(at), accepted));
+                && anyMatches(level.getBlockState(at), accepted)
+                && matchesRule(level, at, rules.get(at.subtract(controller))));
+    }
+
+    private static boolean matchesRule(Level level, BlockPos at, com.google.gson.JsonObject rule) {
+        if (rule == null || (!rule.has("nbt") && !rule.has("script-checker"))) return true;
+        var entity = level.getBlockEntity(at);
+        var nbt = entity == null ? new net.minecraft.nbt.CompoundTag() : entity.saveWithFullMetadata();
+        if (rule.has("nbt") && !com.reborn.modularmachinery.recipe.NbtPredicate.parse(rule.get("nbt"), at).matches(nbt)) return false;
+        return !rule.has("script-checker") || level.isClientSide
+                || com.reborn.modularmachinery.script.ScriptHooks.checkBlock(rule.get("script-checker").getAsString(), level, at, level.getBlockState(at), nbt);
     }
 
     /**
@@ -171,6 +189,7 @@ public final class MachinePattern {
             BlockPos rotated = new BlockPos(pos.getZ(), pos.getY(), -pos.getX());
             builder.add(rotated, entry.getValue().stream()
                     .flatMap(matcher -> matcher.rotateYCounterClockwise().stream()).toList());
+            builder.rule(rotated, rule(pos));
             String tag = this.tags.get(pos);
             if (tag != null) {
                 builder.tag(rotated, tag);
@@ -198,6 +217,11 @@ public final class MachinePattern {
 
         private final Map<BlockPos, List<BlockMatcher>> positions = new LinkedHashMap<>();
         private final Map<BlockPos, String> tags = new LinkedHashMap<>();
+        private final Map<BlockPos, com.google.gson.JsonObject> rules = new LinkedHashMap<>();
+        public Builder rule(BlockPos pos, com.google.gson.JsonObject rule) {
+            if (!rule.entrySet().isEmpty()) rules.put(pos.immutable(), rule.deepCopy());
+            return this;
+        }
         private BlockPos min = new BlockPos(0, 0, 0);
         private BlockPos max = new BlockPos(0, 0, 0);
         private boolean empty = true;
@@ -253,7 +277,7 @@ public final class MachinePattern {
                     ? new BlockPos(0, 0, 0)
                     : new BlockPos(max.getX() - min.getX() + 1, max.getY() - min.getY() + 1,
                             max.getZ() - min.getZ() + 1);
-            return new MachinePattern(new LinkedHashMap<>(positions), new LinkedHashMap<>(tags), min, max, size);
+            return new MachinePattern(new LinkedHashMap<>(positions), new LinkedHashMap<>(tags), new LinkedHashMap<>(rules), min, max, size);
         }
     }
 }

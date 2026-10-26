@@ -1,0 +1,16 @@
+{
+  "registryname": "client_demo:press",
+  "localizedname": "客户端脚本演示压机 / Client Script Press",
+  "hide-components-when-formed": false,
+  "geo-model": {
+    "model": "client_demo:geo/controller.geo.json",
+    "texture": "modular_machinery_reborn:textures/block/blockcasing_plain.png",
+    "animation": "client_demo:animations/controller.animation.json",
+    "idle": "idle",
+    "working": "working"
+  },
+  "parts": [
+    {"x": 1, "y": 0, "z": 0, "elements": "modular_machinery_reborn:item_input_hatch"},
+    {"x": -1, "y": 0, "z": 0, "elements": "modular_machinery_reborn:item_output_hatch"}
+  ]
+}

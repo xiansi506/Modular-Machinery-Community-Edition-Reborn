@@ -54,4 +54,10 @@ public interface MeBusAccess {
 
     default void setConfigFluid(int slot, @Nullable Fluid fluid, int amount) {
     }
+
+    @Nullable default MeGasStorage gasTanks() { return null; }
+    default boolean gasNetworkAvailable() { return false; }
+    default void setConfigGas(int slot, @Nullable net.minecraft.resources.ResourceLocation gas, int amount) { }
+    /** Encoded AE gas stacks are supported only by the optional AppMek bridge. */
+    @Nullable default MeGasStorage.Entry encodedGas(net.minecraft.world.item.ItemStack stack) { return null; }
 }

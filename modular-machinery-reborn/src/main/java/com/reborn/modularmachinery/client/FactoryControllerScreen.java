@@ -396,7 +396,8 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
 
         ControllerStatus status = thread.isWorking() ? ControllerStatus.CRAFTING : ControllerStatus.IDLE;
         for (FormattedCharSequence line : this.font.split(
-                Component.translatable(status.translationKey()), ROW_WRAP_WIDTH)) {
+                thread.scriptState().status().isEmpty() ? Component.translatable(status.translationKey())
+                        : Component.literal(thread.scriptState().status()), ROW_WRAP_WIDTH)) {
             graphics.drawString(this.font, line, x, y, ROW_TEXT, false);
             y += LINE;
         }

@@ -68,6 +68,8 @@ public final class MachineEvents {
      * @return how many machines the listeners registered, so a silent zero is visible in the log
      */
     public static int post() {
+        com.reborn.modularmachinery.script.ScriptHooks.clear();
+        com.reborn.modularmachinery.script.ScriptUpgradeDefinitions.beginCycle();
         MachineDefinitions.beginCycle();
         MachineRegistryEventJS event = new MachineRegistryEventJS();
         REGISTRY.post((ScriptTypeHolder) ScriptType.SERVER, event);

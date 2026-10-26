@@ -107,6 +107,14 @@ public final class NbtPredicate {
         return new NbtPredicate((CompoundNode) parsed, object.toString());
     }
 
+    /** Concrete display data: strings are literal, so JSON text components and texture URLs are valid. */
+    public static CompoundTag previewTag(JsonElement json, Object where) {
+        if (json == null || !json.isJsonObject()) {
+            throw new JsonParseException("The ComponentType 'preview-nbt' expects a json compound! (in " + where + ")");
+        }
+        return (CompoundTag) parseNode(json, where, "preview-nbt", true).toTag();
+    }
+
     /** Parses the text form, used by the network reader and by tests. */
     public static NbtPredicate parse(String json, Object where) {
         JsonElement element;
@@ -437,8 +445,12 @@ public final class NbtPredicate {
         private final Pattern pattern;
 
         private StringNode(String source) {
+            this(source, false);
+        }
+
+        private StringNode(String source, boolean literal) {
             this.source = source;
-            this.pattern = Pattern.compile(source, Pattern.CASE_INSENSITIVE);
+            this.pattern = Pattern.compile(literal ? Pattern.quote(source) : source, Pattern.CASE_INSENSITIVE);
         }
 
         @Override
@@ -484,6 +496,10 @@ public final class NbtPredicate {
     // ------------------------------------------------------------------ parsing
 
     private static Node parseNode(JsonElement json, Object where, String path) {
+        return parseNode(json, where, path, false);
+    }
+
+    private static Node parseNode(JsonElement json, Object where, String path, boolean concrete) {
         if (json.isJsonObject()) {
             Map<String, Node> children = new LinkedHashMap<>();
             for (Map.Entry<String, JsonElement> entry : json.getAsJsonObject().entrySet()) {
@@ -492,13 +508,13 @@ public final class NbtPredicate {
                     throw new JsonParseException("An NBT key in " + where + " at " + path
                             + " is empty. The original rejected an empty key (Expected non-empty key).");
                 }
-                children.put(key, parseNode(entry.getValue(), where, path + "." + key));
+                children.put(key, parseNode(entry.getValue(), where, path + "." + key, concrete));
             }
             return new CompoundNode(children);
         }
         if (json.isJsonArray()) {
             JsonArray array = json.getAsJsonArray();
-            if (array.isEmpty()) {
+            if (array.isEmpty() && !concrete) {
                 throw new JsonParseException("The NBT list at " + path + " in " + where + " is empty. The "
                         + "original's parser rejected an empty list (Expected value, NBTJsonDeserializer:211-245); "
                         + "remove the key rather than writing [].");
@@ -506,7 +522,7 @@ public final class NbtPredicate {
             List<Node> elements = new ArrayList<>(array.size());
             byte type = -1;
             for (int index = 0; index < array.size(); index++) {
-                Node element = parseNode(array.get(index), where, path + "[" + index + "]");
+                Node element = parseNode(array.get(index), where, path + "[" + index + "]", concrete);
                 if (type == -1) {
                     type = element.tagType();
                 } else if (element.tagType() != type) {
@@ -519,16 +535,17 @@ public final class NbtPredicate {
             }
             return new ListNode(elements);
         }
-        if (json.isJsonPrimitive() && json.getAsJsonPrimitive().isString()) {
-            return parseScalar(json.getAsString(), where, path);
+        if (json.isJsonPrimitive() && (concrete || json.getAsJsonPrimitive().isString())) {
+            return parseScalar(json.getAsString(), where, path, concrete);
         }
         throw new JsonParseException("The NBT value at " + path + " in " + where + " must be written as a "
                 + "quoted string. The original read every scalar with a quoted string, so write \"5\", "
                 + "\">=1000\" or \"Foo.*\", not a bare number or boolean.");
     }
 
-    private static Node parseScalar(String raw, Object where, String path) {
+    private static Node parseScalar(String raw, Object where, String path, boolean concrete) {
         if (raw.isEmpty()) {
+            if (concrete) return new StringNode("", true);
             // NBTJsonDeserializer#readTypedValue rejected an empty quoted string (:112-118).
             throw new JsonParseException("The NBT value at " + path + " in " + where + " is empty. The "
                     + "original rejected an empty quoted value (Expected value).");
@@ -577,7 +594,7 @@ public final class NbtPredicate {
         // (NBTJsonDeserializer:157-159), so "<abc" is a pattern that includes the '<'.
         String source = mode == null ? body : mode.identifier + body;
         try {
-            return new StringNode(source);
+            return new StringNode(source, concrete);
         } catch (PatternSyntaxException e) {
             throw new JsonParseException("The NBT pattern \"" + source + "\" at " + path + " in " + where
                     + " is not a valid regular expression: " + e.getDescription(), e);

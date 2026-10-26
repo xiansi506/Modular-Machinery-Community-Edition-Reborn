@@ -1,6 +1,7 @@
 package com.reborn.modularmachinery.machine;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.state.BlockState;
 
 import javax.annotation.Nullable;
@@ -37,14 +38,26 @@ import java.util.Map;
 public final class StructurePreview {
 
     /** One block to draw, at a position relative to the controller. */
-    public record Block(BlockPos pos, BlockState state, List<BlockState> alternatives) {
+    public record Block(BlockPos pos, BlockState state, List<BlockState> alternatives,
+                        @Nullable CompoundTag previewNbt) {
+
+        public Block(BlockPos pos, BlockState state, List<BlockState> alternatives) {
+            this(pos, state, alternatives, null);
+        }
 
         public Block(BlockPos pos, BlockState state) {
             this(pos, state, List.of(state));
         }
 
         public Block {
+            pos = pos.immutable();
             alternatives = List.copyOf(alternatives);
+            previewNbt = previewNbt == null ? null : previewNbt.copy();
+        }
+
+        /** Renderers receive their own copy; loading a tile must not alter the definition. */
+        @Override @Nullable public CompoundTag previewNbt() {
+            return previewNbt == null ? null : previewNbt.copy();
         }
 
         /** How many blocks this position accepts; always at least one. */
@@ -109,7 +122,11 @@ public final class StructurePreview {
                 continue;
             }
             BlockPos pos = entry.getKey();
-            blocks.add(new Block(pos, alternatives.get(0), alternatives));
+            var rule = pattern.rule(pos);
+            CompoundTag previewNbt = rule.has("preview-nbt")
+                    ? com.reborn.modularmachinery.recipe.NbtPredicate.previewTag(rule.get("preview-nbt"), pos)
+                    : null;
+            blocks.add(new Block(pos, alternatives.get(0), alternatives, previewNbt));
             min = min == null ? pos : min(min, pos);
             max = max == null ? pos : max(max, pos);
         }

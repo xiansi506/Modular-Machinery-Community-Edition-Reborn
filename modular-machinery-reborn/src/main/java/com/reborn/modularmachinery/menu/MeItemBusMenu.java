@@ -184,4 +184,12 @@ public final class MeItemBusMenu extends AbstractContainerMenu {
         return !this.hatch.isRemoved()
                 && player.distanceToSqr(Vec3.atCenterOf(this.hatch.getBlockPos())) <= 64.0;
     }
+
+    @Override
+    public boolean clickMenuButton(Player player, int action) {
+        if (!this.input || this.bus == null || this.hatch.getLevel() == null
+                || this.hatch.getLevel().isClientSide || this.hatch.getLevel() != player.level()
+                || !stillValid(player)) return false;
+        return MeConfigAmount.apply(this.bus, action);
+    }
 }

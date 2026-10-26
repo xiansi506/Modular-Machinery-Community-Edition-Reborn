@@ -29,7 +29,7 @@ public final class MeFluidConfigPacket {
 
     /** 该格写入什么。 */
     public enum Mode {
-        CLEAR, ITEM, FLUID
+        CLEAR, ITEM, FLUID, GAS
     }
 
     private final int slot;
@@ -47,7 +47,9 @@ public final class MeFluidConfigPacket {
 
     public MeFluidConfigPacket(FriendlyByteBuf buf) {
         this.slot = buf.readByte();
-        this.mode = Mode.values()[buf.readByte()];
+        int ordinal = buf.readUnsignedByte();
+        if (ordinal >= Mode.values().length) throw new IllegalArgumentException("Unknown ME config mode " + ordinal);
+        this.mode = Mode.values()[ordinal];
         this.id = buf.readBoolean() ? buf.readResourceLocation() : null;
         this.amount = buf.readVarInt();
     }
@@ -73,6 +75,7 @@ public final class MeFluidConfigPacket {
             if (!(menu instanceof MeItemBusMenu busMenu) || !busMenu.isInput()) {
                 return;
             }
+            if (!busMenu.stillValid(player) || busMenu.hatch().getLevel() != player.level()) return;
             if (!(busMenu.hatch() instanceof MeBusAccess bus)) {
                 return;
             }
@@ -105,6 +108,12 @@ public final class MeFluidConfigPacket {
                                     * com.reborn.modularmachinery.block.MeFluidTanks.CAPACITY));
                     bus.setConfigFluid(message.slot, fluid, amount);
                 }
+                case GAS -> {
+                    if (message.id == null || bus.gasTanks() == null) return;
+                    bus.setConfigGas(message.slot, message.id, Math.max(1, Math.min(message.amount,
+                            com.reborn.modularmachinery.block.MeGasStorage.SLOTS
+                                    * com.reborn.modularmachinery.block.MeGasStorage.CAPACITY)));
+                }
             }
         });
         context.setPacketHandled(true);
@@ -125,5 +134,11 @@ public final class MeFluidConfigPacket {
 
     public static void sendClear(int slot) {
         ModNetwork.CHANNEL.sendToServer(new MeFluidConfigPacket(slot, Mode.CLEAR, null, 0));
+    }
+
+    public static void sendGas(int slot, ResourceLocation gas, long amount) {
+        int target = (int) Math.max(1, Math.min(amount,
+                com.reborn.modularmachinery.block.MeGasStorage.SLOTS * com.reborn.modularmachinery.block.MeGasStorage.CAPACITY));
+        ModNetwork.CHANNEL.sendToServer(new MeFluidConfigPacket(slot, Mode.GAS, gas, target));
     }
 }

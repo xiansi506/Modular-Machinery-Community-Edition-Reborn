@@ -25,14 +25,6 @@ import java.util.Map;
  * verbatim for the same reason the other key paths are (see {@link ModConfig}'s class comment): a pack author
  * who knows the 1.12.2 file should recognise them.
  *
- * <p><b>The energy range is narrower than the original's, deliberately.</b> The original stored a {@code long}
- * and accepted up to {@code Long.MAX_VALUE}; this port stores FE in Forge's {@code EnergyStorage}, whose
- * capacity and transfer rate are {@code int}s (the original's own {@code TileEnergyHatch} had the same
- * constraint on the transfer side, but not on storage). Rather than accept a larger number and silently clamp
- * it in {@code MachineHatchBlockEntity}, the key's own range stops at {@code Integer.MAX_VALUE}; Forge reports
- * an out-of-range value in the config file instead of this mod quietly doing something else. Lifting the limit
- * is the separate item F7 (a long-backed storage), not something this key should pretend to support.
- *
  * <p>Item bus sizes are <b>not</b> configurable because the original did not make them so either:
  * {@code ItemBusSize} carried a {@code defaultConfigSize} argument and a {@code //TODO configurable} comment
  * ({@code ItemBusSize.java:32-36}), but no config reader. This port keeps that line.
@@ -51,9 +43,9 @@ public final class HatchConfig {
 
     private static final Map<HatchTier, ForgeConfigSpec.IntValue> FLUID_CAPACITY =
             new EnumMap<>(HatchTier.class);
-    private static final Map<HatchTier, ForgeConfigSpec.IntValue> ENERGY_CAPACITY =
+    private static final Map<HatchTier, ForgeConfigSpec.LongValue> ENERGY_CAPACITY =
             new EnumMap<>(HatchTier.class);
-    private static final Map<HatchTier, ForgeConfigSpec.IntValue> ENERGY_TRANSFER =
+    private static final Map<HatchTier, ForgeConfigSpec.LongValue> ENERGY_TRANSFER =
             new EnumMap<>(HatchTier.class);
 
     private HatchConfig() {
@@ -76,21 +68,16 @@ public final class HatchConfig {
                     List.of(FLUID_SIZE_ROOT, tier.name()), tier.fluidCapacity(), 1, Integer.MAX_VALUE));
         }
 
-        builder.comment("Defines the stored FE of each energy hatch tier (the original's energyhatch.size).",
-                "Range 1 .. 2147483647. The original accepted up to 9223372036854775807, but its 1.20.1",
-                "counterpart, Forge EnergyStorage, stores an int; values above 2147483647 are rejected here",
-                "rather than clamped silently. Lifting this is item F7, not a hidden feature of this key.");
+        builder.comment("Stored FE per hatch tier. Range 1 .. 9223372036854775807; backed by long storage.");
         for (HatchTier tier : HatchTier.ENERGY_LADDER) {
             ENERGY_CAPACITY.put(tier, builder.defineInRange(
-                    List.of(ENERGY_SIZE_ROOT, tier.name()), (int) tier.energyCapacity(), 1, Integer.MAX_VALUE));
+                    List.of(ENERGY_SIZE_ROOT, tier.name()), tier.energyCapacity(), 1L, Long.MAX_VALUE));
         }
 
-        builder.comment("Defines the FE per tick of each energy hatch tier (the original's energyhatch.limit).",
-                "Range 1 .. 2147483647, for the same int-backed reason as energyhatch.size. The original used",
-                "the same number for accepting and emitting; this port does too (see MachineHatchBlockEntity).");
+        builder.comment("FE per operation and output tick. Range 1 .. 9223372036854775806.");
         for (HatchTier tier : HatchTier.ENERGY_LADDER) {
             ENERGY_TRANSFER.put(tier, builder.defineInRange(
-                    List.of(ENERGY_LIMIT_ROOT, tier.name()), (int) tier.energyTransfer(), 1, Integer.MAX_VALUE));
+                    List.of(ENERGY_LIMIT_ROOT, tier.name()), tier.energyTransfer(), 1L, Long.MAX_VALUE - 1));
         }
     }
 
@@ -101,12 +88,22 @@ public final class HatchConfig {
 
     /** Stored FE for an energy hatch of {@code tier}; falls back to the tier's compiled default pre-config. */
     public static int energyHatchCapacity(HatchTier tier) {
-        return read(ENERGY_CAPACITY.get(tier), (int) tier.energyCapacity());
+        return com.reborn.modularmachinery.energy.EnergyAccess.asInt(energyHatchCapacityLong(tier));
     }
 
     /** FE per tick for an energy hatch of {@code tier}; falls back to the tier's compiled default pre-config. */
     public static int energyHatchTransfer(HatchTier tier) {
-        return read(ENERGY_TRANSFER.get(tier), (int) tier.energyTransfer());
+        return com.reborn.modularmachinery.energy.EnergyAccess.asInt(energyHatchTransferLong(tier));
+    }
+
+    public static long energyHatchCapacityLong(HatchTier tier) {
+        return read(ENERGY_CAPACITY.get(tier), tier.energyCapacity());
+    }
+    public static long energyHatchTransferLong(HatchTier tier) {
+        return read(ENERGY_TRANSFER.get(tier), tier.energyTransfer());
+    }
+    private static long read(@Nullable ForgeConfigSpec.LongValue value, long fallback) {
+        return value == null || !ModConfig.SPEC.isLoaded() ? fallback : value.get();
     }
 
     /**

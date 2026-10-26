@@ -809,9 +809,12 @@ public final class MachineSchema {
             List<BlockMatcher> accepted = readElements(part, variables, where);
             String selectorTag = readSelectorTag(part, where);
 
-            if (part.has("nbt") || part.has("preview-nbt")) {
-                ignoredExtras = true;
+            JsonObject rule = new JsonObject();
+            for (String key : List.of("nbt", "preview-nbt", "script-checker")) {
+                if (part.has(key)) rule.add(key, part.get(key).deepCopy());
             }
+            if (part.has("nbt")) com.reborn.modularmachinery.recipe.NbtPredicate.parse(part.get("nbt"), where);
+            if (part.has("preview-nbt")) com.reborn.modularmachinery.recipe.NbtPredicate.previewTag(part.get("preview-nbt"), where);
 
             for (int x : xs) {
                 for (int y : ys) {
@@ -822,6 +825,7 @@ public final class MachineSchema {
                         }
                         BlockPos pos = new BlockPos(x, y, z);
                         builder.add(pos, accepted);
+                        builder.rule(pos, rule);
                         // 一个部件展开了多个坐标时，每个坐标都拿到同一个标签——旧版也是这样：
                         // `selector-tag` 是**部件**的属性，坐标数组只是把同一个部件写在多处
                         // （`DynamicMachine.addParts` 对每个 permutation 设的是同一个 selector，

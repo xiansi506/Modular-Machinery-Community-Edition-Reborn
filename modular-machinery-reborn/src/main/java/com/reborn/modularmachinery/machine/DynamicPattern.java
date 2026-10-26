@@ -320,6 +320,7 @@ public final class DynamicPattern {
         for (Map.Entry<BlockPos, List<BlockMatcher>> entry : section.positions().entrySet()) {
             BlockPos pos = rotate(entry.getKey(), rotationSteps).offset(offset);
             builder.add(pos, entry.getValue());
+            builder.rule(pos, section.rule(entry.getKey()));
             String selectorTag = section.tag(entry.getKey());
             if (selectorTag != null) {
                 // 这个部件在定义里被作者命名过，于是它在**这一段**里得到一个带段号的标签。

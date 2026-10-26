@@ -21,6 +21,9 @@ import java.util.Objects;
  * 「每次 finishCrafting 一次」同粒度。默认随机源就是世界随机——不替换时行为与本版从前完全一致。
  */
 public final class ResultChanceCreateEvent extends RecipeEvent {
+    private int threadOrdinal = -1;
+    public int threadOrdinal() { return threadOrdinal; }
+    public ResultChanceCreateEvent forThread(int ordinal) { threadOrdinal = ordinal; return this; }
 
     private RandomSource random;
 

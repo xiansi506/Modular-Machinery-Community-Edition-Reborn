@@ -1,0 +1,31 @@
+{
+  "type": "modular_machinery_reborn:machine",
+  "machine": "magic_demo:bloodmagic",
+  "recipeTime": 100,
+  "requirements": [
+    {
+      "type": "item",
+      "io-type": "input",
+      "item": "minecraft:cobblestone",
+      "amount": 1
+    },
+    {
+      "type": "lifeessence",
+      "io-type": "input",
+      "amount": 100
+    },
+    {
+      "type": "will",
+      "io-type": "output",
+      "will-type": "default",
+      "amount": 0.25,
+      "max": 100
+    },
+    {
+      "type": "item",
+      "io-type": "output",
+      "item": "minecraft:stone",
+      "amount": 1
+    }
+  ]
+}

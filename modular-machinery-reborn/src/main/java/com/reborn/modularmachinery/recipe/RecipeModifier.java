@@ -78,7 +78,7 @@ public record RecipeModifier(@Nullable Target target, @Nullable IOType ioTarget,
         ENERGY("energy"),
         DURATION("duration"),
         /** Only reachable from the JSON wildcard {@code "*"}; matches every requirement kind. */
-        ALL("*");
+        ALL("*"), MANA("mana"), AURA("aura"), LIFEESSENCE("lifeessence"), WILL("will");
 
         private final String name;
 
@@ -92,7 +92,7 @@ public record RecipeModifier(@Nullable Target target, @Nullable IOType ioTarget,
 
         /** Every {@code target} value a definition may write, for error messages. */
         public static String allowed() {
-            return "\"item\", \"fluid\", \"energy\", \"duration\" or \"*\" (optionally namespaced, "
+            return "\"item\", \"fluid\", \"energy\", \"duration\", \"mana\", \"aura\", \"lifeessence\", \"will\" or \"*\" (optionally namespaced, "
                     + "e.g. \"modular_machinery_reborn:item\")";
         }
     }
@@ -186,6 +186,10 @@ public record RecipeModifier(@Nullable Target target, @Nullable IOType ioTarget,
                 return Target.FLUID;
             case "energy":
                 return Target.ENERGY;
+            case "mana": return Target.MANA;
+            case "aura": return Target.AURA;
+            case "lifeessence": return Target.LIFEESSENCE;
+            case "will": return Target.WILL;
             case "duration":
                 return Target.DURATION;
             case "*":

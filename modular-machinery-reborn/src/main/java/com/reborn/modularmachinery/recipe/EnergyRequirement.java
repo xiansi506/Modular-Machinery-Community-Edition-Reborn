@@ -87,11 +87,17 @@ public final class EnergyRequirement extends MachineRequirement {
      * 永远是同一个数字，不会各算各的。
      */
     public long perTickDraw(RecipeModifiers modifiers) {
+        return perTickDraw(modifiers, parallelism(), durationMultiplier);
+    }
+
+    /** Explicit craft parameters for read-only displays; unaffected requirements still settle one copy. */
+    public long perTickDraw(RecipeModifiers modifiers, int copies, float durationMultiplier) {
         long perCopy = modifiedEnergyPerTick(modifiers);
         if (perCopy <= 0L) {
             return 0L;
         }
-        double scaled = (double) perCopy * this.parallelism() * this.durationMultiplier;
+        int parallelism = isParallelizeUnaffected() ? 1 : Math.max(1, copies);
+        double scaled = (double) perCopy * parallelism * (durationMultiplier <= 0.0F ? 1.0F : durationMultiplier);
         return (long) Math.min(Long.MAX_VALUE / 4L, Math.max(1.0, Math.floor(scaled)));
     }
 

@@ -66,6 +66,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code canRestartCrafting}.
  */
 public final class MachineRecipe implements Recipe<Container> {
+    private int executionTick;
+    public void setExecutionTick(int tick) { executionTick = Math.max(0, tick); }
+    public net.minecraft.nbt.CompoundTag saveExecutionState() {
+        var tag = new net.minecraft.nbt.CompoundTag();
+        tag.putIntArray("triggered", java.util.stream.IntStream.range(0, requirements.size()).filter(i -> requirements.get(i).triggered()).toArray());
+        return tag;
+    }
+    public void loadExecutionState(net.minecraft.nbt.CompoundTag tag) {
+        for (MachineRequirement requirement : requirements) requirement.setTriggered(false);
+        for (int index : tag.getIntArray("triggered")) if (index >= 0 && index < requirements.size()) requirements.get(index).setTriggered(true);
+    }
 
     /**
      * The implicit limit of a recipe that does not set {@code max-parallelism}.
@@ -589,7 +600,7 @@ public final class MachineRecipe implements Recipe<Container> {
             return 0;
         }
         for (MachineRequirement requirement : this.requirements) {
-            if (!requirement.isParallelizable()) {
+            if (!requirement.isParallelizable() || (requirement.ioType() == IOType.OUTPUT && requirement.option("ignore-output-check"))) {
                 continue;
             }
             limit = Math.min(limit, requirement.parallelLimit(requirement.visiblePorts(ports), modifiers, limit));
@@ -666,6 +677,8 @@ public final class MachineRecipe implements Recipe<Container> {
         for (MachineRequirement requirement : this.requirements) {
             if (requirement instanceof EnergyRequirement energy) {
                 energy.setDurationMultiplier(multiplier);
+            } else if (requirement instanceof com.reborn.modularmachinery.magic.MagicRequirement magic) {
+                magic.setDurationMultiplier(multiplier);
             }
         }
     }
@@ -744,7 +757,10 @@ public final class MachineRecipe implements Recipe<Container> {
             CatalystRequirement catalyst = (CatalystRequirement) requirements.get(index);
             if (!catalyst.applyRequired(catalyst.visiblePorts(snapshot), random)) return false;
         }
-        return transaction.commit();
+        if (!transaction.commit()) return false;
+        for (MachineRequirement requirement : requirements) requirement.setTriggered(false);
+        executionTick = 0;
+        return true;
     }
 
     /** Every per-tick requirement can be served this tick. */
@@ -791,7 +807,11 @@ public final class MachineRecipe implements Recipe<Container> {
         return settlePhase(ports, random, modifiers, 2);
     }
 
-    private static boolean inPhase(MachineRequirement requirement, int phase) {
+    private boolean inPhase(MachineRequirement requirement, int phase, RecipeModifiers modifiers) {
+        if (requirement.triggerTime() > 0) {
+            long due = (long) requirement.triggerTime() * Math.round(modifiers.applyDuration(1));
+            return phase == 1 && executionTick == due && (!requirement.triggered() || requirement.option("trigger-repeatable"));
+        }
         return switch (phase) {
             case 0 -> requirement.isStartPhase();
             case 1 -> requirement.isTickPhase();
@@ -808,7 +828,8 @@ public final class MachineRecipe implements Recipe<Container> {
         HatchCollection snapshot = ports.transactionView(new ResourceTransaction());
         for (MachineRequirement requirement : requirements) {
             try {
-                if (inPhase(requirement, phase) && !requirement.reserve(requirement.visiblePorts(snapshot), modifiers))
+                if (phase == 2 && requirement.option("ignore-output-check")) continue;
+                if (inPhase(requirement, phase, modifiers) && !requirement.reserve(requirement.visiblePorts(snapshot), modifiers))
                     return false;
             } catch (ArithmeticException tooLarge) {
                 return false;
@@ -822,9 +843,13 @@ public final class MachineRecipe implements Recipe<Container> {
         ResourceTransaction transaction = new ResourceTransaction();
         HatchCollection snapshot = ports.transactionView(transaction);
         for (MachineRequirement requirement : requirements) {
-            if (inPhase(requirement, phase) && !applyPhase(requirement, snapshot, random, modifiers)) return false;
+            if (inPhase(requirement, phase, modifiers) && !applyPhase(requirement, snapshot, random, modifiers)) return false;
         }
-        return transaction.commit();
+        if (!transaction.commit()) return false;
+        if (phase == 1) for (MachineRequirement requirement : requirements) {
+            if (requirement.triggerTime() > 0 && inPhase(requirement, phase, modifiers)) requirement.setTriggered(true);
+        }
+        return true;
     }
 
     // ------------------------------------------------------------ dispatch

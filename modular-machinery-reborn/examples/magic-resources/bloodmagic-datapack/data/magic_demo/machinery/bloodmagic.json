@@ -1,0 +1,31 @@
+{
+  "registryname": "magic_demo:bloodmagic",
+  "localizedname": "Magic demo: bloodmagic",
+  "requires-blueprint": false,
+  "parts": [
+    {
+      "x": -1,
+      "y": 0,
+      "z": 0,
+      "elements": "modular_machinery_reborn:item_input_hatch"
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "z": 0,
+      "elements": "modular_machinery_reborn:item_output_hatch"
+    },
+    {
+      "x": 0,
+      "y": -1,
+      "z": 0,
+      "elements": "modular_machinery_reborn:lifeessence_input_hatch"
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "z": 0,
+      "elements": "modular_machinery_reborn:will_output_hatch"
+    }
+  ]
+}

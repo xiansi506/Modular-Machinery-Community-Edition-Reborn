@@ -1532,7 +1532,7 @@ public final class ParallelCraftCheck {
             // tooltip.modular_machinery_reborn.catalyst[.effect] lines, 196 plus 2.
             // 204 from 0.73.0: C4 adds two ME bus block names and the online/offline screen strings,
             // 200 plus 4.
-            check("the language files' key count", 331, zhMap.size());
+            check("the language files' key count", 401, zhMap.size());
 
             // The four unit labels, asserted by value rather than by count: the two that the original's own
             // language file gives the SAME text (`ic2_eu` and `gt_eu` both read `EU`) are the pair most likely to
@@ -4381,8 +4381,8 @@ public final class ParallelCraftCheck {
                                     + "MachineDefinitionSyncPacket.class")
                             && source.contains("CHANNEL.registerMessage(ID_HATCH_GROUP_UPDATE, "
                                     + "HatchGroupUpdatePacket.class"));
-            report("the changed requirement wire format requires protocol 2",
-                    source.contains("PROTOCOL_VERSION = \"2\""));
+            report("advanced requirements require protocol 5",
+                    source.contains("PROTOCOL_VERSION = \"5\""));
         } catch (Exception exception) {
             report("reading ModNetwork.java failed: " + exception, false);
         }
@@ -4768,6 +4768,7 @@ public final class ParallelCraftCheck {
 
         Object blockEntity = allocateInstance(controller);
         setField(controller, blockEntity, "factoryEngine", engine);
+        setField(controller, blockEntity, "scriptState", new com.reborn.modularmachinery.script.MachineScriptState());
         setField(controller, blockEntity, "smartInterfaces",
                 Class.forName("com.reborn.modularmachinery.machine.SmartInterfaceStore")
                         .getConstructor().newInstance());
@@ -6734,8 +6735,8 @@ public final class ParallelCraftCheck {
                 1, countInvocations(engine, "begin", "FactoryHost", "runRecipeCommands", hostCallback));
         check("FactoryEngine.tickThread announces the processing phase and the finish",
                 2, countInvocations(engine, "tickThread", "FactoryHost", "runRecipeCommands", hostCallback));
-        check("FactoryEngine.tryRestart announces the re-armed start",
-                1, countInvocations(engine, "tryRestart", "FactoryHost", "runRecipeCommands", hostCallback));
+        check("FactoryEngine.tryRestart delegates to the shared start event and command path",
+                1, countInvocations(engine, "tryRestart", "FactoryEngine", "begin", "(Lcom/reborn/modularmachinery/factory/FactoryThread;Lcom/reborn/modularmachinery/factory/FactoryEngine$ActiveCraft;)Z"));
         report("the controller's command runner asks the recipe for its commands",
                 countInvocationsIncludingLambdas(controller, "runRecipeCommands", "MachineRecipe", "commands",
                         "()Lcom/reborn/modularmachinery/recipe/RecipeCommands;") > 0);

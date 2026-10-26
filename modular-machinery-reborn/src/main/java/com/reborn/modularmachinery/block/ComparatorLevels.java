@@ -57,12 +57,12 @@ final class ComparatorLevels {
         if (energy == null) {
             return 0;
         }
-        int capacity = energy.getMaxEnergyStored();
+        long capacity = com.reborn.modularmachinery.energy.EnergyAccess.capacity(energy);
         if (capacity <= 0) {
             return 0;
         }
         // 旧版是 double 相除再转 float（RedstoneHelper.java:42-43），照抄以免边界上差一级。
-        return clamp(Math.round(15F * (float) ((double) energy.getEnergyStored() / (double) capacity)));
+        return clamp(Math.round(15F * (float) ((double) com.reborn.modularmachinery.energy.EnergyAccess.stored(energy) / (double) capacity)));
     }
 
     /** 控制器：工作中 15、已成型 1、没有结构 0（{@code BlockController.java:262-263}）。 */

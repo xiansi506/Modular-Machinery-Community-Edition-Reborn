@@ -6,6 +6,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.energy.IEnergyStorage;
+import com.reborn.modularmachinery.energy.EnergyAccess;
 import net.minecraftforge.items.IItemHandler;
 
 import java.util.List;
@@ -278,7 +279,7 @@ public final class IngredientIo {
     public static boolean extractEnergy(List<IEnergyStorage> handlers, long amount) {
         long available = 0L;
         for (IEnergyStorage storage : handlers) {
-            available += storage.extractEnergy((int) Math.min(Integer.MAX_VALUE, Math.max(0, amount - available)), true);
+            available += EnergyAccess.extract(storage, Math.max(0, amount - available), true);
         }
         if (available < amount) {
             return false;
@@ -288,7 +289,7 @@ public final class IngredientIo {
             if (remaining <= 0) {
                 break;
             }
-            int taken = storage.extractEnergy((int) Math.min(Integer.MAX_VALUE, remaining), false);
+            long taken = EnergyAccess.extract(storage, remaining, false);
             remaining -= taken;
         }
         return remaining == 0;
@@ -297,7 +298,7 @@ public final class IngredientIo {
     public static boolean canInsertEnergy(List<IEnergyStorage> handlers, long amount) {
         long accepted = 0L;
         for (IEnergyStorage storage : handlers) {
-            accepted += storage.receiveEnergy((int) Math.min(Integer.MAX_VALUE, amount - accepted), true);
+            accepted += EnergyAccess.receive(storage, Math.max(0, amount - accepted), true);
             if (accepted >= amount) {
                 return true;
             }
@@ -311,7 +312,7 @@ public final class IngredientIo {
             if (remaining <= 0) {
                 break;
             }
-            int accepted = storage.receiveEnergy((int) Math.min(Integer.MAX_VALUE, remaining), false);
+            long accepted = EnergyAccess.receive(storage, remaining, false);
             remaining -= accepted;
         }
         return remaining == 0;
@@ -322,16 +323,13 @@ public final class IngredientIo {
      *
      * <p>Exact, because {@code IEnergyStorage#receiveEnergy(..., simulate = true)} is the API's own way of
      * asking — the original used {@code getRemainingCapacity()} for the same purpose. Each storage is asked for
-     * everything it can take, which is why the probe is the maximum an {@code int} can express.
+     * everything it can take; ordinary FE ports retain their int per-call limit.
      */
     public static long insertCapacity(List<IEnergyStorage> handlers) {
         long capacity = 0L;
         for (IEnergyStorage storage : handlers) {
-            capacity += storage.receiveEnergy(Integer.MAX_VALUE, true);
-            if (capacity >= UNBOUNDED) {
-                return UNBOUNDED;
-            }
+            capacity = EnergyAccess.add(capacity, EnergyAccess.receive(storage, Long.MAX_VALUE, true));
         }
-        return Math.min(UNBOUNDED, capacity);
+        return capacity;
     }
 }

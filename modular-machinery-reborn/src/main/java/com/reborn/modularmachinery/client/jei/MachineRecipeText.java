@@ -38,6 +38,13 @@ import java.util.List;
  * </ul>
  */
 final class MachineRecipeText {
+    static void addScriptTooltip(ITooltipBuilder tooltip, MachineRequirement requirement) {
+        String text = requirement.scriptKey("script-tooltip");
+        if (!text.isEmpty()) tooltip.add(Component.literal(text));
+        if (requirement.option("consume-durability")) tooltip.add(Component.translatable("tooltip.modular_machinery_reborn.script.durability", ((ItemRequirement) requirement).amount()));
+        if (requirement.option("fuel-time")) tooltip.add(Component.translatable("tooltip.modular_machinery_reborn.script.fuel", ((ItemRequirement) requirement).amount()));
+        if (requirement.triggerTime() > 0) tooltip.add(Component.translatable("tooltip.modular_machinery_reborn.script.trigger", requirement.triggerTime()));
+    }
 
     /** The original's {@code tooltip.machinery.duration.seconds}. */
     private static final String KEY_DURATION_SECONDS = "tooltip.modular_machinery_reborn.machine.duration.seconds";

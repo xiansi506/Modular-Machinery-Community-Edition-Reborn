@@ -79,6 +79,8 @@ public final class PreviewPanel {
     private final PreviewButton cycleButton;
     /** 右上角的成型预览开关；只有机器声明了 {@code hide-components-when-formed} 才可见。 */
     private final PreviewButton formedButton;
+    private final PreviewButton toolbarButton;
+    private boolean toolbarExpanded = true;
     /**
      * 「额外信息」面板的行。
      *
@@ -135,11 +137,16 @@ public final class PreviewPanel {
 
     /** Screen 宿主走这个构造器；JEI 类别宿主传 {@code true}（理由见 {@link #jeiHost}）。 */
     public PreviewPanel(MachineDefinition machine, boolean jeiHost) {
+        this(machine, jeiHost, StructurePreviews.of(machine), StructurePreviews.components(machine));
+    }
+
+    /** Prepared data lets input handling run independently of world registries and a render context. */
+    PreviewPanel(MachineDefinition machine, boolean jeiHost, StructurePreview prepared, List<ItemStack> ingredients) {
         this.machine = machine;
         this.jeiHost = jeiHost;
         this.dynamicPatternSize = StructurePreviews.initialDynamicPatternSize(machine);
-        this.preview = StructurePreviews.of(machine, this.dynamicPatternSize);
-        this.components = StructurePreviews.components(machine, this.dynamicPatternSize);
+        this.preview = prepared;
+        this.components = List.copyOf(ingredients);
         this.modifierIngredients = StructurePreviews.modifierIngredients(machine);
         this.machineInfoLines = buildMachineInfo(machine, this.dynamicPatternSize);
 
@@ -147,25 +154,24 @@ public final class PreviewPanel {
         // buttons when the machine actually has dynamic patterns (MachineStructurePreviewPanel.java:193-203),
         // which is why the whole strip shifts when they are present. The count is computed up front so the
         // indices below stay in the original's order: the two dynamic buttons come first, then the features
-        // this port has (machine info, cycle, reset, layer toggle) plus the original's own placeWorldPreview
-        // and menu slots, which this port does not implement.
+        // this port has (machine info, cycle, reset, layer toggle) plus the original preview-options menu.
         boolean hasDynamic = machine.hasDynamicPatterns();
         // 两个索引起点：有动态结构时后移两位，因为旧版把动态按钮放在条的最前面。
         int machine_infoX;
         int cycleX;
-        int count = hasDynamic ? 6 : 4;
+        int count = hasDynamic ? 7 : 5;
         int index = 0;
         if (hasDynamic) {
             PreviewButton plus = PreviewButton.button("dynamic-plus", PreviewLayout.buttonX(index++, count),
                     PreviewLayout.BUTTON_STRIP_Y, PreviewLayout.BUTTON_SIZE,
                     PreviewAtlas.DYNAMIC_PLUS, PreviewAtlas.DYNAMIC_PLUS_HOVERED,
                     PreviewAtlas.DYNAMIC_PLUS_PRESSED, () -> dynamicTooltip(true),
-                    ignored -> stepDynamicPatternSize(1));
+                    ignored -> stepDynamicPatternSize(1), () -> this.toolbarExpanded);
             PreviewButton minus = PreviewButton.button("dynamic-minus", PreviewLayout.buttonX(index++, count),
                     PreviewLayout.BUTTON_STRIP_Y, PreviewLayout.BUTTON_SIZE,
                     PreviewAtlas.DYNAMIC_MINUS, PreviewAtlas.DYNAMIC_MINUS_HOVERED,
                     PreviewAtlas.DYNAMIC_MINUS_PRESSED, () -> dynamicTooltip(false),
-                    ignored -> stepDynamicPatternSize(-1));
+                    ignored -> stepDynamicPatternSize(-1), () -> this.toolbarExpanded);
             this.buttons.add(plus);
             this.buttons.add(minus);
         }
@@ -174,10 +180,7 @@ public final class PreviewPanel {
         // margin the original used.
         machine_infoX = index;
         cycleX = index + 1;
-        // Bottom strip order, left to right. The original's own strip was
-        // [placeWorldPreview, cycleReplaceable, toggleLayerRender, menu]; place-to-world and the options menu
-        // are not implemented, so the two features we do have keep their relative order and the two additions
-        // take the remaining places.
+        // Keep the existing controls in order and reserve the rightmost slot for the folding menu.
         this.machineInfoButton = PreviewButton.toggle("machine-info", PreviewLayout.buttonX(machine_infoX, count),
                 PreviewLayout.BUTTON_STRIP_Y,
                 PreviewLayout.BUTTON_SIZE, PreviewAtlas.MACHINE_INFO, PreviewAtlas.MACHINE_INFO_HOVERED,
@@ -187,26 +190,33 @@ public final class PreviewPanel {
                 PreviewAtlas.MACHINE_INFO_HOVERED,
                 // No "clicked" sprite exists for this row, so PreviewButton tints the normal sprite while on.
                 null,
-                this::machineInfoTooltip, this::onMachineInfoToggled);
+                this::machineInfoTooltip, this::onMachineInfoToggled, () -> this.toolbarExpanded);
         this.cycleButton = PreviewButton.toggle("cycle-blocks", PreviewLayout.buttonX(cycleX, count),
                 PreviewLayout.BUTTON_STRIP_Y,
                 PreviewLayout.BUTTON_SIZE, PreviewAtlas.CYCLE_BLOCKS, PreviewAtlas.CYCLE_BLOCKS_HOVERED,
                 PreviewAtlas.CYCLE_BLOCKS_PRESSED, PreviewAtlas.CYCLE_BLOCKS_ACTIVE,
-                this::cycleTooltip, this::onCycleToggled);
+                this::cycleTooltip, this::onCycleToggled, () -> this.toolbarExpanded);
         PreviewButton resetButton = PreviewButton.button("reset-center", PreviewLayout.buttonX(cycleX + 1, count),
                 PreviewLayout.BUTTON_STRIP_Y,
                 PreviewLayout.BUTTON_SIZE, PreviewAtlas.RESET_CENTER, PreviewAtlas.RESET_CENTER_HOVERED,
                 PreviewAtlas.RESET_CENTER_PRESSED, () -> List.of(Component.translatable(
-                        "gui.preview.button.reset_center.tip")), ignored -> resetView());
+                        "gui.preview.button.reset_center.tip")), ignored -> resetView(), () -> this.toolbarExpanded);
         this.layerToggleButton = PreviewButton.toggle("layer-toggle", PreviewLayout.buttonX(cycleX + 2, count),
                 PreviewLayout.BUTTON_STRIP_Y,
                 PreviewLayout.BUTTON_SIZE, PreviewAtlas.LAYER_TOGGLE, PreviewAtlas.LAYER_TOGGLE_HOVERED,
                 PreviewAtlas.LAYER_TOGGLE_PRESSED, PreviewAtlas.LAYER_TOGGLE_ACTIVE,
-                this::layerToggleTooltip, this::setLayerMode);
+                this::layerToggleTooltip, this::setLayerMode, () -> this.toolbarExpanded);
         this.buttons.add(this.machineInfoButton);
         this.buttons.add(this.cycleButton);
         this.buttons.add(resetButton);
         this.buttons.add(this.layerToggleButton);
+        this.toolbarButton = PreviewButton.toggle("toolbar-menu", PreviewLayout.buttonX(count - 1, count),
+                PreviewLayout.BUTTON_STRIP_Y, PreviewLayout.BUTTON_SIZE,
+                PreviewAtlas.MENU, PreviewAtlas.MENU_HOVERED, PreviewAtlas.MENU_ACTIVE, PreviewAtlas.MENU_ACTIVE,
+                () -> List.of(Component.translatable("gui.modular_machinery_reborn.preview.toolbar." + (this.toolbarExpanded ? "hide" : "show"))),
+                enabled -> this.toolbarExpanded = enabled);
+        this.toolbarButton.setToggled(true);
+        this.buttons.add(this.toolbarButton);
         // 旧版把它放在 rightTopMenu（右上角），而不是底部条；补进底部条会改变既有按钮的右对齐位置。
         this.formedButton = PreviewButton.toggle("formed-preview",
                 PreviewLayout.FORMED_BUTTON_X, PreviewLayout.FORMED_BUTTON_Y, PreviewLayout.BUTTON_SIZE,
@@ -295,6 +305,8 @@ public final class PreviewPanel {
     public StructurePreview preview() {
         return this.preview;
     }
+
+    public boolean isToolbarExpanded() { return this.toolbarExpanded; }
 
     public boolean isLayerMode() {
         return this.layerMode;
@@ -420,12 +432,15 @@ public final class PreviewPanel {
             blocks = selectBlocks(this.preview, this.formedPreview, hideComponents, false, 0);
         }
         int variant = this.cycleBlocks ? (int) (Util.getMillis() / CYCLE_PERIOD_MILLIS) : 0;
+        long renderStart = System.nanoTime();
         StructurePreviewRenderer.render(graphics, this.preview, blocks, variant,
                 originX + PreviewLayout.PREVIEW_X + PreviewLayout.PREVIEW_WIDTH / 2.0F + this.panX,
                 originY + PreviewLayout.PREVIEW_Y + PreviewLayout.PREVIEW_HEIGHT / 2.0F + this.panY,
                 PreviewLayout.PREVIEW_BOX, this.yaw, this.pitch, this.zoom, this.selectedBlockPos,
                 selectedModifierPositions());
+        PreviewRenderStats.record(blocks.size(), System.nanoTime() - renderStart, Util.getMillis());
         graphics.disableScissor();
+        drawStatus(graphics, font, originX, originY, blocks.size());
 
         if (drawIngredientItems) {
             StructurePreviews.drawComponents(graphics, this.components, originX, originY, mouseX, mouseY);
@@ -445,6 +460,16 @@ public final class PreviewPanel {
         if (this.machineInfoVisible) {
             drawMachineInfo(graphics, font, originX, originY);
         }
+    }
+
+    private void drawStatus(GuiGraphics graphics, Font font, int originX, int originY, int shown) {
+        Component state = preview.isEmpty() ? Component.translatable("gui.modular_machinery_reborn.preview.status.empty")
+                : Component.translatable("gui.modular_machinery_reborn.preview.status.blocks", shown, preview.blocks().size());
+        int width = showsFormedToggle(machine) ? 151 : 169;
+        String label = state.getString();
+        if (font.width(label) > width) label = font.plainSubstrByWidth(label, width - font.width("…")) + "…";
+        graphics.fill(originX + 7, originY + 27, originX + 7 + Math.min(width + 2, font.width(label) + 4), originY + 39, 0x99000000);
+        graphics.drawString(font, label, originX + 9, originY + 29, 0xffeeeeee, false);
     }
 
     /**
@@ -470,7 +495,9 @@ public final class PreviewPanel {
         Component name = this.machine.displayName();
         int textY = originY + PreviewLayout.TITLE_TEXT_Y;
         if (prefix == null) {
-            graphics.drawCenteredString(font, name, originX + PreviewLayout.PANEL_WIDTH / 2, textY,
+            String caption = name.getString();
+            if (font.width(caption) > PreviewLayout.TITLE_WIDTH) caption = font.plainSubstrByWidth(caption, PreviewLayout.TITLE_WIDTH - font.width("…")) + "…";
+            graphics.drawCenteredString(font, caption, originX + PreviewLayout.PANEL_WIDTH / 2, textY,
                     PreviewLayout.LABEL_COLOR);
             return;
         }
@@ -521,12 +548,16 @@ public final class PreviewPanel {
             width = Math.max(width, font.width(line));
         }
         int x = originX + PreviewLayout.PREVIEW_X + padding;
-        int y = originY + PreviewLayout.PREVIEW_Y + padding;
+        int y = originY + PreviewLayout.PREVIEW_Y + 16;
+        width = PreviewLayout.PREVIEW_WIDTH - padding * 4;
+        int shown = Math.min(this.machineInfoLines.size(), (PreviewLayout.BUTTON_STRIP_Y - PreviewLayout.PREVIEW_Y - 20) / lineHeight);
         int boxWidth = width + padding * 2;
-        int boxHeight = this.machineInfoLines.size() * lineHeight + padding * 2;
+        int boxHeight = shown * lineHeight + padding * 2;
         graphics.fill(x, y, x + boxWidth, y + boxHeight, 0xC0000000);
-        for (int i = 0; i < this.machineInfoLines.size(); i++) {
-            graphics.drawString(font, this.machineInfoLines.get(i), x + padding, y + padding + i * lineHeight,
+        for (int i = 0; i < shown; i++) {
+            String line = this.machineInfoLines.get(i).getString();
+            if (font.width(line) > width) line = font.plainSubstrByWidth(line, Math.max(0, width - font.width("…"))) + "…";
+            graphics.drawString(font, line, x + padding, y + padding + i * lineHeight,
                     0xFFFFFF, false);
         }
     }
@@ -644,6 +675,7 @@ public final class PreviewPanel {
         }
 
         if (button == 0) {
+            if (overStatus(mouseX, mouseY) || overInfo(mouseX, mouseY)) return PointerClaim.NONE;
             for (PreviewButton candidate : this.buttons) {
                 if (candidate.mousePressed(mouseX, mouseY)) {
                     return PointerClaim.button(candidate);
@@ -790,6 +822,7 @@ public final class PreviewPanel {
      * scrollbar moved for a positive wheel delta.
      */
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (overStatus(mouseX, mouseY) || overInfo(mouseX, mouseY)) return true;
         if (!isOverPreview(mouseX, mouseY)) {
             return false;
         }
@@ -923,7 +956,14 @@ public final class PreviewPanel {
      * {@code IRecipeCategory.getTooltip}. Ingredient tooltips are deliberately not included — JEI provides them
      * for its own recipe slots, and the screen asks {@link #componentAt} for the item directly.
      */
+    private boolean overInfo(double x, double y) { return machineInfoVisible && x >= 8 && x < 176 && y >= 42 && y < 42 + Math.min(machineInfoLines.size(), 12) * 9 + 4; }
+
+    private boolean overStatus(double x, double y) { return x >= 7 && x < (showsFormedToggle(machine) ? 160 : 177) && y >= 27 && y < 40; }
+
     public List<Component> tooltipLines(double mouseX, double mouseY) {
+        if (mouseX >= PreviewLayout.TITLE_X && mouseX < PreviewLayout.TITLE_X + PreviewLayout.TITLE_WIDTH
+                && mouseY >= PreviewLayout.TITLE_Y && mouseY < PreviewLayout.TITLE_Y + PreviewLayout.TITLE_HEIGHT) return List.of(machine.displayName());
+        if (overInfo(mouseX, mouseY)) return List.copyOf(machineInfoLines);
         for (PreviewButton button : this.buttons) {
             if (button.contains(mouseX, mouseY)) {
                 return button.tooltipLines();
@@ -941,6 +981,8 @@ public final class PreviewPanel {
                         layerStateLine());
             }
         }
+        if (overStatus(mouseX, mouseY)) return List.of(Component.translatable("gui.modular_machinery_reborn.preview.status.blocks", visibleBlocks().size(), preview.blocks().size()),
+                Component.translatable("gui.modular_machinery_reborn.preview.status.hint"));
         int modifier = modifierIngredientAt(mouseX, mouseY);
         if (modifier >= 0) {
             String description = this.modifierIngredients.get(modifier).description();

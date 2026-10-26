@@ -31,6 +31,7 @@ public final class MachineRegistryEventJS extends EventJS {
 
     /** How many machines this event's listeners registered; reported once so a silent zero is visible. */
     private int registered;
+    public UpgradeBuilderJS upgrade(String name) { return new UpgradeBuilderJS(name); }
 
     /**
      * Starts a machine definition. The name is its registry name; a bare path such as {@code kubejs_furnace}

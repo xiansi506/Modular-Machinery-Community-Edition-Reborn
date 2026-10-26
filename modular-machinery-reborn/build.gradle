@@ -84,6 +84,7 @@ dependencies {
         compileOnly fg.deobf('libs:mekanism:1.20.1-10.4.16.80')
         compileOnly fg.deobf('libs:appliedenergistics2:forge-15.4.10')
         compileOnly fg.deobf('libs:guideme:20.1.15')
+        compileOnly fg.deobf('libs:Applied-Mekanistics:1.4.3')
         // 0.70.0（C7）：控制器自定义模型。选 4.4.9 而不是 latest 4.8.4：4.4.9 的 GeoObjectRenderer
         // 与旧版 GeoBlockRenderer 的 preRender/actuallyRender 语义接近，且这个版本已在 libs/ 里核对过源码。
         compileOnly fg.deobf('libs:geckolib-forge-1.20.1:4.4.9')
@@ -98,6 +99,7 @@ dependencies {
         compileOnly fg.deobf('maven.modrinth:nvQzSEkH:xJQHCmWJ') // Jade 11.13.3+forge
         compileOnly fg.deobf('maven.modrinth:XxWD5pD3:7KVs6HMQ') // AE2 Forge 15.4.10
         compileOnly fg.deobf('maven.modrinth:Ck4E7v7R:i7Tp1AHw') // GuideME 20.1.15
+        compileOnly fg.deobf('maven.modrinth:IiATswDj:9n9p68Qq') // Applied Mekanistics 1.4.3
     }
 }
 

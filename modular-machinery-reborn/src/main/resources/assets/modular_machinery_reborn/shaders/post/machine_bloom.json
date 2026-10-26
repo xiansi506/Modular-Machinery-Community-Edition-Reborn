@@ -1,0 +1,12 @@
+{
+  "targets": ["mask", "horizontal", "blurred", "composite"],
+  "passes": [
+    {"name": "blur", "intarget": "mask", "outtarget": "horizontal", "uniforms": [
+      {"name": "BlurDir", "values": [1.0, 0.0]}, {"name": "Radius", "values": [6.0]}]},
+    {"name": "blur", "intarget": "horizontal", "outtarget": "blurred", "uniforms": [
+      {"name": "BlurDir", "values": [0.0, 1.0]}, {"name": "Radius", "values": [6.0]}]},
+    {"name": "modular_machinery_reborn:machine_bloom_combine", "intarget": "minecraft:main", "outtarget": "composite",
+      "auxtargets": [{"name": "BloomSampler", "id": "blurred"}]},
+    {"name": "modular_machinery_reborn:machine_bloom_copy", "intarget": "composite", "outtarget": "minecraft:main"}
+  ]
+}

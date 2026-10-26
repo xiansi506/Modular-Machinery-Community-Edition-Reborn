@@ -5,16 +5,24 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.reborn.modularmachinery.block.MachineControllerBlockEntity;
 import com.reborn.modularmachinery.machine.MachineDefinition;
 import com.reborn.modularmachinery.machine.MachineRegistry;
+import com.reborn.modularmachinery.machine.GeoModelSpec;
+import com.reborn.modularmachinery.script.ClientModelRegistry;
+import com.reborn.modularmachinery.client.WorldComponentHider;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import com.mojang.math.Axis;
 import org.joml.Matrix4f;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
+import software.bernie.geckolib.cache.object.GeoBone;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.LightTexture;
+import com.mojang.blaze3d.vertex.VertexMultiConsumer;
+import com.reborn.modularmachinery.client.MachineBloom;
 import software.bernie.geckolib.renderer.GeoObjectRenderer;
 
-import java.lang.ref.WeakReference;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.LinkedHashMap;
 
 /**
  * 控制器的 GeckoLib 渲染器。
@@ -32,12 +40,14 @@ public final class MachineControllerGeoRenderer extends GeoObjectRenderer<GeoCon
         implements BlockEntityRenderer<MachineControllerBlockEntity> {
 
     /**
-     * 键与值都是弱引用：值里的 animatable 持有控制器，如果只让键弱引用、值强引用，
-     * 键就永远回收不掉（WeakHashMap 的经典泄漏）。值被回收后下一次渲染会重建一个，
-     * 代价只是那台机器的动画从第一帧开始，不会拖住方块实体。
+     * Animatable 仅弱引用控制器，因此稳定保留动画缓存不会反向拖住 WeakHashMap 的键。
+     * 控制器仍存在时不因普通 GC 随机丢失动画；脚本／资源重载主动清理缓存。
      */
-    private final Map<MachineControllerBlockEntity, WeakReference<GeoControllerAnimatable>> animatables
+    private final Map<MachineControllerBlockEntity, GeoControllerAnimatable> animatables
             = new WeakHashMap<>();
+    private long generation = -1;
+    private boolean captureBloom;
+    private final Map<GeoModelSpec, Boolean> failedModels = new LinkedHashMap<>(16, .75F, true);
 
     public MachineControllerGeoRenderer() {
         super(new MachineControllerGeoModel());
@@ -47,20 +57,48 @@ public final class MachineControllerGeoRenderer extends GeoObjectRenderer<GeoCon
     public void render(MachineControllerBlockEntity controller, float partialTick, PoseStack poseStack,
                        MultiBufferSource bufferSource, int packedLight, int packedOverlay) {
         MachineDefinition definition = MachineRegistry.clientById(controller.machineId()).orElse(null);
-        if (definition == null || definition.geoModel() == null) {
+        if (definition == null) {
+            WorldComponentHider.modelRendered(controller, false);
             return;
         }
-        GeoControllerAnimatable animatable = this.animatables.computeIfAbsent(controller,
-                key -> new WeakReference<>(new GeoControllerAnimatable(key))).get();
-        if (animatable == null) {
-            animatable = new GeoControllerAnimatable(controller);
-            this.animatables.put(controller, new WeakReference<>(animatable));
+        ClientModelRegistry.Selection selection = ClientModelRegistry.resolve(controller, definition.geoModel());
+        if (generation != ClientModelRegistry.generation()) {
+            animatables.clear(); failedModels.clear(); generation = ClientModelRegistry.generation();
         }
-        poseStack.pushPose();
+        if (selection.spec() == null) {
+            WorldComponentHider.modelRendered(controller, false);
+            return;
+        }
+        GeoControllerAnimatable animatable = this.animatables.computeIfAbsent(controller, GeoControllerAnimatable::new);
+        boolean previousCapture = captureBloom;
+        boolean rendered;
+        var minecraft = net.minecraft.client.Minecraft.getInstance();
+        captureBloom = controller.getLevel() != null && controller.getLevel() == minecraft.level
+                && bufferSource == minecraft.renderBuffers().bufferSource();
         try {
-            super.render(poseStack, animatable, bufferSource, null, null, packedLight);
-        } finally {
-            poseStack.popPose();
+            rendered = renderSelection(animatable, selection, poseStack, bufferSource, packedLight);
+            if (!rendered && definition.geoModel() != null && !definition.geoModel().equals(selection.spec()))
+                rendered = renderSelection(animatable, new ClientModelRegistry.Selection("", definition.geoModel()), poseStack, bufferSource, packedLight);
+        } finally { captureBloom = previousCapture; }
+        WorldComponentHider.modelRendered(controller, rendered);
+    }
+
+    private boolean renderSelection(GeoControllerAnimatable animatable, ClientModelRegistry.Selection selection,
+                                    PoseStack callerPose, MultiBufferSource buffers, int light) {
+        if (failedModels.containsKey(selection.spec())) return false;
+        animatable.select(selection);
+        PoseStack poseStack = new PoseStack();
+        poseStack.last().pose().set(callerPose.last().pose());
+        poseStack.last().normal().set(callerPose.last().normal());
+        try {
+            super.render(poseStack, animatable, buffers, null, null, light);
+            return true;
+        } catch (RuntimeException | LinkageError error) {
+            failedModels.put(selection.spec(), true);
+            if (failedModels.size() > 64) failedModels.remove(failedModels.keySet().iterator().next());
+            com.reborn.modularmachinery.ModularMachineryReborn.LOGGER.warn(
+                    "Could not render client model {}; using definition model when available", selection.spec().model(), error);
+            return false;
         }
     }
 
@@ -74,6 +112,36 @@ public final class MachineControllerGeoRenderer extends GeoObjectRenderer<GeoCon
                 partialTick, packedLight, packedOverlay);
         poseStack.translate(0.5f, 0.01f, 0.5f);
         poseStack.mulPose(Axis.YP.rotationDegrees(animatable.controller().rotationSteps() * 90.0f));
+    }
+
+    @Override
+    public void renderRecursively(PoseStack poseStack, GeoControllerAnimatable animatable, GeoBone bone,
+                                  RenderType renderType, MultiBufferSource bufferSource, VertexConsumer buffer,
+                                  boolean isReRender, float partialTick, int packedLight, int packedOverlay,
+                                  float red, float green, float blue, float alpha) {
+        BoneRenderStyle style = styleOf(bone);
+        if (style.emissive() || style.transparent()) {
+            renderType = MachineModelRenderTypes.get(getTextureLocation(animatable), style);
+            buffer = bufferSource.getBuffer(renderType);
+        }
+        // Reacquire ordinary buffers too: a previous sibling can have ended the shared builder.
+        else buffer = bufferSource.getBuffer(renderType);
+        if (style.emissive()) {
+            packedLight = LightTexture.FULL_BRIGHT;
+            if (captureBloom && !isReRender) {
+                VertexConsumer mask = MachineBloom.capture(getTextureLocation(animatable));
+                // Only this bone's cubes receive this dual consumer. Child recursion reacquires its own.
+                if (mask != null) buffer = VertexMultiConsumer.create(buffer, mask);
+            }
+        }
+        super.renderRecursively(poseStack, animatable, bone, renderType, bufferSource, buffer,
+                isReRender, partialTick, packedLight, packedOverlay, red, green, blue, alpha);
+    }
+
+    public static BoneRenderStyle styleOf(GeoBone bone) {
+        BoneRenderStyle style = BoneRenderStyle.NORMAL;
+        for (GeoBone current = bone; current != null; current = current.getParent()) style = style.child(current.getName());
+        return style;
     }
 
     @Override

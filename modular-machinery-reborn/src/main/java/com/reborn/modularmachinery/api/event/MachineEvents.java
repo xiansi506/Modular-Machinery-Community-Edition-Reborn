@@ -42,6 +42,7 @@ public final class MachineEvents {
     /** Posts {@code event} and returns it, so a caller can inspect what listeners wrote. */
     public static <T extends Event> T post(T event) {
         bus().post(event);
+        if (event instanceof MachineEvent machine) com.reborn.modularmachinery.script.ScriptHooks.dispatch(machine);
         return event;
     }
 }

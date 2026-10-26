@@ -1,6 +1,8 @@
 package com.reborn.modularmachinery.block;
 
 import com.reborn.modularmachinery.config.HatchConfig;
+import com.reborn.modularmachinery.energy.*;
+import com.reborn.modularmachinery.compat.energy.OptionalEnergy;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -73,11 +75,14 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
      * A4：这个仓口建成时配置给出的 FE/t。Forge 的 {@link EnergyStorage} 不暴露 {@code maxExtract} 的读法，
      * 而 {@code HatchConfig} 在改配置后可能与已建好的方块不同，所以把当时的值留在这里。
      */
-    private final int energyTransfer;
+    private final long energyTransfer;
 
-    private final LazyOptional<ItemStackHandler> itemCapability;
-    private final LazyOptional<FluidTank> fluidCapability;
-    private final LazyOptional<EnergyStorage> energyCapability;
+    private LazyOptional<ItemStackHandler> itemCapability;
+    private LazyOptional<FluidTank> fluidCapability;
+    private LazyOptional<IEnergyStorage> energyCapability;
+    private boolean capsValid = true;
+
+    @Nullable private OptionalEnergy.Handle optionalEnergy;
 
     /** A1（0.63.9）：自动交换的节流状态，语义照旧版 {@code TileItemBus}。 */
     private int ticksExisted;
@@ -124,7 +129,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         ItemStackHandler itemStorage = null;
         FluidTank fluidStorage = null;
         EnergyStorage energyStorage = null;
-        int energyTransferValue = 0;
+        long energyTransferValue = 0;
 
         switch (this.kind.family()) {
             case ITEM -> {
@@ -143,23 +148,11 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
                 fluidStorage = new FluidTankWithGasPriority(Math.max(1, HatchConfig.fluidHatchCapacity(this.tier)));
             }
             case ENERGY -> {
-                // A4: the live numbers come from the config, not from the enum. The accessors already
-                // guarantee 1 .. Integer.MAX_VALUE, so no clamp is repeated here.
-                int capacity = HatchConfig.energyHatchCapacity(this.tier);
-                int transfer = HatchConfig.energyHatchTransfer(this.tier);
+                long capacity = HatchConfig.energyHatchCapacityLong(this.tier);
+                long transfer = HatchConfig.energyHatchTransferLong(this.tier);
                 energyTransferValue = transfer;
-                energyStorage = new EnergyStorage(capacity, transfer, transfer, 0) {
-                    @Override public int receiveEnergy(int maxReceive, boolean simulate) {
-                        int received = super.receiveEnergy(maxReceive, simulate);
-                        if (received > 0 && !simulate) { onStorageChanged(false); }
-                        return received;
-                    }
-                    @Override public int extractEnergy(int maxExtract, boolean simulate) {
-                        int extracted = super.extractEnergy(maxExtract, simulate);
-                        if (extracted > 0 && !simulate) { onStorageChanged(false); }
-                        return extracted;
-                    }
-                };
+                energyStorage = new LongEnergyStorage(capacity, transfer, transfer,
+                        () -> onStorageChanged(false));
             }
         }
 
@@ -169,7 +162,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         this.energyTransfer = energyTransferValue;
         this.itemCapability = itemStorage == null ? LazyOptional.empty() : LazyOptional.of(() -> this.items);
         this.fluidCapability = fluidStorage == null ? LazyOptional.empty() : LazyOptional.of(() -> this.tank);
-        this.energyCapability = energyStorage == null ? LazyOptional.empty() : LazyOptional.of(() -> this.energy);
+        this.energyCapability = energyStorage == null ? LazyOptional.empty() : LazyOptional.of(() -> new EnergyPort(this.energy, this.kind.isInput()));
     }
 
     public HatchKind kind() {
@@ -239,7 +232,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         return switch (this.kind.family()) {
             case ITEM -> (this.items == null ? 0 : this.items.getSlots()) + " slots";
             case FLUID -> (this.tank == null ? 0 : this.tank.getCapacity()) + " mB";
-            case ENERGY -> (this.energy == null ? 0 : this.energy.getMaxEnergyStored()) + " FE, "
+            case ENERGY -> (this.energy == null ? 0 : EnergyAccess.capacity(this.energy)) + " FE, "
                     + this.energyTransfer + " FE/t";
         };
     }
@@ -334,8 +327,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             return;
         }
         // A4: the transfer recorded at construction time (EnergyStorage has no max-extract getter).
-        int limit = this.energyTransfer;
-        int remaining = Math.min(limit, this.energy.getEnergyStored());
+        long remaining = Math.min(this.energyTransfer, EnergyAccess.stored(this.energy));
         if (remaining <= 0) {
             return;
         }
@@ -344,13 +336,12 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             if (neighbor == null || isFamily(neighbor, HatchKind.Family.ENERGY)) {
                 continue;
             }
-            LazyOptional<IEnergyStorage> capability =
-                    neighbor.getCapability(ForgeCapabilities.ENERGY, face.getOpposite());
-            IEnergyStorage target = capability.orElse(null);
+            IEnergyStorage target = OptionalEnergy.find(neighbor, face.getOpposite());
+            if (target == null) target = neighbor.getCapability(ForgeCapabilities.ENERGY, face.getOpposite()).orElse(null);
             if (target == null) {
                 continue;
             }
-            remaining -= HatchAutoIo.pushEnergy(this.energy, target, remaining);
+            remaining -= EnergyAccess.push(this.energy, target, remaining);
             if (remaining <= 0) {
                 break;
             }
@@ -364,6 +355,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     // ------------------------------------------------------- menu data
 
     /** Client-side mirror of the four numbers the hatch screen shows. */
+    private final int[] clientEnergyWords = new int[8];
     private int clientEnergyStored;
     private int clientEnergyCapacity;
     private int clientFluidAmount;
@@ -385,6 +377,11 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
      * because a container data slot is the only place those numbers can live on the client.
      */
     public int menuValue(int index) {
+        if (index >= 6 && index < 14) {
+            if (this.level == null || this.level.isClientSide) return this.clientEnergyWords[index - 6];
+            long value = this.energy == null ? 0 : index < 10 ? EnergyAccess.stored(this.energy) : EnergyAccess.capacity(this.energy);
+            return EnergyMenuValues.word(value, (index - 6) % 4);
+        }
         if (this.level == null || this.level.isClientSide) {
             return switch (index) {
                 case 0 -> this.clientEnergyStored;
@@ -548,6 +545,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
     }
 
     public void setMenuValue(int index, int value) {
+        if (index >= 6 && index < 14) { this.clientEnergyWords[index - 6] = value & 0xffff; return; }
         switch (index) {
             case 0 -> this.clientEnergyStored = value;
             case 1 -> this.clientEnergyCapacity = value;
@@ -685,6 +683,11 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
         if (capability == ForgeCapabilities.ENERGY) {
             return this.energyCapability.cast();
         }
+        if (this.energy != null && this.capsValid) {
+            if (this.optionalEnergy == null) this.optionalEnergy = new OptionalEnergy.Handle(this.energyCapability.orElseThrow(IllegalStateException::new));
+            LazyOptional<?> wide = this.optionalEnergy.get(capability);
+            if (wide != null) return wide.cast();
+        }
         LazyOptional<?> compat = com.reborn.modularmachinery.compat.ModCompat.mapPort(capability, this);
         if (compat != null) {
             return compat.cast();
@@ -731,10 +734,22 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
 
     @Override
     public void invalidateCaps() {
+        this.capsValid = false;
         super.invalidateCaps();
         this.itemCapability.invalidate();
         this.fluidCapability.invalidate();
         this.energyCapability.invalidate();
+        if (this.optionalEnergy != null) this.optionalEnergy.invalidate();
+    }
+
+    @Override
+    public void reviveCaps() {
+        super.reviveCaps();
+        this.capsValid = true;
+        this.itemCapability = this.items == null ? LazyOptional.empty() : LazyOptional.of(() -> this.items);
+        this.fluidCapability = this.tank == null ? LazyOptional.empty() : LazyOptional.of(() -> this.tank);
+        this.energyCapability = this.energy == null ? LazyOptional.empty() : LazyOptional.of(() -> new EnergyPort(this.energy, this.kind.isInput()));
+        this.optionalEnergy = null;
     }
 
     @Override
@@ -747,7 +762,7 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             tag.put(TAG_TANK, this.tank.writeToNBT(new CompoundTag()));
         }
         if (this.energy != null) {
-            tag.putInt(TAG_ENERGY, this.energy.getEnergyStored());
+            tag.putLong(TAG_ENERGY, EnergyAccess.stored(this.energy));
         }
         if (this.machineColor != null) {
             tag.putInt(TAG_COLOR, this.machineColor);
@@ -771,8 +786,9 @@ public class MachineHatchBlockEntity extends BlockEntity implements net.minecraf
             this.tank.readFromNBT(tag.getCompound(TAG_TANK));
         }
         if (this.energy != null && tag.contains(TAG_ENERGY)) {
-            // EnergyStorage has no direct setter; fill it back up to the stored amount.
-            this.energy.receiveEnergy(tag.getInt(TAG_ENERGY), false);
+            // Exact replacement, independent of transfer limits; getLong accepts legacy IntTag saves.
+            if (this.energy instanceof LongEnergyStorage wide) wide.setStored(tag.getLong(TAG_ENERGY));
+            else this.energy.deserializeNBT(net.minecraft.nbt.IntTag.valueOf(EnergyAccess.asInt(tag.getLong(TAG_ENERGY))));
         }
         this.machineColor = tag.contains(TAG_COLOR) ? tag.getInt(TAG_COLOR) : null;
         if (this.kind.canGroupInput()) {

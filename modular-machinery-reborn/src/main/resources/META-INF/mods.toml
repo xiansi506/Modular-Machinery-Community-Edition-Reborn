@@ -98,3 +98,31 @@ description='''A Forge 1.20.1 reimplementation foundation for Modular Machinery:
     ordering="AFTER"
     side="BOTH"
 
+[[dependencies.${mod_id}]]
+    modId="appmek"
+    mandatory=false
+    versionRange="[1.4.3,2)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="botania"
+    mandatory=false
+    versionRange="[1.20.1-455,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="naturesaura"
+    mandatory=false
+    versionRange="[39.4,40)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="bloodmagic"
+    mandatory=false
+    versionRange="[3.3.8-50,4)"
+    ordering="AFTER"
+    side="BOTH"
+

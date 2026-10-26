@@ -1,0 +1,2 @@
+PASS 3259 checks in 20 suites; versions, protocol, guide links, examples, final archive identity and persistent build dependencies verified.
+PASS prior source and docs retained; 98 project files recorded.

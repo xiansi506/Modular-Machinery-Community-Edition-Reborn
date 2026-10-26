@@ -286,6 +286,7 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
             ItemRequirement finalItemForRange = itemForRange;
             CatalystRequirement finalCatalyst = catalyst;
             slot.addRichTooltipCallback((view, tooltip) -> {
+                MachineRecipeText.addScriptTooltip(tooltip, requirement);
                 MachineRecipeText.addChanceTooltip(!output, tooltip, chance);
                 if (finalItemForRange != null) {
                     MachineRecipeText.addAmountRangeTooltip(!output, tooltip, finalItemForRange);
@@ -317,14 +318,11 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
         for (int i = 0; i < count; i++) {
             MachineRequirement requirement = requirements.get(i);
             MachineRecipeLayout.Cell cell = cells.get(i);
-            // 气体（以及以后的其它化学物质）：占同一个**罐格**，但格内画的是文字（E10，0.100.0）。
-            //
-            // 为什么不能走下面那条流体渲染器：那条路要 cast FluidRequirement 并调 fluidType()，
-            // 而气体不是流体。**旧版事实（0.100.0 勘测修正）**：旧版 JEI 对气体不是「只有 tooltip」——
-            // JEIComponentGas → RecipeLayoutPart.GasTank，渲染器是 Mekanism 自带的 GasStackRenderer
-            // （画气体贴图）+ 罐壳。本版主模组按 X4 隔离不能引用 Mekanism 客户端渲染类，
-            // 所以照清点 E10 的拍板降级为文本格；格内文字由 draw() 侧的 drawGasText 画出。
-            // 分类由需求自己声明（MachineRequirement.tankKind()），主模组不认识气体那个类型。
+            // Chemical visuals arrive as atlas metadata, without optional client API linkage.
+            if (requirement.tankKind() == MachineRequirement.TankKind.MAGIC) {
+                builder.addSlot(role, cell.x(), cell.y()).setBackground(new MagicTankDrawable(requirement), 0, 0);
+                continue;
+            }
             if (requirement.tankKind() == MachineRequirement.TankKind.GAS) {
                 addGasSlot(builder, role, cell, requirement);
                 continue;
@@ -341,24 +339,14 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
                     .setFluidRenderer(amount, false, MachineRecipeLayout.CELL, MachineRecipeLayout.CELL)
                     .addFluidStack(fluid.fluidType().getFluid(), amount);
             slot.setOverlay(MachineRecipeAtlas.TANK_SHELL, 0, 0);
-            slot.addRichTooltipCallback((view, tooltip) -> MachineRecipeText.addChanceTooltip(
-                    role != RecipeIngredientRole.OUTPUT, tooltip, fluid.chance()));
+            slot.addRichTooltipCallback((view, tooltip) -> {
+                MachineRecipeText.addScriptTooltip(tooltip, requirement);
+                MachineRecipeText.addChanceTooltip(role != RecipeIngredientRole.OUTPUT, tooltip, fluid.chance());
+            });
         }
     }
 
-    /**
-     * A gas (chemical) cell: a <b>text cell</b> (E10, 0.100.0) — the cell holds no ingredient; its content is
-     * {@code requirement.describe()}, drawn into the cell by {@link #drawGasText}.
-     *
-     * <p><b>旧版事实（0.100.0 勘测修正）</b>：本方法过去自称「与流体同罐框、holding text instead of a fluid
-     * stack」并画罐壳 overlay；其依据「旧版在 JEI 里对气体本来也只有 tooltip」是错的——旧版
-     * {@code JEIComponentGas} → {@code RecipeLayoutPart.GasTank}，渲染器是 Mekanism 自带的
-     * {@code GasStackRenderer}（画气体贴图）+ {@code PART_GAS_TANK_SHELL} 罐壳。本版主模组按 X4 隔离
-     * 不能引用 Mekanism 客户端渲染类，走 Mekanism 自己的 JEI ingredient 类型又把页面绑在它的内部
-     * API 形状上（版本脆弱面，与 87e8d66 修的「JEI 页就崩」同类风险），所以照清点 E10 的拍板降级：
-     * **文本格**——罐壳 overlay 移除，格内画半倍缩放、折行、剪裁后的 {@code describe()}，
-     * 全文悬停经 {@link #getTooltip} 可读（类别级 tooltip，不依赖空槽是否触发槽位回调）。
-     */
+    /** Gas sprite, tint and shell in the JEI slot pass; tooltip also works without an ingredient type. */
     private static void addGasSlot(IRecipeLayoutBuilder builder, RecipeIngredientRole role,
                                    MachineRecipeLayout.Cell cell, MachineRequirement requirement) {
         String text = requirement.describe();
@@ -366,11 +354,12 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
             return;
         }
         IRecipeSlotBuilder slot = builder.addSlot(role, cell.x(), cell.y())
-                .setBackground(MachineRecipeAtlas.CELL, 0, 0);
+                .setBackground(new GasTankDrawable(requirement), 0, 0);
         // 槽位级 tooltip 保留（若 JEI 为空槽触发回调则与类别级重复一条，无害）；全文显示由
         // getTooltip 的气体格兜底保证——那条路径不依赖 JEI 对空槽的行为，离线也证不了它。
         slot.addRichTooltipCallback((view, tooltip) -> {
             tooltip.add(net.minecraft.network.chat.Component.literal(text));
+            MachineRecipeText.addScriptTooltip(tooltip, requirement);
             MachineRecipeText.addChanceTooltip(role != RecipeIngredientRole.OUTPUT, tooltip, chanceOf(requirement));
         });
     }
@@ -450,39 +439,7 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
             MachineRecipeAtlas.ARROW_ACTIVE.drawPartial(graphics, measured.arrowX(), measured.arrowY(), revealed);
         }
 
-        drawGasText(graphics, recipe, measured);
         drawTips(graphics, recipe, measured.height());
-    }
-
-    /**
-     * E10（0.100.0）：气体文本格的可见文字。
-     *
-     * <p>槽位本身不带 ingredient（见 {@link #addGasSlot}），所以文字在这里按与 {@code setRecipe} 完全相同的
-     * 配对规则找到气体格——{@code components(recipe, io, FLUID)} 的第 {@code i} 项对应罐格列表第 {@code i} 格，
-     * 气体需求就是其中 {@code tankKind() == GAS} 的那些。每格画一行折好、半倍缩放、居中的
-     * {@code describe()}；放不下的内容由 scissor 剪掉，全文经 {@link #getTooltip} 可读。
-     */
-    private static void drawGasText(GuiGraphics graphics, MachineRecipe recipe, MachineRecipeLayout measured) {
-        drawGasText(graphics, recipe, IOType.INPUT, measured.inputFluids());
-        drawGasText(graphics, recipe, IOType.OUTPUT, measured.outputFluids());
-    }
-
-    private static void drawGasText(GuiGraphics graphics, MachineRecipe recipe, IOType ioType,
-                                    List<MachineRecipeLayout.Cell> cells) {
-        List<MachineRequirement> fluidKind =
-                MachineRecipeLayout.components(recipe, ioType, MachineRecipeLayout.Kind.FLUID);
-        int count = Math.min(fluidKind.size(), cells.size());
-        for (int i = 0; i < count; i++) {
-            MachineRequirement requirement = fluidKind.get(i);
-            if (requirement.tankKind() != MachineRequirement.TankKind.GAS) {
-                continue;
-            }
-            String text = requirement.describe();
-            if (text == null || text.isEmpty()) {
-                continue;
-            }
-            drawTextInCell(graphics, cells.get(i), text);
-        }
     }
 
     /**
@@ -490,7 +447,7 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
      * 格内 16px ≈ 文本空间 32px 宽），超过格高的行数直接不画（scissor 兜底），整体水平垂直居中。
      * 颜色与 tip 块一致（白字带阴影，背景同为 JEI 灰面板）。
      */
-    private static void drawTextInCell(GuiGraphics graphics, MachineRecipeLayout.Cell cell, String text) {
+    static void drawTextInCell(GuiGraphics graphics, MachineRecipeLayout.Cell cell, String text) {
         Font font = Minecraft.getInstance().font;
         int inner = MachineRecipeLayout.CELL - 2;
         int wrapWidth = (int) (inner / GAS_TEXT_SCALE);
@@ -605,7 +562,7 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
         int count = Math.min(fluidKind.size(), cells.size());
         for (int i = 0; i < count; i++) {
             MachineRequirement requirement = fluidKind.get(i);
-            if (requirement.tankKind() != MachineRequirement.TankKind.GAS) {
+            if (requirement.tankKind() != MachineRequirement.TankKind.GAS && requirement.tankKind() != MachineRequirement.TankKind.MAGIC) {
                 continue;
             }
             MachineRecipeLayout.Cell cell = cells.get(i);
@@ -614,6 +571,7 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
                 String text = requirement.describe();
                 if (text != null && !text.isEmpty()) {
                     tooltip.add(Component.literal(text));
+                    MachineRecipeText.addScriptTooltip(tooltip, requirement);
                 }
             }
         }

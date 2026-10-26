@@ -25,6 +25,7 @@ public final class ModularMachineryReborn {
 
     public ModularMachineryReborn() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
+        com.reborn.modularmachinery.magic.MagicBlocks.register();
         ModBlocks.BLOCKS.register(bus);
         ModBlocks.ITEMS.register(bus);
         ModItems.ITEMS.register(bus);

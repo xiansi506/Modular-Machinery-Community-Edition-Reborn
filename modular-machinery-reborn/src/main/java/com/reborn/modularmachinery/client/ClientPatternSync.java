@@ -18,6 +18,8 @@ public final class ClientPatternSync {
         if (player.containerMenu instanceof MePatternProviderMenu menu
                 && menu.provider() != null
                 && menu.provider().getBlockPos().equals(message.pos())) {
+            menu.setClientSummary(message.summary());
+            menu.provider().setClientSummary(message.summary());
             menu.setClientPatterns(message.patterns());
             // 0.97.4：BE 镜像同步更新——重开窗口（新菜单从客户端 BE 初始化）也读得到。
             menu.provider().setClientPatternsMirror(message.patterns());

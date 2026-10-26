@@ -44,6 +44,22 @@ public final class MachineRecipeJsonBuilder {
     private boolean cancelIfPerTickFails;
     private String registryName;
     private JsonObject lastCatalyst;
+    private final JsonObject extra = new JsonObject();
+
+    public int lastRequirementIndex() {
+        if (requirements.isEmpty()) throw new IllegalStateException("Add a requirement first");
+        return requirements.size() - 1;
+    }
+    public MachineRecipeJsonBuilder requirementOption(String key, JsonElement value) {
+        requirements.get(lastRequirementIndex()).getAsJsonObject().add(key, value.deepCopy()); return this;
+    }
+    public MachineRecipeJsonBuilder requirementOptionIfAbsent(String key, JsonElement value) {
+        if (!requirements.get(lastRequirementIndex()).getAsJsonObject().has(key)) requirementOption(key, value);
+        return this;
+    }
+    public MachineRecipeJsonBuilder field(String key, JsonElement value) {
+        extra.add(key, value.deepCopy()); return this;
+    }
 
     /**
      * Makes this recipe belong to several machines. The original accepted the {@code machine} field as one
@@ -309,7 +325,7 @@ public final class MachineRecipeJsonBuilder {
 
     /** Builds the recipe body. The returned tree is independent of the builder. */
     public JsonObject build(String machine) {
-        JsonObject json = new JsonObject();
+        JsonObject json = extra.deepCopy();
         if (this.machines.isEmpty()) {
             json.addProperty("machine", requireId(machine, "machine"));
         } else {

@@ -44,6 +44,8 @@ public final class ModularMachineryKubeJSPlugin extends KubeJSPlugin {
      */
     public ModularMachineryKubeJSPlugin() {
         LifecycleEventsJS.registerBridge();
+        if (net.minecraftforge.fml.loading.FMLEnvironment.dist == net.minecraftforge.api.distmarker.Dist.CLIENT)
+            ClientEventsJS.registerBridge();
     }
 
     @Override
@@ -57,6 +59,7 @@ public final class ModularMachineryKubeJSPlugin extends KubeJSPlugin {
     public void registerEvents() {
         MachineEvents.register();
         LifecycleEventsJS.register();
+        ClientEventsJS.register();
     }
 
     /**
@@ -80,6 +83,12 @@ public final class ModularMachineryKubeJSPlugin extends KubeJSPlugin {
         event.add(MachineEvents.GROUP_NAME, new EventGroupWrapper(event.getType(), MachineEvents.group()));
         // C3（0.90.0）：生命周期事件组。同一条规矩：绑定必须是 wrapper，不是裸 group（见上面 0.28.0 的教训）。
         event.add(LifecycleEventsJS.GROUP_NAME, new EventGroupWrapper(event.getType(), LifecycleEventsJS.group()));
+        if (event.getType() == dev.latvian.mods.kubejs.script.ScriptType.CLIENT) {
+            // ScriptManager creates bindings once before evaluating this reload's client script files.
+            com.reborn.modularmachinery.script.ClientModelRegistry.beginReload();
+            event.add(ClientEventsJS.GROUP_NAME, new EventGroupWrapper(event.getType(), ClientEventsJS.group()));
+            event.add("MachineClientModels", new ClientModelsJS());
+        }
     }
 
     /**

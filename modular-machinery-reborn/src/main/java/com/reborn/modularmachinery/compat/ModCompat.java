@@ -103,6 +103,9 @@ public final class ModCompat {
     private static List<CompatModule> modules() {
         List<CompatModule> all = new ArrayList<>(1 + EXTERNAL_MODULES.size());
         all.add(new com.reborn.modularmachinery.compat.mekanism.MekanismModule());
+        all.add(new com.reborn.modularmachinery.magic.MagicModule("botania"));
+        all.add(new com.reborn.modularmachinery.magic.MagicModule("naturesaura"));
+        all.add(new com.reborn.modularmachinery.magic.MagicModule("bloodmagic"));
         all.addAll(EXTERNAL_MODULES);
         return all;
     }
@@ -162,6 +165,9 @@ public final class ModCompat {
     public static void onCommonSetup(FMLCommonSetupEvent event) {
         sealModules();
         register(modules(), ModList.get()::isLoaded);
+        if (ModList.get().isLoaded("ae2") && ModList.get().isLoaded("mekanism") && ModList.get().isLoaded("appmek")) {
+            event.enqueueWork(com.reborn.modularmachinery.compat.ae2.AppMekGasBridge::register);
+        }
     }
 
     /**

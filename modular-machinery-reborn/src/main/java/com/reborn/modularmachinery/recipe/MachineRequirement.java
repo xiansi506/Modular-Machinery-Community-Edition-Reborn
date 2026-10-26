@@ -74,6 +74,42 @@ public abstract class MachineRequirement {
 
     /** When true this requirement never scales with parallelism, the original's {@code parallelizeUnaffected}. */
     private boolean parallelizeUnaffected;
+    private com.google.gson.JsonObject scriptOptions = new com.google.gson.JsonObject();
+    private boolean triggered;
+    public com.google.gson.JsonObject scriptOptions() { return scriptOptions.deepCopy(); }
+    public boolean option(String key) { return scriptOptions.has(key) && scriptOptions.get(key).getAsBoolean(); }
+    public String scriptKey(String key) { return scriptOptions.has(key) ? scriptOptions.get(key).getAsString() : ""; }
+    public int triggerTime() { return scriptOptions.has("trigger-time") ? scriptOptions.get("trigger-time").getAsInt() : 0; }
+    public boolean triggered() { return triggered; }
+    public void setTriggered(boolean value) { triggered = value; }
+    public void setScriptOptions(com.google.gson.JsonObject options) {
+        for (String key : java.util.List.of("script-checker", "script-tooltip")) if (options.has(key)
+                && (!options.get(key).isJsonPrimitive() || !options.get(key).getAsJsonPrimitive().isString()))
+            throw new com.google.gson.JsonParseException(key + " must be a string");
+        if (options.has("script-modifiers")) {
+            if (!options.get("script-modifiers").isJsonArray()) throw new com.google.gson.JsonParseException("script-modifiers must be an array of callback keys");
+            for (var key : options.getAsJsonArray("script-modifiers")) if (!key.isJsonPrimitive() || !key.getAsJsonPrimitive().isString() || key.getAsString().isBlank())
+                throw new com.google.gson.JsonParseException("script-modifiers entries must be non-empty strings");
+        }
+        for (String key : java.util.List.of("consume-durability", "fuel-time", "ignore-output-check", "trigger-repeatable")) {
+            if (options.has(key) && (!options.get(key).isJsonPrimitive() || !options.get(key).getAsJsonPrimitive().isBoolean()))
+                throw new com.google.gson.JsonParseException(key + " must be true or false");
+        }
+        if (options.has("trigger-time")) {
+            var tick = options.get("trigger-time");
+            if (!tick.isJsonPrimitive() || !tick.getAsJsonPrimitive().isNumber() || tick.getAsDouble() < 0
+                    || tick.getAsDouble() > Integer.MAX_VALUE || tick.getAsDouble() != tick.getAsInt())
+                throw new com.google.gson.JsonParseException("trigger-time must be a non-negative integer");
+            if (perTick) throw new com.google.gson.JsonParseException("trigger-time is for one-shot requirements; remove perTick");
+        }
+        boolean itemOnly = options.has("script-checker") || options.has("script-modifiers")
+                || options.has("consume-durability") || options.has("fuel-time");
+        if (itemOnly && !(this instanceof ItemRequirement)) throw new com.google.gson.JsonParseException("Item callbacks, fuel and durability require an item requirement");
+        if ((options.has("consume-durability") || options.has("fuel-time")) && ioType != IOType.INPUT)
+            throw new com.google.gson.JsonParseException("Durability and fuel requirements are inputs only");
+        scriptOptions = options.deepCopy();
+        if (option("fuel-time") && option("consume-durability")) throw new com.google.gson.JsonParseException("fuel-time and consume-durability cannot be combined");
+    }
 
     protected MachineRequirement(IOType ioType, boolean perTick) {
         this.ioType = ioType;
@@ -101,7 +137,7 @@ public abstract class MachineRequirement {
 
     /** Inputs consumed once, when the craft starts. */
     public final boolean isStartPhase() {
-        return this.ioType == IOType.INPUT && !this.perTick;
+        return this.ioType == IOType.INPUT && !this.perTick && triggerTime() <= 0;
     }
 
     /** Requirements evaluated every tick of the craft. */
@@ -111,7 +147,7 @@ public abstract class MachineRequirement {
 
     /** Outputs produced once, when the craft completes. */
     public final boolean isFinishPhase() {
-        return this.ioType == IOType.OUTPUT && !this.perTick;
+        return this.ioType == IOType.OUTPUT && !this.perTick && triggerTime() <= 0;
     }
 
     // ------------------------------------------------------------------ parallelism
@@ -289,17 +325,16 @@ public abstract class MachineRequirement {
         NONE,
         /** 真正的流体：JEI 用自己的流体渲染器画。 */
         FLUID,
-        /**
-         * 气体之类的化学物质：**只给文字**。
-         *
-         * <p>为什么文字而不是贴图：旧版在 JEI 里对气体也只有 tooltip（没有贴图），本版照做——
-         * 不假装能画出气体的样子，而是把「多少、什么、多少概率」写清楚（见 {@code describe()}）。
-         */
-        GAS
+        /** Chemical atlas sprite and tank shell; text is a fallback for an unavailable sprite. */
+        GAS, MAGIC
     }
 
     /** 这条需求在 JEI 里占哪种格子；默认物品格。 */
     public TankKind tankKind() {
         return TankKind.NONE;
     }
+
+    /** Optional animated block-atlas visual; no chemical client classes cross this common API. */
+    @javax.annotation.Nullable public net.minecraft.resources.ResourceLocation tankTexture() { return null; }
+    public int tankTint() { return 0xFFFFFFFF; }
 }

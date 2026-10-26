@@ -12,14 +12,89 @@
     "modular_machinery_reborn:energy_output_hatch",
     "modular_machinery_reborn:parallel_controller",
     "modular_machinery_reborn:upgrade_bus",
-    { "id": "modular_machinery_reborn:example_machine_controller", "required": false },
-    { "id": "modular_machinery_reborn:example_factory_controller", "required": false },
-    { "id": "modularcontroller:alloy_furnace_controller", "required": false },
-    { "id": "modularcontroller:iron_centrifuge_controller", "required": false },
-    { "id": "modularcontroller:transformer_controller", "required": false },
-    { "id": "modularcontroller:example_factory_controller", "required": false },
-    { "id": "modularcontroller:example_machine_controller", "required": false },
-    { "id": "modularcontroller:immortal_bloom_assembler_controller", "required": false },
-    { "id": "modularcontroller:machine_1_controller", "required": false }
+    {
+      "id": "modular_machinery_reborn:example_machine_controller",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:example_factory_controller",
+      "required": false
+    },
+    {
+      "id": "modularcontroller:alloy_furnace_controller",
+      "required": false
+    },
+    {
+      "id": "modularcontroller:iron_centrifuge_controller",
+      "required": false
+    },
+    {
+      "id": "modularcontroller:transformer_controller",
+      "required": false
+    },
+    {
+      "id": "modularcontroller:example_factory_controller",
+      "required": false
+    },
+    {
+      "id": "modularcontroller:example_machine_controller",
+      "required": false
+    },
+    {
+      "id": "modularcontroller:immortal_bloom_assembler_controller",
+      "required": false
+    },
+    {
+      "id": "modularcontroller:machine_1_controller",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:me_item_input_bus",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:me_item_output_bus",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:me_pattern_provider",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:me_pattern_mirror",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:mana_input_hatch",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:mana_output_hatch",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:aura_input_hatch",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:aura_output_hatch",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:lifeessence_input_hatch",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:lifeessence_output_hatch",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:will_input_hatch",
+      "required": false
+    },
+    {
+      "id": "modular_machinery_reborn:will_output_hatch",
+      "required": false
+    }
   ]
 }

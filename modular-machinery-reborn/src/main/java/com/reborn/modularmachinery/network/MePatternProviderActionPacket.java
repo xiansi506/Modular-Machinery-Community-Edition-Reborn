@@ -8,20 +8,12 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
 
-/**
- * C4-II（0.102.0）：供应器工作模式切换（客户端 → 服务端）——旧版
- * {@code PktMEPatternProviderAction}（ENABLE_*_MODE 五个动作）的对应物。
- *
- * <p>本版五个模式只实现三个（BLOCKING / ISOLATION 有据暂缓，见方块实体类注释），
- * 所以载荷是一个模式序号而不是旧版的动作枚举；服务端验证序号在范围内后
- * {@code setWorkMode}（模式切换的状态复位语义都在那边），再把样板列表连同新模式推回
- * 正在看窗口的玩家（同步走 MePatternSyncPacket——0.97.1 实测 sendBlockUpdated 的
- * 数据包 tag 为 null，客户端镜像不依赖那条路）。
- */
+/** Menu-authorized provider actions: mode, return, input group, fluid container and preview page. */
 public final class MePatternProviderActionPacket {
 
     private final BlockPos pos;
     private final int modeOrdinal;
+    private int action;
 
     public MePatternProviderActionPacket(BlockPos pos, int modeOrdinal) {
         this.pos = pos;
@@ -30,11 +22,13 @@ public final class MePatternProviderActionPacket {
 
     public MePatternProviderActionPacket(FriendlyByteBuf buf) {
         this.pos = buf.readBlockPos();
+        this.action = buf.readVarInt();
         this.modeOrdinal = buf.readVarInt();
     }
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeBlockPos(this.pos);
+        buf.writeVarInt(this.action);
         buf.writeVarInt(this.modeOrdinal);
     }
 
@@ -50,17 +44,32 @@ public final class MePatternProviderActionPacket {
                 return;
             }
             MePatternProviderBlockEntity provider = menu.provider();
-            MePatternProviderBlockEntity.WorkMode[] modes = MePatternProviderBlockEntity.WorkMode.values();
-            if (message.modeOrdinal < 0 || message.modeOrdinal >= modes.length) {
-                return;
-            }
-            provider.setWorkMode(modes[message.modeOrdinal]);
+            if (message.action == 0) {
+                var modes = MePatternProviderBlockEntity.WorkMode.values();
+                if (message.modeOrdinal < 0 || message.modeOrdinal >= modes.length) return;
+                provider.setWorkMode(modes[message.modeOrdinal]);
+            } else if (message.action == 1) provider.storage().requestReturnAll();
+            else if (message.action == 2) provider.storage().setGroup(message.modeOrdinal);
+            else if (message.action == 3 && !provider.storage().pending()) {
+                // Fluid container is held on the menu cursor; successful transfers replace that exact stack.
+                var carried = menu.getCarried();
+                if (carried.isEmpty()) return;
+                var inventory = new net.minecraftforge.items.wrapper.PlayerMainInvWrapper(player.getInventory());
+                var result = net.minecraftforge.fluids.FluidUtil.tryEmptyContainerAndStow(carried, provider.storage().manualFluid, inventory, Integer.MAX_VALUE, player, true);
+                if (!result.isSuccess()) result = net.minecraftforge.fluids.FluidUtil.tryFillContainerAndStow(carried, provider.storage().manualFluid, inventory, Integer.MAX_VALUE, player, true);
+                if (result.isSuccess()) menu.setCarried(result.getResult());
+                player.displayClientMessage(net.minecraft.network.chat.Component.translatable("gui.modular_machinery_reborn.mepatternprovider.fluid." + (result.isSuccess() ? "success" : "failed")), true);
+            } else if (message.action == 4) menu.setBufferPage(message.modeOrdinal);
+            else return;
             // 同步推回（新模式 + 样板列表一张包）。
-            MePatternSyncPacket.sendTo(player, message.pos, provider.patternsView(), message.modeOrdinal);
+            MePatternSyncPacket.sendTo(player, message.pos, provider.patternsView(), provider.workMode().ordinal());
         });
         context.setPacketHandled(true);
     }
 
+    public static void sendAction(BlockPos pos, int action, int value) {
+        var message = new MePatternProviderActionPacket(pos, value); message.action = action; ModNetwork.CHANNEL.sendToServer(message);
+    }
     public static void sendSetMode(BlockPos pos, int modeOrdinal) {
         ModNetwork.CHANNEL.sendToServer(new MePatternProviderActionPacket(pos, modeOrdinal));
     }

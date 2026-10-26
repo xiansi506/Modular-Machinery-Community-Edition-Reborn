@@ -21,6 +21,7 @@ import java.util.List;
  * concurrency of its own (see {@link FactoryThreadModel}).
  */
 public interface FactoryHost {
+    default RecipeModifiers scriptModifiers() { return RecipeModifiers.EMPTY; }
 
     /**
      * The controller this engine runs in — C2 收尾（0.89.0）：工厂配方事件的载荷需要一个

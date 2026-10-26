@@ -45,6 +45,7 @@ final class MachineRecipeAtlas {
 
     /** {@code PART_TANK_SHELL}: drawn as the fluid renderer's overlay, i.e. on top of the fluid. */
     static final Sprite TANK_SHELL = new Sprite(0, 0, 18, 18);
+    static final Sprite GAS_SHELL = new Sprite(0, 18, 18, 18);
 
     /** {@code PART_INVENTORY_CELL} == {@code PART_TANK_SHELL_BACKGROUND}: the opaque cell every slot sits in. */
     static final Sprite CELL = new Sprite(54, 0, 18, 18);

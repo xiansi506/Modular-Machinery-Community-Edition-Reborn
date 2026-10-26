@@ -1,0 +1,26 @@
+{
+  "type": "modular_machinery_reborn:machine",
+  "machine": "magic_demo:naturesaura",
+  "recipeTime": 100,
+  "requirements": [
+    {
+      "type": "item",
+      "io-type": "input",
+      "item": "minecraft:cobblestone",
+      "amount": 1
+    },
+    {
+      "type": "aura",
+      "io-type": "input",
+      "aura-type": "naturesaura:overworld",
+      "amount": 100,
+      "min-aura": 0
+    },
+    {
+      "type": "item",
+      "io-type": "output",
+      "item": "minecraft:stone",
+      "amount": 1
+    }
+  ]
+}

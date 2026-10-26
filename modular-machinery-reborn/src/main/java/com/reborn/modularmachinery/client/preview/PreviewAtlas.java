@@ -42,6 +42,11 @@ public final class PreviewAtlas {
     public static final Sprite FORMED_PRESSED = new Sprite(214, 0, 13, 13);
     public static final Sprite FORMED_ACTIVE = new Sprite(229, 0, 13, 13);
 
+    /** Original preview-options menu row. */
+    public static final Sprite MENU = new Sprite(184, 15, 13, 13);
+    public static final Sprite MENU_HOVERED = new Sprite(199, 15, 13, 13);
+    public static final Sprite MENU_ACTIVE = new Sprite(214, 15, 13, 13);
+
     /** {@code machineExtraInfo} (:155-159). The original had no "clicked" art because it was not a toggle. */
     public static final Sprite MACHINE_INFO = new Sprite(184, 214, 13, 13);
     public static final Sprite MACHINE_INFO_HOVERED = new Sprite(199, 214, 13, 13);

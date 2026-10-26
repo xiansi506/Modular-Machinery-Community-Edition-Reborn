@@ -163,8 +163,8 @@ public abstract class MachineHatchBlock extends Block implements EntityBlock {
             // here instead, because those two branches do not exist on 1.20.1 and a hard-coded `FE` sitting beside
             // a configurable unit is a contradiction the player can see. The grouping is the original's.
             case ENERGY -> Component.translatable("tooltip.modular_machinery_reborn.hatch.energy",
-                    com.reborn.modularmachinery.config.DisplayNumbers.grouped(HatchConfig.energyHatchCapacity(tier)),
-                    com.reborn.modularmachinery.config.DisplayNumbers.grouped(HatchConfig.energyHatchTransfer(tier)),
+                    com.reborn.modularmachinery.config.DisplayNumbers.grouped(HatchConfig.energyHatchCapacityLong(tier)),
+                    com.reborn.modularmachinery.config.DisplayNumbers.grouped(HatchConfig.energyHatchTransferLong(tier)),
                     com.reborn.modularmachinery.config.ModConfig.energyDisplay().labelComponent());
         };
     }

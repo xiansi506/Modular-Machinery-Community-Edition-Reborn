@@ -7,6 +7,7 @@ import com.reborn.modularmachinery.api.event.FactoryRecipeTickEvent;
 import com.reborn.modularmachinery.api.event.MachineEvents;
 import com.reborn.modularmachinery.api.event.Phase;
 import com.reborn.modularmachinery.machine.HatchCollection;
+import com.reborn.modularmachinery.recipe.EnergyUsage;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
 import com.reborn.modularmachinery.recipe.RecipeModifiers;
 import net.minecraft.nbt.CompoundTag;
@@ -96,6 +97,7 @@ public final class FactoryEngine {
 
     /** How many ordinary threads have ever been created, so a thread's printed number never shifts. */
     private int createdOrdinary;
+    private int createdCore;
 
     /** Set by any transition that changes what the controller should persist or show. */
     private boolean dirty;
@@ -151,6 +153,23 @@ public final class FactoryEngine {
             }
         }
         return false;
+    }
+
+    /** All non-idle core and ordinary threads, as in the original TOP collectRequirementEnergy. */
+    public EnergyUsage energyUsage() {
+        var total = EnergyUsage.ZERO;
+        for (FactoryThread thread : allThreads()) {
+            ActiveCraft craft = thread.active();
+            if (craft != null) total = total.plus(EnergyUsage.of(
+                    craft.recipe(), effectiveModifiers(thread, craft), craft.parallelism()));
+        }
+        return total;
+    }
+
+    /** Frozen structural/catalyst rules plus the current controller and thread script contributions. */
+    private RecipeModifiers effectiveModifiers(FactoryThread thread, ActiveCraft craft) {
+        return craft.modifiers().without(craft.scriptModifiers)
+                .andThen(host.scriptModifiers()).andThen(thread.scriptState().modifiers());
     }
 
     /** How many ordinary threads the machine allows — the original's {@code getMaxThreads()}. */
@@ -209,6 +228,7 @@ public final class FactoryEngine {
 
     /** See {@link #hasIdleThread()} — the same test, named for the search that uses it. */
     public boolean canAccept() {
+        for (FactoryThread thread : coreThreads.values()) if (thread.isIdle()) return true;
         if (this.recipeThreads.size() < this.host.maxThreads()) {
             return true;
         }
@@ -242,7 +262,15 @@ public final class FactoryEngine {
             // with nothing to do from spending a thread on finding that out.
             return 0;
         }
-        while (true) {
+        for (FactoryThread core : List.copyOf(coreThreads.values())) {
+            if (core.isWorking()) continue;
+            ActiveCraft craft = nextCraft(core, runnable);
+            if (craft == null) continue;
+            if (begin(core, craft)) started++;
+            else unavailable.add(craft.recipeId());
+            runnable = runnable(unavailable);
+        }
+        while (!runnable.isEmpty()) {
             FactoryThread target = nextFreeThread();
             if (target == null) {
                 break;
@@ -289,7 +317,8 @@ public final class FactoryEngine {
                 MachineRecipe candidate = recipe.executionCopy();
                 candidate.setParallelism(1);
                 MachineRecipe.StartPlan plan = candidate.prepareStart(groupPorts, modifiers);
-                if (candidate.canStart(groupPorts, plan)) {
+                boolean threadRules = allThreads().stream().anyMatch(t -> !t.scriptState().modifiers().isEmpty());
+                if (candidate.canStart(groupPorts, plan) || threadRules) {
                     out.add(new Candidate(recipe, group));
                 }
             }
@@ -320,7 +349,7 @@ public final class FactoryEngine {
                 return thread;
             }
         }
-        if (!canAccept()) {
+        if (recipeThreads.size() >= host.maxThreads()) {
             return null;
         }
         FactoryThread created = new FactoryThread(this.createdOrdinary++);
@@ -350,6 +379,7 @@ public final class FactoryEngine {
 
     /** Runs the start phase of {@code craft} on {@code thread} and announces it when it took. */
     private boolean begin(FactoryThread thread, ActiveCraft craft) {
+        if (!thread.accepts(craft.recipe())) return false;
         if (!thread.begin(craft, this.host.ports().withGroup(craft.group()), this.host.random())) {
             return false;
         }
@@ -368,18 +398,31 @@ public final class FactoryEngine {
 
     private ActiveCraft prepareCraft(MachineRecipe definition, int group, FactoryThread thread) {
         HatchCollection ports = host.ports().withGroup(group);
-        RecipeModifiers base = host.modifiers();
+        RecipeModifiers base = host.modifiers().andThen(thread.scriptState().modifiers());
         MachineRecipe recipe = definition.executionCopy();
+        recipe.setExecutionTick(0);
         recipe.setParallelism(1);
         MachineRecipe.StartPlan plan = recipe.prepareStart(ports, base);
         if (!recipe.canStart(ports, plan)) return null;
         recipe.applyDurationMultiplier(plan.modifiers());
         int parallelism = Math.max(1, recipe.parallelism(ports, plan, availableParallelism(thread)));
+        var checkStart = MachineEvents.post(new com.reborn.modularmachinery.api.event.RecipeCheckEvent(
+                host.controller(), host.controller().machineId(), Phase.START, recipe, 0, recipe.duration(plan.modifiers()), parallelism).forThread(thread.ordinal()));
+        if (checkStart.isCanceled()) return null;
+        parallelism = checkStart.resolvedParallelism(parallelism);
         recipe.setParallelism(parallelism);
+        base = host.modifiers().andThen(thread.scriptState().modifiers());
         plan = recipe.prepareStart(ports, base);
         recipe.applyDurationMultiplier(plan.modifiers());
         if (!recipe.canStart(ports, plan) || !recipe.canTick(ports, plan.modifiers())) return null;
-        return new ActiveCraft(recipe, parallelism, group, base);
+        var checkEnd = MachineEvents.post(new com.reborn.modularmachinery.api.event.RecipeCheckEvent(
+                host.controller(), host.controller().machineId(), Phase.END, recipe, 0, recipe.duration(plan.modifiers()), parallelism).forThread(thread.ordinal()));
+        if (checkEnd.isCanceled()) return null;
+        parallelism = checkEnd.resolvedParallelism(parallelism);
+        recipe.setParallelism(parallelism);
+        base = host.modifiers().andThen(thread.scriptState().modifiers());
+        if (thread.isCoreThread() && host.coreThreads().stream().noneMatch(spec -> spec.name().equals(thread.threadName()))) return null;
+        return new ActiveCraft(recipe, parallelism, group, base).withScriptModifiers(host.scriptModifiers().andThen(thread.scriptState().modifiers()));
     }
 
     /**
@@ -409,7 +452,8 @@ public final class FactoryEngine {
         }
 
         HatchCollection ports = this.host.ports().withGroup(craft.group());
-        RecipeModifiers modifiers = craft.modifiers();
+        RecipeModifiers modifiers = effectiveModifiers(thread, craft);
+        craft.withDuration(craft.recipe().duration(modifiers));
 
         // Re-assert the freeze every tick: the recipe object is shared with every other controller in the
         // level, so another machine's settlement must not be able to change what this thread pays.
@@ -421,6 +465,7 @@ public final class FactoryEngine {
         FactoryRecipeTickEvent startEvent = MachineEvents.post(new FactoryRecipeTickEvent(
                 this.host.controller(), this.host.controller().machineId(), craft.recipe(), craft.progress(),
                 craft.duration(), craft.parallelism(), thread.ordinal(), Phase.START));
+        craft.recipe().setExecutionTick(craft.progress());
         if (startEvent.isCanceled()) {
             return;
         }
@@ -482,7 +527,7 @@ public final class FactoryEngine {
         com.reborn.modularmachinery.api.event.ResultChanceCreateEvent chance =
                 MachineEvents.post(new com.reborn.modularmachinery.api.event.ResultChanceCreateEvent(
                         this.host.controller(), this.host.controller().machineId(), craft.recipe(),
-                        craft.progress(), craft.duration(), craft.parallelism(), this.host.random()));
+                        craft.progress(), craft.duration(), craft.parallelism(), this.host.random()).forThread(thread.ordinal()));
         if (!craft.recipe().finish(ports, chance.random(), modifiers)) {
             craft.setProgress(Math.max(0, craft.duration() - 1));
             return;
@@ -493,6 +538,7 @@ public final class FactoryEngine {
         // C2 收尾：产物已结算、完成命令已跑，重开工之前发 Finish——只读（旧版 TileFactoryController:305）。
         MachineEvents.post(new FactoryRecipeFinishEvent(this.host.controller(), this.host.controller().machineId(),
                 craft.recipe(), craft.progress(), craft.duration(), craft.parallelism(), thread.ordinal()));
+        thread.scriptState().clearCraft();
         tryRestart(thread, craft);
     }
 
@@ -505,15 +551,13 @@ public final class FactoryEngine {
      * excluded from the machine's parallel ledger while computing its new allowance.
      */
     private void tryRestart(FactoryThread thread, ActiveCraft finished) {
+        if (!thread.accepts(finished.recipe()) || (thread.isCoreThread()
+                && host.coreThreads().stream().noneMatch(spec -> spec.name().equals(thread.threadName())))) {
+            thread.clear(); dirty = true; host.onThreadIdle(thread); return;
+        }
         HatchCollection groupPorts = this.host.ports().withGroup(finished.group());
         ActiveCraft again = prepareCraft(finished.recipe(), finished.group(), thread);
-        if (again != null && thread.begin(again, groupPorts, this.host.random())) {
-            this.dirty = true;
-            this.host.onThreadStarted(thread);
-            // B8: the re-armed craft counts as a fresh start, so its startCommands run again.
-            this.host.runRecipeCommands(thread, again.recipe(), FactoryHost.PHASE_START, 0);
-            return;
-        }
+        if (again != null && begin(thread, again)) return;
         thread.clear();
         this.dirty = true;
         this.host.onThreadIdle(thread);
@@ -545,8 +589,7 @@ public final class FactoryEngine {
     public void syncCoreThreads() {
         List<FactoryThreadModel.CoreThreadSpec> declared = this.host.coreThreads();
         if (declared.isEmpty()) {
-            if (!this.coreThreads.isEmpty()) {
-                this.coreThreads.clear();
+            if (this.coreThreads.values().removeIf(FactoryThread::isIdle)) {
                 this.dirty = true;
             }
             return;
@@ -558,18 +601,18 @@ public final class FactoryEngine {
             wanted.add(spec.name());
             FactoryThread existing = this.coreThreads.get(spec.name());
             if (existing == null) {
-                this.coreThreads.put(spec.name(), new FactoryThread(spec, ordinal));
+                this.coreThreads.put(spec.name(), new FactoryThread(spec, createdCore++));
                 this.dirty = true;
             } else {
                 Set<ResourceLocation> wanted2 = Set.copyOf(spec.recipes());
-                if (!existing.recipeSet().equals(wanted2)) {
+                if (!existing.hasScriptRecipes() && !existing.recipeSet().equals(wanted2)) {
                     existing.setRecipeSet(wanted2);
                     this.dirty = true;
                 }
             }
             ordinal++;
         }
-        if (this.coreThreads.keySet().removeIf(name -> !wanted.contains(name))) {
+        if (this.coreThreads.entrySet().removeIf(entry -> !wanted.contains(entry.getKey()) && entry.getValue().isIdle())) {
             this.dirty = true;
         }
     }
@@ -622,6 +665,7 @@ public final class FactoryEngine {
         this.coreThreads.clear();
         this.recipeThreads.clear();
         this.createdOrdinary = 0;
+        this.createdCore = 0;
         if (had) {
             this.dirty = true;
         }
@@ -664,7 +708,7 @@ public final class FactoryEngine {
         this.coreThreads.clear();
         this.recipeThreads.clear();
         for (FactoryThreadModel.CoreThreadSpec spec : corePreset) {
-            this.coreThreads.put(spec.name(), new FactoryThread(spec, this.coreThreads.size()));
+            this.coreThreads.put(spec.name(), new FactoryThread(spec, createdCore++));
         }
         if (tag.contains("coreThreadList")) {
             net.minecraft.nbt.ListTag list = tag.getList("coreThreadList", CompoundTag.TAG_COMPOUND);
@@ -688,6 +732,7 @@ public final class FactoryEngine {
 
     private void restore(FactoryThread thread, CompoundTag entry,
                          java.util.function.Function<ResourceLocation, MachineRecipe> resolve) {
+        thread.loadScriptState(entry);
         FactoryThread.SavedCraft saved = FactoryThread.load(entry);
         if (saved == null) {
             return;
@@ -700,8 +745,10 @@ public final class FactoryEngine {
         RecipeModifiers effective = saved.modifiers() != null ? saved.modifiers()
                 : this.host.modifiers().andThen(recipe.catalystModifiers(groupPorts));
         ActiveCraft craft = new ActiveCraft(recipe, saved.parallelism(), saved.group(), effective);
+        if (entry.contains("scriptModifiers")) craft.withScriptModifiers(RecipeModifiers.load(entry.getList("scriptModifiers", net.minecraft.nbt.Tag.TAG_COMPOUND)));
         if (saved.duration() > 0) craft.withDuration(saved.duration());
         craft.setProgress(saved.progress());
+        craft.recipe().loadExecutionState(entry.getCompound("scriptExecution"));
         thread.restart(craft);
     }
 
@@ -733,6 +780,9 @@ public final class FactoryEngine {
         private final int group;
         private final RecipeModifiers startBaseModifiers;
         private RecipeModifiers modifiers;
+        private RecipeModifiers scriptModifiers = RecipeModifiers.EMPTY;
+        public RecipeModifiers scriptModifiers() { return scriptModifiers; }
+        ActiveCraft withScriptModifiers(RecipeModifiers value) { scriptModifiers = value; return this; }
 
         private int progress;
         private int duration;

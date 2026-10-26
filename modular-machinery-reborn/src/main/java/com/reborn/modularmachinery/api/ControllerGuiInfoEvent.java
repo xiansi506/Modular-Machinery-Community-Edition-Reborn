@@ -29,6 +29,9 @@ public class ControllerGuiInfoEvent extends Event {
     private final MachineControllerBlockEntity controller;
     private final List<Component> extraInfo = new ArrayList<>();
 
+    /** Forge listener-list probe only; real screen events always supply a controller. */
+    public ControllerGuiInfoEvent() { this.controller = null; }
+
     public ControllerGuiInfoEvent(MachineControllerBlockEntity controller) {
         this.controller = controller;
     }

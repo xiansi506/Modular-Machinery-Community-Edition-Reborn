@@ -4,6 +4,7 @@ import com.reborn.modularmachinery.block.MeBusAccess;
 import com.reborn.modularmachinery.block.MeFluidTanks;
 import com.reborn.modularmachinery.compat.ae2.MeItemBusBlockEntity;
 import com.reborn.modularmachinery.menu.MeItemBusMenu;
+import com.reborn.modularmachinery.menu.MeConfigAmount;
 import com.reborn.modularmachinery.network.MeFluidConfigPacket;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -37,7 +38,7 @@ import java.util.Optional;
  * 客户端随 update tag 镜像刷新。
  *
  * <p>罐条（输入竖条/输出横条）自 0.94.0 起纯显示（配置都在格子里）。渲染 v1 简化：
- * 流体贴图**不做 tint**，按比例从罐底画到液面；全部信息在悬停提示里。
+ * 流体使用方块图集贴图和原生 tint，按比例从罐底画到液面；悬停显示精确数量。
  */
 public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu> {
 
@@ -58,6 +59,7 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
 
     @Nullable
     private MeBusAccess bus;
+    private List<Component> hoveredTooltip;
 
     public MeItemBusScreen(MeItemBusMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -79,21 +81,18 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
-        Component status = Component.translatable(this.menu.meOnline()
-                ? "screen.modular_machinery_reborn.me_bus.online"
-                : "screen.modular_machinery_reborn.me_bus.offline");
-        int color = this.menu.meOnline() ? 0x308030 : 0x903030;
-        graphics.drawString(this.font, status,
-                this.leftPos + this.imageWidth - 8 - this.font.width(status),
-                this.topPos + 6, color, false);
-        this.renderFluidStrip(graphics, mouseX, mouseY);
-        this.renderConfigMarks(graphics, mouseX, mouseY);
+        if (hoveredTooltip != null) graphics.renderComponentTooltip(font, hoveredTooltip, mouseX, mouseY);
+        else renderTooltip(graphics, mouseX, mouseY);
     }
 
     @Override
     protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
         graphics.blit(this.menu.isInput() ? INPUT : OUTPUT,
                 this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
+        hoveredTooltip = null;
+        renderFluidStrip(graphics, mouseX, mouseY);
+        renderGasStrip(graphics, mouseX, mouseY);
+        renderConfigMarks(graphics, mouseX, mouseY);
     }
 
     // ------------------------------------------------------------ 配置格（0.94.0 ghost 标记）
@@ -126,18 +125,22 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
             int y = this.topPos + GRID_Y + (slot / 4) * 18;
             ItemStack item = bus.configItemAt(slot);
             Fluid fluid = bus.fluidMarkAt(slot);
+            var gas = bus.gasTanks() == null ? null : bus.gasTanks().mark(slot);
             if (item != null && !item.isEmpty()) {
                 graphics.renderItem(item, x, y);
                 graphics.renderItemDecorations(this.font, item, x, y);
+            } else if (gas != null) {
+                graphics.fill(x + 2, y + 2, x + 14, y + 14, 0xFF000000 | gas.color());
+                String label = GuiAmounts.compact(gas.amount());
+                drawAmountLabel(graphics, label, x, y);
             } else if (fluid != null) {
                 // 流体标记：12×12 的流体块 + 目标量小字。
                 drawFluidBlock(graphics, fluid, x + 2, y + 2, 12, 12);
-                String label = amountLabel(bus.fluidMarkAmount(slot));
-                graphics.drawString(this.font, label, x + 16 - this.font.width(label), y + 8,
-                        0xFFFFFF, true);
+                String label = GuiAmounts.compact(bus.fluidMarkAmount(slot));
+                drawAmountLabel(graphics, label, x, y);
             }
             if (slot == hovered) {
-                graphics.renderComponentTooltip(this.font, configTooltip(bus, slot), (int) mouseX, (int) mouseY);
+                hoveredTooltip = configTooltip(bus, slot);
             }
         }
     }
@@ -146,9 +149,14 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
         List<Component> lines = new ArrayList<>();
         ItemStack item = bus.configItemAt(slot);
         Fluid fluid = bus.fluidMarkAt(slot);
+        var gas = bus.gasTanks() == null ? null : bus.gasTanks().mark(slot);
         if (item != null && !item.isEmpty()) {
             lines.add(item.getHoverName());
             lines.add(Component.literal("× " + item.getCount()));
+        } else if (gas != null) {
+            lines.add(gas.name());
+            lines.add(Component.translatable("screen.modular_machinery_reborn.me_bus.gas.target", gas.amount()));
+            if (!bus.gasNetworkAvailable()) lines.add(Component.translatable("screen.modular_machinery_reborn.me_bus.gas.requires_appmek"));
         } else if (fluid != null) {
             lines.add(new FluidStack(fluid, 1).getDisplayName());
             lines.add(Component.literal(bus.fluidMarkAmount(slot) + " mB"));
@@ -156,32 +164,34 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
             lines.add(Component.translatable("screen.modular_machinery_reborn.me_bus.fluid.unfiltered"));
         }
         lines.add(Component.translatable("screen.modular_machinery_reborn.me_bus.fluid.hint"));
+        if (MeConfigAmount.hasMark(bus, slot)) {
+            lines.add(Component.translatable("screen.modular_machinery_reborn.me_bus.scroll.step"));
+            lines.add(Component.translatable("screen.modular_machinery_reborn.me_bus.scroll.scale"));
+        }
         return lines;
     }
 
-    /**
-     * 0.94.1：流体块的统一画法。两个坑都在这里修：①贴图是 16×16，必须用带纹理尺寸的 blit 重载
-     * （默认重载按 256×256 画布取 UV——水显示黑方块的原因）；②水的贴图依赖 tint，有 tint 的流体
-     * 直接画 tint 色块。
-     */
-    private static void drawFluidBlock(GuiGraphics graphics, Fluid fluid, int x, int y, int w, int h) {
-        IClientFluidTypeExtensions ext = IClientFluidTypeExtensions.of(fluid);
-        int tint = ext.getTintColor(new FluidStack(fluid, 1));
-        if (tint != -1) {
-            graphics.fill(x, y, x + w, y + h, 0xFF000000 | tint);
-            return;
-        }
-        ResourceLocation still = ext.getStillTexture();
-        if (still != null) {
-            graphics.blit(still, x, y, 0, 0, w, h, 16, 16);
-        } else {
-            graphics.fill(x, y, x + w, y + h, 0xFF808080);
-        }
+    private void drawAmountLabel(GuiGraphics graphics, String label, int x, int y) {
+        float scale = Math.min(1F, 16F / Math.max(1, font.width(label)));
+        graphics.pose().pushPose();
+        graphics.pose().translate(x + 16, y + 8, 0);
+        graphics.pose().scale(scale, scale, 1F);
+        graphics.drawString(font, label, -font.width(label), 0, 0xffffff, true);
+        graphics.pose().popPose();
     }
 
-    /** 目标量的短写（≥1000 且整千 → k）。 */
-    private String amountLabel(int amount) {
-        return amount >= 1000 && amount % 1000 == 0 ? (amount / 1000) + "k" : String.valueOf(amount);
+    private static void drawFluidBlock(GuiGraphics graphics, Fluid fluid, int x, int y, int w, int h) {
+        GuiFluidRenderer.draw(graphics, new FluidStack(fluid, 1), x, y, w, h);
+    }
+
+    @Override protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
+        Component status = Component.translatable(menu.meOnline() ? "screen.modular_machinery_reborn.me_bus.online" : "screen.modular_machinery_reborn.me_bus.offline");
+        int statusX = imageWidth - 8 - font.width(status);
+        String caption = title.getString();
+        if (font.width(caption) > statusX - 16) caption = font.plainSubstrByWidth(caption, Math.max(0, statusX - 16 - font.width("…"))) + "…";
+        graphics.drawString(font, caption, 8, 6, 0x404040, false);
+        graphics.drawString(font, status, statusX, 6, menu.meOnline() ? 0x308030 : 0x903030, false);
+        graphics.drawString(font, playerInventoryTitle, inventoryLabelX, inventoryLabelY, 0x404040, false);
     }
 
     @Override
@@ -194,14 +204,19 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
         if (slot >= 0) {
             ItemStack carried = this.menu.getCarried();
             Optional<FluidStack> contained = FluidUtil.getFluidContained(carried);
+            var access = bus();
+            var gas = access == null || access.gasTanks() == null ? null : access.gasTanks().containedGas(carried);
+            if (gas == null && access != null) gas = access.encodedGas(carried);
             if (button == 0) {
                 if (carried.isEmpty()) {
                     MeFluidConfigPacket.sendClear(slot);
                 } else {
                     MeFluidConfigPacket.sendItem(slot, carried, false);
                 }
-            } else {
-                if (contained.isPresent()) {
+            } else if (button == 1) {
+                if (gas != null) {
+                    MeFluidConfigPacket.sendGas(slot, gas.id(), gas.amount());
+                } else if (contained.isPresent()) {
                     MeFluidConfigPacket.sendFluid(slot, contained.get().getFluid(),
                             contained.get().getAmount());
                 } else {
@@ -211,6 +226,18 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
             return true;
         }
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        int slot = configSlotAt(mouseX, mouseY);
+        if (slot >= 0 && Double.isFinite(delta) && delta != 0 && MeConfigAmount.hasMark(bus(), slot)
+                && this.minecraft != null && this.minecraft.gameMode != null) {
+            this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId,
+                    MeConfigAmount.action(slot, delta > 0, hasShiftDown(), hasControlDown()));
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, delta);
     }
 
     // ------------------------------------------------------------ 罐条（纯显示）
@@ -224,11 +251,11 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
     }
 
     private int gaugeWidth() {
-        return this.menu.isInput() ? GAUGE_W - 2 : 16;
+        return this.menu.isInput() ? (bus() != null && bus().gasTanks() != null ? 5 : GAUGE_W - 2) : 16;
     }
 
     private int gaugeHeight() {
-        return this.menu.isInput() ? GAUGE_H - 2 : 12;
+        return this.menu.isInput() ? GAUGE_H - 2 : (bus() != null && bus().gasTanks() != null ? 5 : 12);
     }
 
     private int hoveredGauge(double mouseX, double mouseY) {
@@ -268,7 +295,7 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
             int h = gaugeHeight();
             graphics.fill(x - 1, y - 1, x + w + 1, y + h + 1, hovered == slot ? 0xFFE0E0E0 : 0xFF606060);
             graphics.fill(x, y, x + w, y + h, 0xFF101010);
-            int fill = Math.max(1, h * contents.getAmount() / tanks.getTankCapacity(slot));
+            int fill = GuiAmounts.filledPixels(contents.getAmount(), tanks.getTankCapacity(slot), h);
             drawFluidBlock(graphics, contents.getFluid(), x, y + (h - fill), w, fill);
         }
         if (hovered >= 0) {
@@ -278,7 +305,29 @@ public final class MeItemBusScreen extends AbstractContainerScreen<MeItemBusMenu
                     ? Component.translatable("screen.modular_machinery_reborn.me_bus.fluid.empty")
                     : contents.getDisplayName());
             lines.add(Component.literal(contents.getAmount() + " / " + tanks.getTankCapacity(hovered) + " mB"));
-            graphics.renderTooltip(this.font, lines, Optional.empty(), (int) mouseX, (int) mouseY);
+            hoveredTooltip = lines;
+        }
+    }
+
+    /** Separate strip: the gas and fluid pools never hide or overwrite each other's contents. */
+    private void renderGasStrip(GuiGraphics graphics, int mouseX, int mouseY) {
+        MeBusAccess bus = bus();
+        var tanks = bus == null ? null : bus.gasTanks();
+        if (tanks == null) return;
+        for (int tank = 0; tank < com.reborn.modularmachinery.block.MeGasStorage.SLOTS; tank++) {
+            var gas = tanks.contents(tank);
+            if (gas == null) continue;
+            int x = this.leftPos + (this.menu.isInput() ? IN_STRIP_X + 9 : 9 + tank * 18);
+            int y = this.topPos + (this.menu.isInput() ? GRID_Y + tank * GAUGE_H + 1 : OUT_STRIP_Y + 9);
+            int w = this.menu.isInput() ? 6 : 16;
+            int h = this.menu.isInput() ? GAUGE_H - 2 : 4;
+            graphics.fill(x - 1, y - 1, x + w + 1, y + h + 1, 0xFF606060);
+            graphics.fill(x, y, x + w, y + h, 0xFF101010);
+            int fill = GuiAmounts.filledPixels(gas.amount(), com.reborn.modularmachinery.block.MeGasStorage.CAPACITY, h);
+            graphics.fill(x, y + h - fill, x + w, y + h, 0xFF000000 | gas.color());
+            if (mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h) {
+                hoveredTooltip = List.of(gas.name(), Component.literal(GuiAmounts.exact(gas.amount()) + " / " + GuiAmounts.exact(com.reborn.modularmachinery.block.MeGasStorage.CAPACITY) + " mB"));
+            }
         }
     }
 }

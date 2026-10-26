@@ -329,7 +329,7 @@ final class MachineRecipeLayout {
         return switch (requirement.tankKind()) {
             // 气体与流体占**同一种格子**：它们本来就住在同一个罐里（一个仓要么装流体要么装气体），
             // 而绘制侧按 tankKind 分开画（流体给贴图、气体给文字）。见 MachineRecipeCategory。
-            case FLUID, GAS -> Kind.FLUID;
+            case FLUID, GAS, MAGIC -> Kind.FLUID;
             case NONE -> Kind.ITEM;
         };
     }

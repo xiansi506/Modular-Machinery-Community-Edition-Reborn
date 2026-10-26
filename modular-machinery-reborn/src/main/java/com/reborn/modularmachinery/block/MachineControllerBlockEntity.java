@@ -35,6 +35,7 @@ import com.reborn.modularmachinery.machine.StructureChangeTracker;
 import com.reborn.modularmachinery.machine.StructureCheckScheduler;
 import com.reborn.modularmachinery.menu.FactoryControllerMenu;
 import com.reborn.modularmachinery.menu.MachineControllerMenu;
+import com.reborn.modularmachinery.recipe.EnergyUsage;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
 import com.reborn.modularmachinery.recipe.ModRecipeTypes;
 import com.reborn.modularmachinery.recipe.RecipeCommands;
@@ -339,10 +340,30 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      */
     @Nullable
     private RecipeModifiers activeCraftModifiers;
+    private RecipeModifiers activeScriptModifiers = RecipeModifiers.EMPTY;
     private MachineRecipe executionRecipeSource;
     private MachineRecipe executionRecipe;
     private CompoundTag pendingFactoryState;
+    private CompoundTag pendingExecutionState;
     private java.util.Set<BlockPos> formedPartOffsets = java.util.Set.of();
+    private boolean formedPartSnapshotKnown;
+
+    /** Actual matched offsets, already rotated; also synchronized for world model hiding. */
+    public java.util.Set<BlockPos> formedPartOffsets() { return formedPartOffsets; }
+    public boolean hasFormedPartSnapshot() { return formedPartSnapshotKnown; }
+    private MachineDefinition inputDefinition;
+    private MachinePattern inputPattern;
+    private final com.reborn.modularmachinery.script.MachineScriptState scriptState = new com.reborn.modularmachinery.script.MachineScriptState();
+    public com.reborn.modularmachinery.script.MachineScriptState scriptState() { return scriptState; }
+    public ResourceLocation scriptActiveRecipeId() { return activeRecipeId; }
+    public void setScriptProgress(int ticks) { progress = Math.max(0, Math.min(maxProgress, ticks)); setChanged(); }
+    public RecipeModifiers scriptBaseModifiers() { return modifiers.andThen(scriptState.modifiers()); }
+    public long scriptTicksExisted() { return ticksExisted; }
+    public List<BlockPos> scriptPatternPositions() { return formedPartOffsets.stream().map(worldPosition::offset).toList(); }
+    public void syncScriptState() {
+        setChanged();
+        if (level != null && !level.isClientSide) level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), Block.UPDATE_CLIENTS);
+    }
 
     /** The ceiling the last recipe search computed, i.e. what the screen's "max parallelism" line shows. */
     private int parallelCeiling = 1;
@@ -600,6 +621,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
             boolean wasFormed = be.formed;
             ResourceLocation previousMachine = be.machineId;
+            java.util.Set<BlockPos> previousParts = be.formedPartOffsets;
             be.formed = match != null;
             be.machineId = match == null ? null : match.machine().id();
             be.rotationSteps = match == null ? 0 : match.rotationSteps();
@@ -608,6 +630,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             MachinePattern effectivePattern = match == null ? null : match.pattern();
             be.formedPartOffsets = effectivePattern == null ? java.util.Set.of()
                     : java.util.Set.copyOf(effectivePattern.positions().keySet());
+            be.formedPartSnapshotKnown = true;
             if (match == null) {
                 // The original incremented structureCheckCounter and cleared the recipe retry counter when a
                 // check failed (TileMultiblockMachineController.java:414 and :409-411, through resetMachine).
@@ -668,7 +691,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 // definition to another while staying formed only gets the update.
                 be.postStructureEvents(!wasFormed);
             }
-            if (wasFormed != be.formed || !java.util.Objects.equals(previousMachine, be.machineId)) {
+            if (wasFormed != be.formed || !java.util.Objects.equals(previousMachine, be.machineId)
+                    || !previousParts.equals(be.formedPartOffsets)) {
                 // The screen reads the machine name from the block entity, so the client needs the new tag.
                 be.setChanged();
                 level.sendBlockUpdated(pos, state, state, Block.UPDATE_ALL);
@@ -777,9 +801,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
         RecipeModifiers effective;
         if (be.activeRecipeId == null) {
+            recipe.setExecutionTick(0);
             // B9：催化剂只在**这次开工确实带着**时并入，且一旦并入就冻结到合成结束。不能每 tick 按当前
             // 库存重算——催化剂在 start 时已被消耗，重算会让 modifier 中途消失。
-            MachineRecipe.StartPlan prepared = recipe.prepareStart(scope, be.modifiers);
+            MachineRecipe.StartPlan prepared = recipe.prepareStart(scope, be.scriptBaseModifiers());
             effective = prepared.modifiers();
             recipe.applyDurationMultiplier(effective);
             be.maxProgress = recipe.duration(effective);
@@ -791,7 +816,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 parallelism = 1;
             }
             recipe.setParallelism(parallelism);
-            prepared = recipe.prepareStart(scope, be.modifiers);
+            prepared = recipe.prepareStart(scope, be.scriptBaseModifiers());
             effective = prepared.modifiers();
             // C2: the original's RecipeCheckEvent, START half, before canStart/canTick. A listener may lower
             // the parallelism for this start; the event resolves through min(computed, requested) with a floor
@@ -808,11 +833,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             if (requested != parallelism) {
                 parallelism = requested;
                 recipe.setParallelism(parallelism);
-                prepared = recipe.prepareStart(scope, be.modifiers);
+                prepared = recipe.prepareStart(scope, be.scriptBaseModifiers());
                 effective = prepared.modifiers();
             }
             recipe.applyDurationMultiplier(effective);
             be.maxProgress = recipe.duration(effective);
+            prepared = recipe.prepareStart(scope, be.scriptBaseModifiers());
+            effective = prepared.modifiers();
             if (!recipe.canStart(scope, prepared) || !recipe.canTick(scope, effective)) {
                 // M6d-b: say *which* start-phase requirement refused, so an interface_number_input mismatch is
                 // reported as the original's own message rather than as a bare "idle".
@@ -835,11 +862,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             if (adjusted != parallelism) {
                 parallelism = adjusted;
                 recipe.setParallelism(parallelism);
-                prepared = recipe.prepareStart(scope, be.modifiers);
+                prepared = recipe.prepareStart(scope, be.scriptBaseModifiers());
                 effective = prepared.modifiers();
                 recipe.applyDurationMultiplier(effective);
                 be.maxProgress = recipe.duration(effective);
             }
+            prepared = recipe.prepareStart(scope, be.scriptBaseModifiers());
+            effective = prepared.modifiers();
+            recipe.applyDurationMultiplier(effective);
+            be.maxProgress = recipe.duration(effective);
             if (!recipe.start(scope, level.random, prepared)) {
                 be.recordStartFailure(recipe, scope);
                 be.status = ControllerStatus.IDLE;
@@ -849,23 +880,24 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // C2: posted only once start() really succeeded. The original posted its start event before calling
             // start(), but its start could not fail; here a refused one-shot requirement means no craft began,
             // and announcing one would be false. The event is read-only either way.
-            be.postRecipeStart(recipe, parallelism);
             be.clearStartFailure();
             be.activeCraftModifiers = effective;
+            be.activeScriptModifiers = be.scriptState.modifiers();
             be.activeRecipeId = recipe.getId();
             be.activeParallelism = parallelism;
             be.activeDuration = be.maxProgress;
             be.activeGroupId = startGroup.groupId();
+            be.postRecipeStart(recipe, parallelism);
             be.setChanged();
             // A12: the original's enable-full-data-sync, on the start half (TileMachineController.java:265-275).
             be.syncFullDataIfEnabled();
             // B8: startCommands run once the craft is really armed and its state is complete.
             be.runRecipeCommands(recipe, RecipeCommands.Phase.START, 0);
         } else {
-            effective = be.activeCraftModifiers;
+            effective = be.activeCraftModifiers == null ? null : be.activeCraftModifiers.without(be.activeScriptModifiers).andThen(be.scriptState.modifiers());
             if (effective == null) {
                 // A craft loaded from before this field existed (or from disk): re-derive once and freeze it.
-                effective = be.modifiers.andThen(recipe.catalystModifiers(scope));
+                effective = be.scriptBaseModifiers().andThen(recipe.catalystModifiers(scope));
                 be.activeCraftModifiers = effective;
             }
             recipe.applyDurationMultiplier(effective);
@@ -879,6 +911,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // here means nothing is drawn and the craft stays armed; the status stays CRAFTING because the recipe is
         // still selected and will be tried again next tick.
         RecipeTickEvent startTick = be.postRecipeTick(Phase.START, recipe);
+        recipe.setExecutionTick(be.progress);
         if (startTick.isPreventProgressing()) {
             be.status = ControllerStatus.CRAFTING;
             be.recordTiming(tickStart, searchNanos);
@@ -913,7 +946,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // B8: processingCommands see the progress *before* this successful tick was counted, which is what
         // the original's ioTick/ActiveMachineRecipe ordering produced.
         be.runRecipeCommands(recipe, RecipeCommands.Phase.PROCESSING, be.progress);
-        be.progress = nextProgress;
+        be.progress = be.progress < Integer.MAX_VALUE ? be.progress + 1 : Integer.MAX_VALUE;
         be.status = ControllerStatus.CRAFTING;
 
         if (be.progress >= be.maxProgress) {
@@ -935,6 +968,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             // B8: finishCommands run after the outputs have been settled, even when one output's chance roll
             // failed to place anything -- the original's finishCrafting reached its command list regardless.
             be.runRecipeCommands(recipe, RecipeCommands.Phase.FINISH, 0);
+            be.scriptState.clearCraft();
             be.progress = 0;
             be.activeRecipeId = null;
             be.activeGroupId = null;
@@ -1061,9 +1095,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (!isServerSide()) {
             return Math.max(0, this.clientFactoryMaxThreads);
         }
-        return MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide)
-                .map(FactoryThreadModel::maxThreads)
-                .orElse(FactoryThreadModel.DEFAULT_MAX_THREADS);
+        return new FactoryHostImpl().maxThreads();
     }
 
     /** The parallelism ceiling the factory's threads settle against, the original's {@code getTotalParallelism()}. */
@@ -1115,8 +1147,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
         @Override
         public RecipeModifiers modifiers() {
-            return MachineControllerBlockEntity.this.modifiers;
+            return MachineControllerBlockEntity.this.scriptBaseModifiers();
         }
+        @Override public RecipeModifiers scriptModifiers() { return scriptState.modifiers(); }
 
         @Override
         public HatchCollection ports() {
@@ -1125,9 +1158,12 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
         @Override
         public List<FactoryThreadModel.CoreThreadSpec> coreThreads() {
-            return MachineRegistry.byId(MachineControllerBlockEntity.this.machineId)
+            var threads = new java.util.LinkedHashMap<String, FactoryThreadModel.CoreThreadSpec>();
+            MachineRegistry.byId(MachineControllerBlockEntity.this.machineId, level != null && level.isClientSide)
                     .map(MachineDefinition::coreThreads)
-                    .orElse(List.of());
+                    .orElse(List.of()).forEach(spec -> threads.put(spec.name(), spec));
+            scriptState.coreThreads().forEach(spec -> threads.put(spec.name(), spec));
+            return List.copyOf(threads.values());
         }
 
         @Override
@@ -1149,13 +1185,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
         @Override
         public int maxThreads() {
-            return MachineRegistry.byId(MachineControllerBlockEntity.this.machineId)
+            return (int) Math.min(Integer.MAX_VALUE, (long) MachineRegistry.byId(MachineControllerBlockEntity.this.machineId)
                     .map(FactoryThreadModel::maxThreads)
                     .orElse(FactoryThreadModel.DEFAULT_MAX_THREADS)
                     // The original added its extra count here, not inside the machine definition: the definition's
                     // `max-threads` is what the pack author declared, and the extra count is what a controller
                     // added at runtime (`TileFactoryController.java:455-457`).
-                    + MachineControllerBlockEntity.this.extraThreadCount;
+                    + MachineControllerBlockEntity.this.extraThreadCount);
         }
 
         @Override
@@ -1281,9 +1317,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     private RecipeModifiers modifiersFor(MachineRecipe recipe) {
         if (this.activeCraftModifiers != null && this.activeRecipeId != null
                 && this.activeRecipeId.equals(recipe.getId())) {
-            return this.activeCraftModifiers;
+            return this.activeCraftModifiers.without(activeScriptModifiers).andThen(scriptState.modifiers());
         }
-        return this.modifiers;
+        return this.scriptBaseModifiers();
     }
 
     /**
@@ -1302,7 +1338,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         recipe.setParallelism(1);
         for (int groupId : this.hatches.groupIds()) {
             HatchCollection scope = this.hatches.withGroup(groupId);
-            MachineRecipe.StartPlan plan = recipe.prepareStart(scope, this.modifiers);
+            MachineRecipe.StartPlan plan = recipe.prepareStart(scope, this.scriptBaseModifiers());
             if (recipe.canStart(scope, plan)) {
                 return new GroupScope(groupId, scope, plan.modifiers());
             }
@@ -1569,15 +1605,21 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
 
     private MachineRecipe executionCopyOf(MachineRecipe source) {
+        if (executionRecipe != null && activeRecipeId != null && activeRecipeId.equals(source.getId())
+                && activeRecipeId.equals(executionRecipe.getId())) return executionRecipe;
         if (executionRecipeSource != source || executionRecipe == null) {
+            CompoundTag state = executionRecipe != null && activeRecipeId != null && activeRecipeId.equals(source.getId())
+                    ? executionRecipe.saveExecutionState() : pendingExecutionState;
             executionRecipeSource = source;
             executionRecipe = source.executionCopy();
+            if (state != null && activeRecipeId != null && activeRecipeId.equals(source.getId())) executionRecipe.loadExecutionState(state);
+            pendingExecutionState = null;
         }
         return executionRecipe;
     }
 
     /**
-     * E9 能量行（0.105.0）：当前合成每 tick 的能量快照，{@code [消耗, 生成]}（FE/t）。
+     * E9 能量行：当前合成的需求速率快照，{@code [消耗, 生成]}（FE/t），不是实际流量计。
      *
      * <p>旧版 {@code MMInfoProvider}（TOP）的能量行：普通机器取当前线程 context 的
      * {@code RequirementEnergy}（INPUT/OUTPUT 各取第一个），数值 = 需求值 × modifiers ×
@@ -1585,12 +1627,17 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      * {@code EnergyRequirement.perTickDraw} 里——它就是逐 tick 结算用的算式，这里只做聚合展示，
      * 不另立口径。合成没在跑（或配方/修饰符丢失）时两个数都是 0，Jade 侧就不显示能量行。
      *
-     * <p><b>范围</b>：单配方引擎。工厂引擎的多线程聚合（旧版把 core 与普通线程逐条加总）是
-     * 另一个口径，留 E9 后续片——这里对工厂控制器返回 0，即不显示，而不是显示一个错的数。
+     * <p>0.115.0：工厂对非空闲核心／普通线程分别按各自并行、催化剂和脚本修改器求和；
+     * 暂时阻塞但仍持有配方的线程仍计入需求。未成型或红石暂停时不显示工厂速率。
+     * 普通机器继续使用当前合成的修改器；读取不更改配方执行状态，聚合溢出时饱和为 long 上限。
      */
     public long[] energySnapshot(@Nullable Level level) {
-        if (level == null || this.status != ControllerStatus.CRAFTING
-                || this.activeRecipeId == null || this.factoryEnabled) {
+        if (level == null) return new long[]{0L, 0L};
+        if (this.factoryEnabled) {
+            return this.formed && !this.redstoneStopped ? this.factoryEngine.energyUsage().toArray()
+                    : new long[]{0L, 0L};
+        }
+        if (this.status != ControllerStatus.CRAFTING || this.activeRecipeId == null) {
             return new long[]{0L, 0L};
         }
         MachineRecipe recipe = resolveRecipe(level);
@@ -1599,25 +1646,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         }
         RecipeModifiers modifiers = this.activeCraftModifiers == null
                 ? RecipeModifiers.EMPTY : this.activeCraftModifiers;
-        recipe.setParallelism(this.activeParallelism);
-        recipe.applyDurationMultiplier(modifiers);
-        long input = 0L;
-        long output = 0L;
-        for (com.reborn.modularmachinery.recipe.MachineRequirement requirement : recipe.requirements()) {
-            if (!(requirement instanceof com.reborn.modularmachinery.recipe.EnergyRequirement energy)) {
-                continue;
-            }
-            long draw = energy.perTickDraw(modifiers);
-            if (draw <= 0L) {
-                continue;
-            }
-            if (energy.ioType() == com.reborn.modularmachinery.recipe.IOType.INPUT) {
-                input += draw;
-            } else {
-                output += draw;
-            }
-        }
-        return new long[]{input, output};
+        return EnergyUsage.of(recipe, modifiers, this.activeParallelism).toArray();
     }
 
     /**
@@ -1693,11 +1722,16 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      */
     private HatchCollection collectHatches(Level level, BlockPos pos, @Nullable MachineDefinition machine,
                                            @Nullable MachinePattern effectivePattern) {
+        inputDefinition = machine; inputPattern = effectivePattern;
         if (machine == null || effectivePattern == null) {
             return HatchCollection.EMPTY;
         }
         HatchCollection.Builder builder = HatchCollection.builder();
         for (BlockPos relative : effectivePattern.positions().keySet()) {
+            if (!level.hasChunkAt(pos.offset(relative))) continue;
+            if (level.getBlockEntity(pos.offset(relative)) instanceof com.reborn.modularmachinery.magic.MagicHatchBlockEntity magic) {
+                builder.addMagicPort(magic.backend(), effectivePattern.tag(relative));
+            }
             if (level.getBlockEntity(pos.offset(relative)) instanceof MachineHatchBlockEntity hatch) {
                 // 把结构位置上的 `selector-tag` 一起交给端口：配方需求靠它筛出「属于那个部件」的仓口。
                 // 绝大多数结构没有标签，此时 tag() 答 null，端口就按「无标签」入桶。
@@ -1717,6 +1751,24 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                 builder.gasPorts(hatch, hatch.kind().isInput(), effectivePattern.tag(relative),
                         hatch.kind().canGroupInput() ? hatch.effectiveGroup() : -1);
             }
+        }
+        java.util.Set<Integer> usedGroups = new java.util.HashSet<>();
+        for (BlockPos relative : effectivePattern.positions().keySet()) {
+            if (!level.hasChunkAt(pos.offset(relative))) continue;
+            var entity = level.getBlockEntity(pos.offset(relative));
+            if (entity instanceof MachineHatchBlockEntity hatch && hatch.effectiveGroup() >= 0) usedGroups.add(hatch.effectiveGroup());
+            if (entity instanceof com.reborn.modularmachinery.machine.MachineInputProvider provider && provider.declaredInputGroup() >= 0) usedGroups.add(provider.declaredInputGroup());
+        }
+        java.util.IdentityHashMap<Object,Integer> allocated = new java.util.IdentityHashMap<>();
+        com.reborn.modularmachinery.machine.MachineInputProvider.GroupAllocator groups = (identity, preferred) -> {
+            Integer existing = allocated.get(identity); if (existing != null) return existing;
+            int value = preferred > 65535 && !usedGroups.contains(preferred) ? preferred : 65536;
+            while (usedGroups.contains(value)) value++;
+            usedGroups.add(value); allocated.put(identity, value); return value;
+        };
+        for (BlockPos relative : effectivePattern.positions().keySet()) {
+            if (level.hasChunkAt(pos.offset(relative)) && level.getBlockEntity(pos.offset(relative)) instanceof com.reborn.modularmachinery.machine.MachineInputProvider provider)
+                provider.appendInputs(builder, effectivePattern.tag(relative), groups);
         }
         // M6d-b: the smart-interface values travel with the ports (see HatchCollection's class comment). The
         // source is this block entity, i.e. the same object the recipe lifecycle already reaches through the
@@ -1977,6 +2029,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
      */
     @Nullable
     public String failureCauseText() {
+        if (!scriptState.status().isEmpty()) return scriptState.status();
         return isServerSide() ? this.startFailureCause : this.clientFailureCause;
     }
 
@@ -2060,6 +2113,18 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
     /** The ports gathered from the formed structure. */
     public HatchCollection hatches() { return this.hatches; }
+    public void refreshInputPorts() {
+        if (formed && level != null && !level.isClientSide && inputPattern != null)
+            hatches = collectHatches(level, worldPosition, inputDefinition, inputPattern);
+    }
+    public boolean usesInputProvider(Object identity) {
+        if (!formed || level == null) return false;
+        for (BlockPos relative : formedPartOffsets) {
+            BlockPos at = worldPosition.offset(relative);
+            if (level.hasChunkAt(at) && level.getBlockEntity(at) instanceof com.reborn.modularmachinery.machine.MachineInputProvider source && source.inputIdentity() == identity) return true;
+        }
+        return false;
+    }
 
     /** 真实匹配结构中的成员关系，供应器不能以邻近搜索猜测归属。 */
     public boolean containsStructurePart(BlockPos part) {
@@ -2182,7 +2247,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
                     .filter(recipe -> recipe instanceof MachineRecipe)
                     .map(recipe -> (MachineRecipe) recipe)
                     .orElse(null);
-        }, MachineRegistry.byId(this.machineId, this.level != null && this.level.isClientSide).map(MachineDefinition::coreThreads).orElse(List.of()));
+        }, new FactoryHostImpl().coreThreads());
     }
 
     /** 动态结构定格值的 NBT 键，与旧版同义（它把一组 {@code DynamicPattern.Status} 存进一个 tag）。 */
@@ -2310,7 +2375,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         if (pattern != null && color != null) {
             for (BlockPos relative : pattern.positions().keySet()) {
                 BlockEntity part = this.level == null ? null : this.level.getBlockEntity(this.worldPosition.offset(relative));
-                if (part instanceof MachineHatchBlockEntity || part instanceof MachineCasingBlockEntity) {
+                if (part instanceof MachineHatchBlockEntity || part instanceof MachineCasingBlockEntity || part instanceof com.reborn.modularmachinery.magic.MagicHatchBlockEntity) {
                     nextOffsets.add(new BlockPos(relative.getX(), relative.getY(), relative.getZ()));
                 }
             }
@@ -2340,7 +2405,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         // 而 pattern 恰好就是「这台机器占哪些格子」的权威答案。
         for (BlockPos relative : pattern.positions().keySet()) {
             BlockEntity part = this.level.getBlockEntity(this.worldPosition.offset(relative));
-            if (part instanceof MachineHatchBlockEntity hatch) {
+            if (part instanceof com.reborn.modularmachinery.magic.MagicHatchBlockEntity magic) {
+                magic.setMachineColor(color);
+            } else if (part instanceof MachineHatchBlockEntity hatch) {
                 hatch.setMachineColor(color);
             } else if (part instanceof MachineCasingBlockEntity casing) {
                 casing.setMachineColor(color);
@@ -2377,7 +2444,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
             return;
         }
         BlockEntity part = this.level.getBlockEntity(this.worldPosition.offset(relative));
-        if (part instanceof MachineHatchBlockEntity hatch
+        if (part instanceof com.reborn.modularmachinery.magic.MagicHatchBlockEntity magic && java.util.Objects.equals(magic.machineColor(),expectedColor)) {
+            magic.setMachineColor(null);
+        } else if (part instanceof MachineHatchBlockEntity hatch
                 && java.util.Objects.equals(hatch.machineColor(), expectedColor)) {
             hatch.setMachineColor(null);
         } else if (part instanceof MachineCasingBlockEntity casing
@@ -2435,15 +2504,21 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     @Override
     protected void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
+        tag.put("scriptState", scriptState.save());
+        if (executionRecipe != null && activeRecipeId != null) tag.put("scriptExecution", executionRecipe.saveExecutionState());
+        else if (pendingExecutionState != null) tag.put("scriptExecution", pendingExecutionState.copy());
         tag.put("items", items.serializeNBT());
         tag.putInt("progress", progress);
         tag.putInt("maxProgress", maxProgress);
         tag.putBoolean("formed", formed);
+        if (formedPartSnapshotKnown) tag.putLongArray("formedParts", formedPartOffsets.stream()
+                .mapToLong(BlockPos::asLong).toArray());
         tag.putBoolean("redstoneStopped", redstoneStopped);
         tag.putInt("status", status.ordinal());
         tag.putInt("activeParallelism", activeParallelism);
         tag.putInt("activeDuration", activeDuration);
         if (activeCraftModifiers != null) tag.put("activeModifiers", activeCraftModifiers.save());
+        tag.put("activeScriptModifiers", activeScriptModifiers.save());
         // A2：正在跑的那组。不存的话重进世界会退回「全部端口」，等于中途换料。
         if (activeGroupId != null) {
             tag.putInt("activeGroupId", activeGroupId);
@@ -2486,16 +2561,23 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     @Override
     public void load(CompoundTag tag) {
         super.load(tag);
+        scriptState.load(tag.getCompound("scriptState"));
+        pendingExecutionState = tag.contains("scriptExecution") ? tag.getCompound("scriptExecution").copy() : null;
         items.deserializeNBT(tag.getCompound("items"));
         progress = tag.getInt("progress");
         maxProgress = Math.max(1, tag.getInt("maxProgress"));
         formed = tag.getBoolean("formed");
+        formedPartSnapshotKnown = tag.contains("formedParts", Tag.TAG_LONG_ARRAY);
+        java.util.Set<BlockPos> loadedParts = new java.util.HashSet<>();
+        if (formedPartSnapshotKnown) for (long packed : tag.getLongArray("formedParts")) loadedParts.add(BlockPos.of(packed));
+        formedPartOffsets = java.util.Set.copyOf(loadedParts);
         redstoneStopped = tag.getBoolean("redstoneStopped");
         status = ControllerStatus.byOrdinal(tag.getInt("status"));
         activeParallelism = Math.max(1, tag.getInt("activeParallelism"));
         activeDuration = Math.max(1, tag.getInt("activeDuration"));
         activeCraftModifiers = tag.contains("activeModifiers")
                 ? RecipeModifiers.load(tag.getList("activeModifiers", Tag.TAG_COMPOUND)) : null;
+        activeScriptModifiers = RecipeModifiers.load(tag.getList("activeScriptModifiers", Tag.TAG_COMPOUND));
         executionRecipe = null;
         executionRecipeSource = null;
         // A2：缺这个键的存档（0.63.9 及更早）代表「在途合成没有组」——保持 null，tick 里按全部端口继续。

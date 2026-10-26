@@ -36,5 +36,6 @@ public final class ModMenus {
      * buffer constructor resolves the block entity from it.
      */
     public static final RegistryObject<MenuType<FactoryControllerMenu>> FACTORY_CONTROLLER = MENUS.register("factory_controller", () -> IForgeMenuType.create((windowId, inv, data) -> new FactoryControllerMenu(windowId, inv, data)));
+    public static final RegistryObject<MenuType<com.reborn.modularmachinery.magic.MagicHatchMenu>> MAGIC_HATCH = MENUS.register("magic_hatch", () -> IForgeMenuType.create(com.reborn.modularmachinery.magic.MagicHatchMenu::new));
     private ModMenus() {}
 }

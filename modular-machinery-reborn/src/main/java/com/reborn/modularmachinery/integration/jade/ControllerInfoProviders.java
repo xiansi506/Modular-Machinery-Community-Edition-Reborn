@@ -27,8 +27,8 @@ import java.util.UUID;
  *
  * <p><b>能量行（0.105.0 补齐）</b>：旧版从激活配方的需求里聚合能耗——本版同一条算式住在
  * {@code EnergyRequirement.perTickDraw}（逐 tick 结算本身），BE 的 {@code energySnapshot}
- * 聚合 INPUT/OUTPUT 两路，服务端快照 → NBT → tooltip 两行（消耗/生成）。工厂引擎的多线程
- * 聚合（旧版逐线程加总）留 E9 后续片；工厂块不写能量键，即不显示，而不是显示错的数。
+ * 聚合 INPUT/OUTPUT 两路，服务端快照 → NBT → tooltip 两行（消耗/生成）。0.115.0 同时聚合工厂
+ * 的核心与普通线程；显示当前配方需求速率，临时阻塞但保留配方的线程也计入，不是实际流量计。
  *
  * <p>API 签名（jade-11.13.3，javap 已核对）：\`IServerDataProvider#appendServerData(CompoundTag, BlockAccessor)\`
  * ——不像预想的那样按 player/level/BE 分参，全部从 {@link BlockAccessor} 取；两个 provider 都必须
@@ -96,7 +96,7 @@ public final class ControllerInfoProviders {
 
             // E9 能量行（0.105.0）：当前合成每 tick 的 [消耗, 生成]（FE/t）。快照在 BE 的
             // energySnapshot——与逐 tick 结算同一条算式（EnergyRequirement.perTickDraw），
-            // 展示与扣账不会各算各的。工厂引擎多线程聚合留后续片，工厂块这里不写键。
+            // 工厂使用每个核心／普通线程自己的并行及有效修改器；这表示需求速率，不是实际流量。
             long[] energy = controller.energySnapshot(level);
             if (energy[0] > 0L) {
                 tag.putLong("energyIn", energy[0]);

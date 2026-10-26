@@ -82,6 +82,23 @@ public final class FactoryThread {
     private Set<ResourceLocation> recipeSet = Set.of();
 
     private int idleTime;
+    private final com.reborn.modularmachinery.script.MachineScriptState scriptState = new com.reborn.modularmachinery.script.MachineScriptState();
+    public com.reborn.modularmachinery.script.MachineScriptState scriptState() { return scriptState; }
+    public void setScriptProgress(int ticks) {
+        if (active != null) active.setProgress(Math.min(active.duration(), Math.max(0, ticks)));
+    }
+    private boolean scriptRecipes;
+    public boolean hasScriptRecipes() { return scriptRecipes; }
+    public void setScriptRecipes(List<ResourceLocation> recipes) { scriptRecipes = true; setRecipeSet(Set.copyOf(recipes)); }
+    public void loadScriptState(CompoundTag tag) {
+        scriptState.load(tag.getCompound("scriptState"));
+        scriptRecipes = tag.getBoolean("hasScriptRecipes");
+        if (scriptRecipes) {
+            var ids = tag.getList("scriptRecipes", net.minecraft.nbt.Tag.TAG_STRING); var recipes = new java.util.ArrayList<ResourceLocation>();
+            for (int i = 0; i < ids.size(); i++) { var id = ResourceLocation.tryParse(ids.getString(i)); if (id != null) recipes.add(id); }
+            setRecipeSet(Set.copyOf(recipes));
+        }
+    }
 
     @Nullable
     private FactoryEngine.ActiveCraft active;
@@ -90,7 +107,7 @@ public final class FactoryThread {
     FactoryThread(FactoryThreadModel.CoreThreadSpec spec, int ordinal) {
         this.coreThread = true;
         this.threadName = spec.name();
-        this.ordinal = ordinal;
+        this.ordinal = -2 - ordinal;
         this.recipeSet = Set.copyOf(spec.recipes());
     }
 
@@ -254,6 +271,7 @@ public final class FactoryThread {
     void clear() {
         this.active = null;
         this.idleTime = 0;
+        scriptState.clearCraft();
     }
 
     /**
@@ -261,7 +279,7 @@ public final class FactoryThread {
      * {@code thread.isIdle() && thread.idleTime >= IDLE_TIME_OUT} ({@code TileFactoryController.java:518}).
      */
     boolean expired() {
-        return this.active == null && this.idleTime >= FactoryThreadModel.IDLE_TIME_OUT;
+        return this.active == null && this.idleTime >= FactoryThreadModel.IDLE_TIME_OUT && !scriptRecipes && scriptState.isEmpty();
     }
 
     void age() {
@@ -279,6 +297,9 @@ public final class FactoryThread {
      */
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
+        tag.put("scriptState", scriptState.save());
+        tag.putBoolean("hasScriptRecipes", scriptRecipes);
+        if (scriptRecipes) { var ids = new net.minecraft.nbt.ListTag(); recipeSet.forEach(id -> ids.add(net.minecraft.nbt.StringTag.valueOf(id.toString()))); tag.put("scriptRecipes", ids); }
         tag.putString(TAG_STATUS, this.active == null ? "idle" : "crafting");
         if (this.coreThread && this.threadName != null) {
             tag.putString(TAG_CORE_THREAD_NAME, this.threadName);
@@ -290,6 +311,8 @@ public final class FactoryThread {
             tag.putInt("parallelism", this.active.parallelism());
             tag.putInt("duration", this.active.duration());
             tag.put("modifiers", this.active.modifiers().save());
+            tag.put("scriptExecution", this.active.recipe().saveExecutionState());
+            tag.put("scriptModifiers", this.active.scriptModifiers().save());
         }
         return tag;
     }

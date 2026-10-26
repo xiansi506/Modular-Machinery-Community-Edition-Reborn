@@ -49,7 +49,7 @@ public record GeoModelSpec(ResourceLocation model,
      * @throws JsonParseException 字段存在但内容不合法；消息里点名具体键，便于包作者定位
      */
     @Nullable
-    static GeoModelSpec parse(JsonObject root, String where) {
+    public static GeoModelSpec parse(JsonObject root, String where) {
         JsonElement element = root.get("geo-model");
         if (element == null || element.isJsonNull()) {
             return null;

@@ -14,6 +14,13 @@ import net.minecraftforge.items.IItemHandler;
 public final class PatternInputTransfer {
     private PatternInputTransfer() { }
 
+    @FunctionalInterface
+    public interface AdditionalInput {
+        boolean push(HatchCollection planned, appeng.api.stacks.AEKey key, long amount);
+    }
+    private static AdditionalInput additionalInput = (ports, key, amount) -> false;
+    public static void setAdditionalInput(AdditionalInput handler) { additionalInput = java.util.Objects.requireNonNull(handler); }
+
     public static boolean push(HatchCollection ports, KeyCounter[] holders) {
         ResourceTransaction transaction = new ResourceTransaction();
         HatchCollection planned = ports.transactionView(transaction);
@@ -37,8 +44,9 @@ public final class PatternInputTransfer {
                         remaining -= input.fill(new FluidStack(stack, remaining), IFluidHandler.FluidAction.EXECUTE);
                     }
                 } else {
-                    // 未支持的 key 必须拒绝整批，不能报告成功并丢掉它。
-                    return false;
+                    // The optional chemical bridge receives the SAME transaction as items and fluids.
+                    if (!additionalInput.push(planned, entry.getKey(), amount)) return false;
+                    remaining = 0;
                 }
                 if (remaining != 0) return false;
             }
