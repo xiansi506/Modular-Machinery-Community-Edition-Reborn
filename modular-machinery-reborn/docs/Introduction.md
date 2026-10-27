@@ -17,7 +17,7 @@ Machine definitions load on the server and synchronize to clients. Most data cha
 
 ## Current status
 
-This introduction covers **0.118.0, October 27, 2026**. Botania mana, Nature’s Aura, and Blood Magic 3 LP and five Demon Will types are implemented through eight optional hatches, transactional recipes, KubeJS methods, menus and JEI descriptions. Offline checks and the production build passed; **in-game acceptance, deployment and upload are pending**. Other magic integrations remain deferred. See [Magic resources](Magic-resources.md).
+This introduction covers **0.118.3, October 27, 2026**. It fixes material slots reverting to the focused controller after JEI ingredient cycling. Display updates now restore the current materials and verify the actual slot stacks. Six new native JEI lifecycle regressions and 2726 checks in this patch passed, along with the production build. Earlier fixes remain included; repaired gameplay acceptance is pending. See the [bilingual fix notes](修复记录-0.118.3.md).
 
 This is a reimplementation, so existing scripts and pack content need migration. The old CraftTweaker / ZenScript API does not run directly, and the original third-party recipe adapters are not all available. GT / IC2 energy integration remains unavailable. Preview NBT now drives block entity rendering in the isolated preview scene; third-party visual behavior still needs in-game verification. Client GUI information, model selection and animation hooks are now available; their visual behavior still needs in-game verification. ME gas features require AE2, Mekanism and Applied Mekanistics 1.4.3; clients and servers must update together to protocol **7**. See [Known limitations](已知限制.md) (Chinese) for the current scope.
 
@@ -30,3 +30,5 @@ See [Factory energy information](工厂能量信息.md) (Chinese) for display an
 Follow the [Usage guide](使用说明.md) (Chinese) to build a minimal working machine, then use the [Recipe guide](KJS-配方指南.md) (Chinese) to add processing recipes. The [Advanced scripting guide](高级脚本指南.md) (Chinese) covers runtime control and scoped callbacks. Examples use Reborn's current file layout, fields and scripting interfaces.
 
 [中文简介](简介.md) · [Documentation index](README.md) · [Changelog](../迁移日志.md)
+
+For file placement and reload behavior, see [Installation and reload](安装与重载.md). The [advanced structure example](进阶结构示例.md) and [ME automation guide](ME自动化指南.md) provide complete follow-up exercises (Chinese).

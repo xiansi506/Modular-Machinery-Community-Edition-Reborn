@@ -47,7 +47,11 @@ public final class StructurePreviews {
 
     /** {@link #of(MachineDefinition)} for a chosen dynamic size — what the panel rebuilds when the player picks one. */
     public static StructurePreview of(MachineDefinition machine, int dynamicPatternSize) {
-        return StructurePreview.of(previewRenderPattern(machine, dynamicPatternSize), controllerState(machine));
+        return of(machine, dynamicPatternSize, controllerState(machine));
+    }
+
+    static StructurePreview of(MachineDefinition machine, int dynamicPatternSize, BlockState controller) {
+        return StructurePreview.of(previewRenderPattern(machine, dynamicPatternSize), controller);
     }
 
     /** 预览渲染结构：本体、动态段和单块/多块 modifier 的候选方块。 */
@@ -157,6 +161,28 @@ public final class StructurePreviews {
         return components(machine, initialDynamicPatternSize(machine));
     }
 
+    /** Search index includes alternatives and zero-length dynamic sections, without expanding maxSize. */
+    public static List<ItemStack> indexedComponents(MachineDefinition machine) {
+        return indexedComponents(machine, controllerState(machine));
+    }
+
+    static List<ItemStack> indexedComponents(MachineDefinition machine, BlockState controller) {
+        Map<Item,ItemStack> items = new LinkedHashMap<>();
+        addComponent(items,controller);
+        java.util.function.Consumer<MachinePattern> addPattern = pattern -> {
+            if (pattern != null) for (var accepted : pattern.positions().values()) for (BlockMatcher matcher : accepted)
+                addComponent(items,matcher.representativeState());
+        };
+        addPattern.accept(machine.pattern());
+        for (DynamicPattern dynamic : machine.dynamicPatterns()) {
+            addPattern.accept(dynamic.part()); addPattern.accept(dynamic.endPart());
+        }
+        for (MachineModifier modifier : machine.modifiers()) for (BlockMatcher matcher : modifier.accepted())
+            addComponent(items,matcher.representativeState());
+        for (MachineMultiBlockModifier modifier : machine.multiBlockModifiers()) addPattern.accept(modifier.pattern());
+        return items.values().stream().map(stack->stack.copyWithCount(1)).toList();
+    }
+
     /**
      * {@link #components(MachineDefinition)} for a chosen dynamic size.
      *
@@ -164,8 +190,12 @@ public final class StructurePreviews {
      * 所以清单必须与预览画出来的结构一致。旧版的 {@code IngredientList} 也是从它当时渲染的那个结构取的。
      */
     public static List<ItemStack> components(MachineDefinition machine, int dynamicPatternSize) {
+        return components(machine, dynamicPatternSize, controllerState(machine));
+    }
+
+    static List<ItemStack> components(MachineDefinition machine, int dynamicPatternSize, BlockState controller) {
         Map<Item, ItemStack> stacks = new LinkedHashMap<>();
-        addComponent(stacks, controllerState(machine));
+        addComponent(stacks, controller);
         for (List<BlockMatcher> accepted : previewPattern(machine, dynamicPatternSize).positions().values()) {
             if (!accepted.isEmpty()) {
                 addComponent(stacks, accepted.get(0).representativeState());

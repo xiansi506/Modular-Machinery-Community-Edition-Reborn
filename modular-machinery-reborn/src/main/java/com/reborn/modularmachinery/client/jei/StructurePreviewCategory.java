@@ -12,6 +12,7 @@ import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
+import mezz.jei.api.gui.ingredient.IRecipeSlotDrawable;
 import mezz.jei.api.gui.inputs.IJeiInputHandler;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
 import mezz.jei.api.gui.widgets.IRecipeExtrasBuilder;
@@ -72,6 +73,7 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
     private final IDrawable icon;
     private final IDrawable slotBackground;
     private final Map<MachineDefinition, PreviewPanel> panels = new WeakHashMap<>();
+    private final PreviewIngredientSlots.Layouts ingredientSlots = new PreviewIngredientSlots.Layouts();
 
     public StructurePreviewCategory(IGuiHelper helper) {
         this.background = helper.createDrawable(PreviewAtlas.TEXTURE, PreviewAtlas.PANEL.u(), PreviewAtlas.PANEL.v(),
@@ -94,7 +96,7 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
 
     @Override
     public void setRecipe(IRecipeLayoutBuilder builder, MachineDefinition machine, IFocusGroup focuses) {
-        List<ItemStack> components = StructurePreviews.components(machine);
+        List<ItemStack> components = StructurePreviews.indexedComponents(machine);
         if (components.isEmpty()) {
             return;
         }
@@ -106,19 +108,31 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
         // sprite holds the item inset by one pixel, so the slot is registered at the item position and the
         // sprite hung one pixel up and left of it — the same -1/-1 JEI's own plugins use with an 18px slot
         // drawable. The result is pixel-identical to what StructurePreviews.drawComponents paints on the screen.
-        int shown = StructurePreviews.visibleComponentCount(components.size());
-        for (int i = 0; i < shown; i++) {
+        for (int i = 0; i < PreviewLayout.COMPONENT_CAPACITY; i++) {
             builder.addSlot(RecipeIngredientRole.INPUT,
-                            PreviewLayout.componentItemX(i), PreviewLayout.componentItemY(i))
+                            HIDDEN_SLOT, HIDDEN_SLOT)
+                    .setSlotName(PreviewIngredientSlots.COMPONENT + i)
                     .setBackground(this.slotBackground,
                             -PreviewLayout.COMPONENT_ITEM_INSET, -PreviewLayout.COMPONENT_ITEM_INSET)
-                    .addItemStack(components.get(i));
+                    .addItemStacks(components);
         }
+        for (int i = 0; i < 7; i++) builder.addSlot(RecipeIngredientRole.INPUT, HIDDEN_SLOT, HIDDEN_SLOT)
+                .setSlotName(PreviewIngredientSlots.SELECTED + i).addItemStacks(components);
+    }
+
+    @Override
+    public void onDisplayedIngredientsUpdate(MachineDefinition machine, List<IRecipeSlotDrawable> slots,
+                                              IFocusGroup focuses) {
+        // Called at layout creation and after JEI clears overrides on each ingredient cycle.
+        // Restore immediately so hover/query events see the same materials as the next draw.
+        PreviewIngredientSlots bridge = this.ingredientSlots.get(panel(machine), slots);
+        if (bridge != null) bridge.sync();
     }
 
     @Override
     public void createRecipeExtras(IRecipeExtrasBuilder builder, MachineDefinition machine, IFocusGroup focuses) {
-        builder.addInputHandler(new PreviewInputHandler(panel(machine)));
+        PreviewIngredientSlots slots = this.ingredientSlots.get(panel(machine), builder.getRecipeSlots().getSlots());
+        builder.addInputHandler(new PreviewInputHandler(panel(machine), () -> { if (slots != null) slots.sync(); }));
     }
 
     @Override
@@ -129,6 +143,9 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
         // the same pair the input handler subtracts), so the origin is simply zero here. The ingredient grid is
         // drawn by JEI (real recipe slots), so the panel only paints everything else.
         panel(machine).render(graphics, 0, 0, mouseX, mouseY, false);
+        PreviewIngredientSlots bridge = this.ingredientSlots.get(panel(machine), slots.getSlotViews().stream()
+                .filter(IRecipeSlotDrawable.class::isInstance).map(IRecipeSlotDrawable.class::cast).toList());
+        if (bridge != null) bridge.sync();
     }
 
     /**
@@ -141,7 +158,8 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
     @Override
     public void getTooltip(ITooltipBuilder tooltip, MachineDefinition machine, IRecipeSlotsView slots,
                            double mouseX, double mouseY) {
-        tooltip.addAll(panel(machine).tooltipLines(mouseX, mouseY));
+        if (panel(machine).ingredientAt(mouseX, mouseY).isEmpty())
+            tooltip.addAll(panel(machine).tooltipLines(mouseX, mouseY));
     }
 
     private PreviewPanel panel(MachineDefinition machine) {
@@ -201,9 +219,15 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
                 new ScreenRectangle(0, 0, PreviewLayout.PANEL_WIDTH, PreviewLayout.PANEL_HEIGHT);
 
         private final PreviewPanel panel;
+        private final Runnable sync;
 
         private PreviewInputHandler(PreviewPanel panel) {
+            this(panel, () -> {});
+        }
+
+        private PreviewInputHandler(PreviewPanel panel, Runnable sync) {
             this.panel = panel;
+            this.sync = sync;
         }
 
         @Override
@@ -213,6 +237,7 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
 
         @Override
         public boolean handleInput(double mouseX, double mouseY, IJeiUserInput input) {
+            if (input.isSimulate() && !this.panel.ingredientAt(mouseX, mouseY).isEmpty()) return false;
             if (input.getKey().getType() != InputConstants.Type.MOUSE) {
                 return false;
             }
@@ -243,6 +268,7 @@ public final class StructurePreviewCategory implements IRecipeCategory<MachineDe
                 return claim.claimed();
             }
             PreviewPanel.PointerClaim claim = this.panel.mouseReleased(mouseX, mouseY, button);
+            this.sync.run();
             logInput("execute", mouseX, mouseY, button, claim);
             return claim.claimed();
         }

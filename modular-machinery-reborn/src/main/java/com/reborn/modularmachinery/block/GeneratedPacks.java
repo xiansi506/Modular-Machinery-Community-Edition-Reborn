@@ -40,7 +40,8 @@ public final class GeneratedPacks {
         // "there is something to generate" is one question, not two.
         int declarations = ModBlocks.controllersNeedingGeneratedAssets().size()
                 + ModBlocks.MOC_CONTROLLERS.size();
-        if (declarations == 0 && (event.getPackType() != PackType.SERVER_DATA || com.reborn.modularmachinery.magic.MagicBlocks.blocks().length == 0)) {
+        boolean optionalLoot = ModBlocks.ME_PATTERN_PROVIDER_ITEM != null || com.reborn.modularmachinery.magic.MagicBlocks.blocks().length > 0;
+        if (declarations == 0 && (event.getPackType() != PackType.SERVER_DATA || !optionalLoot)) {
             return;
         }
 

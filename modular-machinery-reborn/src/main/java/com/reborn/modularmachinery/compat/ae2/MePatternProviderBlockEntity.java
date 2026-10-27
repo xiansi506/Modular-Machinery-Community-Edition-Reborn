@@ -56,8 +56,8 @@ public final class MePatternProviderBlockEntity extends BlockEntity
     }
     private boolean available(){return level!=null&&!level.isClientSide&&!isRemoved()&&level.hasChunkAt(worldPosition)&&level.getBlockEntity(worldPosition)==this;}
     @Override public void onLoad(){super.onLoad();if(level!=null&&!level.isClientSide){mainNode.create(level,worldPosition);ICraftingProvider.requestUpdate(mainNode);registerListeners();if(storage.locked())ACTIVE_LOCKS.add(this);refreshHosts();}}
-    @Override public void setRemoved(){ACTIVE_LOCKS.remove(this);mainNode.destroy();super.setRemoved();}
-    @Override public void onChunkUnloaded(){ACTIVE_LOCKS.remove(this);mainNode.destroy();super.onChunkUnloaded();}
+    @Override public void setRemoved(){ACTIVE_LOCKS.remove(this);mainNode.destroy();super.setRemoved();refreshHosts();}
+    @Override public void onChunkUnloaded(){ACTIVE_LOCKS.remove(this);mainNode.destroy();super.onChunkUnloaded();refreshHosts();}
     @Override public IGridNode getGridNode(Direction side){return mainNode.getNode();}
     @Override public IGridNode getActionableNode(){return mainNode.getNode();}
     @Override public AECableType getCableConnectionType(Direction side){return AECableType.SMART;}
@@ -109,7 +109,7 @@ public final class MePatternProviderBlockEntity extends BlockEntity
     @Override public void appendInputs(HatchCollection.Builder builder,String tag,GroupAllocator groups){storage.appendInputs(builder,tag,groups);}
     private void refreshHosts(){
         if(level==null||level.isClientSide)return;
-        for(var host:MachineControllerBlockEntity.loadedControllers())if(host.getLevel()==level)host.refreshInputPorts();
+        MachineControllerBlockEntity.inputProviderChanged(level,worldPosition);
     }
     private static void registerListeners(){
         if(listenerRegistered)return;listenerRegistered=true;

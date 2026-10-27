@@ -14,7 +14,8 @@ import java.util.*;
 /** Two optional API boundaries, verified against Flux 1.20 and Brandon's Core 3.2.1.302. No optional linkage. */
 public final class OptionalEnergy {
     private OptionalEnergy() {}
-    private record Api(Capability<?> capability, Class<?> type, String receive, String extract, String stored, String capacity) {}
+    private record Api(Capability<?> capability, Class<?> type, String receive, String extract, String stored, String capacity,
+                       Map<String,Method> methods) {}
     private static final class Loaded {
         static final List<Api> APIS = load();
     }
@@ -36,9 +37,11 @@ public final class OptionalEnergy {
     private static void add(List<Api> out, String owner, String field, String name, String receive, String extract, String stored, String capacity) {
         try {
             Class<?> type = Class.forName(name);
-            type.getMethod(receive, long.class, boolean.class); type.getMethod(extract, long.class, boolean.class);
-            type.getMethod(stored); type.getMethod(capacity);
-            out.add(new Api((Capability<?>) Class.forName(owner).getField(field).get(null), type, receive, extract, stored, capacity));
+            Map<String,Method> methods = new HashMap<>();
+            methods.put(receive,type.getMethod(receive,long.class,boolean.class));
+            methods.put(extract,type.getMethod(extract,long.class,boolean.class));
+            for (String getter : List.of(stored,capacity,"canExtract","canReceive")) methods.put(getter,type.getMethod(getter));
+            out.add(new Api((Capability<?>) Class.forName(owner).getField(field).get(null), type, receive, extract, stored, capacity,Map.copyOf(methods)));
         } catch (ReflectiveOperationException | LinkageError error) {
             ModularMachineryReborn.LOGGER.warn("Optional energy API {} could not be initialized; FE remains available", name, error);
         }
@@ -101,18 +104,18 @@ public final class OptionalEnergy {
         return null;
     }
     private record External(Api api, Object target) implements LongEnergyAccess {
-        private Object invoke(String name, Class<?>[] parameters, Object... args) {
-            try { return api.type.getMethod(name, parameters).invoke(target, args); }
+        private Object invoke(String name, Object... args) {
+            try { return api.methods.get(name).invoke(target, args); }
             catch (InvocationTargetException error) {
                 if (error.getCause() instanceof RuntimeException cause) throw cause;
                 throw new IllegalStateException(error.getCause());
             } catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
         }
-        @Override public long receiveEnergyL(long amount, boolean simulate) { return ((Number) invoke(api.receive, new Class<?>[]{long.class, boolean.class}, amount, simulate)).longValue(); }
-        @Override public long extractEnergyL(long amount, boolean simulate) { return ((Number) invoke(api.extract, new Class<?>[]{long.class, boolean.class}, amount, simulate)).longValue(); }
-        @Override public long getEnergyStoredL() { return Math.max(0, ((Number) invoke(api.stored, new Class<?>[0])).longValue()); }
-        @Override public long getMaxEnergyStoredL() { return Math.max(0, ((Number) invoke(api.capacity, new Class<?>[0])).longValue()); }
-        @Override public boolean canExtract() { return (boolean) invoke("canExtract", new Class<?>[0]); }
-        @Override public boolean canReceive() { return (boolean) invoke("canReceive", new Class<?>[0]); }
+        @Override public long receiveEnergyL(long amount, boolean simulate) { return ((Number) invoke(api.receive, amount, simulate)).longValue(); }
+        @Override public long extractEnergyL(long amount, boolean simulate) { return ((Number) invoke(api.extract, amount, simulate)).longValue(); }
+        @Override public long getEnergyStoredL() { return Math.max(0, ((Number) invoke(api.stored)).longValue()); }
+        @Override public long getMaxEnergyStoredL() { return Math.max(0, ((Number) invoke(api.capacity)).longValue()); }
+        @Override public boolean canExtract() { return (boolean) invoke("canExtract"); }
+        @Override public boolean canReceive() { return (boolean) invoke("canReceive"); }
     }
 }

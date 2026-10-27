@@ -257,8 +257,10 @@ public final class PreviewPanel {
             return;
         }
         this.dynamicPatternSize = wanted;
-        this.preview = StructurePreviews.of(this.machine, wanted);
-        this.components = StructurePreviews.components(this.machine, wanted);
+        var controller = this.preview.blocks().stream().filter(block -> block.pos().equals(BlockPos.ZERO))
+                .map(StructurePreview.Block::state).findFirst().orElse(null);
+        this.preview = StructurePreviews.of(this.machine, wanted, controller);
+        this.components = StructurePreviews.components(this.machine, wanted, controller);
         // 长/高/宽那一行与画面对齐：结构变长了，尺寸行也必须跟着变。
         this.machineInfoLines = buildMachineInfo(this.machine, wanted);
         // 层索引指向的是旧结构的某一层，而结构的层数刚刚变了（动态段会加高/降低）。
@@ -305,6 +307,8 @@ public final class PreviewPanel {
     public StructurePreview preview() {
         return this.preview;
     }
+
+    public List<ItemStack> components() { return this.components.stream().map(ItemStack::copy).toList(); }
 
     public boolean isToolbarExpanded() { return this.toolbarExpanded; }
 
@@ -420,8 +424,6 @@ public final class PreviewPanel {
         // The structure goes down first, scissored to the viewport, then the buttons and overlays are painted
         // over it: the original's bottom strip sits at y=161, inside the 26..176 viewport band, so it has to be
         // drawn after the blocks or the structure would cover it.
-        StructurePreviewRenderer.clip(graphics, originX + PreviewLayout.PREVIEW_X, originY + PreviewLayout.PREVIEW_Y,
-                PreviewLayout.PREVIEW_WIDTH, PreviewLayout.PREVIEW_HEIGHT);
         boolean hideComponents = this.machine.hideComponentsWhenFormed();
         List<StructurePreview.Block> blocks;
         if (this.layerMode) {
@@ -433,13 +435,16 @@ public final class PreviewPanel {
         }
         int variant = this.cycleBlocks ? (int) (Util.getMillis() / CYCLE_PERIOD_MILLIS) : 0;
         long renderStart = System.nanoTime();
-        StructurePreviewRenderer.render(graphics, this.preview, blocks, variant,
-                originX + PreviewLayout.PREVIEW_X + PreviewLayout.PREVIEW_WIDTH / 2.0F + this.panX,
-                originY + PreviewLayout.PREVIEW_Y + PreviewLayout.PREVIEW_HEIGHT / 2.0F + this.panY,
-                PreviewLayout.PREVIEW_BOX, this.yaw, this.pitch, this.zoom, this.selectedBlockPos,
-                selectedModifierPositions());
-        PreviewRenderStats.record(blocks.size(), System.nanoTime() - renderStart, Util.getMillis());
-        graphics.disableScissor();
+        StructurePreviewRenderer.clip(graphics, originX + PreviewLayout.PREVIEW_X, originY + PreviewLayout.PREVIEW_Y,
+                PreviewLayout.PREVIEW_WIDTH, PreviewLayout.PREVIEW_HEIGHT);
+        try {
+            StructurePreviewRenderer.render(graphics, this.preview, blocks, variant,
+                    originX + PreviewLayout.PREVIEW_X + PreviewLayout.PREVIEW_WIDTH / 2.0F + this.panX,
+                    originY + PreviewLayout.PREVIEW_Y + PreviewLayout.PREVIEW_HEIGHT / 2.0F + this.panY,
+                    PreviewLayout.PREVIEW_BOX, this.yaw, this.pitch, this.zoom, this.selectedBlockPos,
+                    selectedModifierPositions(),this.machine.id(),this.formedPreview);
+            PreviewRenderStats.record(blocks.size(), System.nanoTime() - renderStart, Util.getMillis());
+        } finally { graphics.disableScissor(); }
         drawStatus(graphics, font, originX, originY, blocks.size());
 
         if (drawIngredientItems) {
@@ -505,15 +510,17 @@ public final class PreviewPanel {
         int prefixRight = originX + PreviewLayout.TITLE_X + 36;
         graphics.enableScissor(originX + PreviewLayout.TITLE_X, originY + PreviewLayout.TITLE_Y,
                 prefixRight, originY + PreviewLayout.TITLE_Y + PreviewLayout.TITLE_HEIGHT);
-        graphics.drawCenteredString(font, prefix, originX + PreviewLayout.TITLE_X + 36 / 2, textY,
-                PreviewLayout.LABEL_COLOR);
-        graphics.disableScissor();
+        try {
+            graphics.drawCenteredString(font, prefix, originX + PreviewLayout.TITLE_X + 36 / 2, textY,
+                    PreviewLayout.LABEL_COLOR);
+        } finally { graphics.disableScissor(); }
 
         int nameLeft = prefixRight + 2;
         graphics.enableScissor(nameLeft, originY + PreviewLayout.TITLE_Y,
                 nameLeft + 136, originY + PreviewLayout.TITLE_Y + PreviewLayout.TITLE_HEIGHT);
-        graphics.drawCenteredString(font, name, nameLeft + 136 / 2, textY, PreviewLayout.LABEL_COLOR);
-        graphics.disableScissor();
+        try {
+            graphics.drawCenteredString(font, name, nameLeft + 136 / 2, textY, PreviewLayout.LABEL_COLOR);
+        } finally { graphics.disableScissor(); }
     }
 
     private void drawLayerSelector(GuiGraphics graphics, int originX, int originY, double mouseX, double mouseY) {
@@ -857,7 +864,7 @@ public final class PreviewPanel {
         if (this.jeiHost || !ModList.get().isLoaded("jei")) {
             return false;
         }
-        ItemStack hovered = StructurePreviews.componentAt(this.components, this.lastMouseX, this.lastMouseY);
+        ItemStack hovered = ingredientAt(this.lastMouseX,this.lastMouseY);
         return hovered != null && !hovered.isEmpty() && PreviewJeiActions.keyPressed(hovered, keyCode, scanCode);
     }
 
@@ -871,6 +878,7 @@ public final class PreviewPanel {
     }
 
     private void selectBlockAt(double mouseX, double mouseY) {
+        if (!isOverPreview(mouseX,mouseY)) { this.selectedBlockPos=null; return; }
         StructurePreview.Block hit = StructurePreviewRenderer.pickBlockAt(this.preview, visibleBlocks(), mouseX, mouseY,
                 PreviewLayout.PREVIEW_X + PreviewLayout.PREVIEW_WIDTH / 2.0 + this.panX,
                 PreviewLayout.PREVIEW_Y + PreviewLayout.PREVIEW_HEIGHT / 2.0 + this.panY,
@@ -895,15 +903,16 @@ public final class PreviewPanel {
         int shown = Math.min(6, alternatives.size());
         // This is the original selected-block area (main ingredient at 8,28; alternatives below it), drawn over
         // the viewport only after an explicit block click so it does not obscure the default structure view.
-        graphics.fill(originX + 7, originY + 27, originX + 29, originY + 49 + shown * 18,
+        int x = selectedItemX();
+        graphics.fill(originX + x - 3, originY + 27, originX + x + 19, originY + 49 + shown * 18,
                 0xB0202020);
-        graphics.renderItem(main, originX + 10, originY + 30);
+        if (!this.jeiHost) graphics.renderItem(main, originX + x, originY + 30);
         for (int index = 0; index < shown; index++) {
-            graphics.renderItem(alternatives.get(index), originX + 10, originY + 51 + index * 18);
+            if (!this.jeiHost) graphics.renderItem(alternatives.get(index), originX + x, originY + 51 + index * 18);
         }
         if (alternatives.size() > shown) {
             graphics.drawString(Minecraft.getInstance().font, Component.literal("+" + (alternatives.size() - shown)),
-                    originX + 11, originY + 52 + shown * 18, 0xFFFFFFFF, false);
+                    originX + x + 1, originY + 52 + shown * 18, 0xFFFFFFFF, false);
         }
     }
 
@@ -1005,26 +1014,40 @@ public final class PreviewPanel {
 
     /** The selected block item under a panel-space position, for the blueprint screen's item tooltip. */
     public ItemStack selectedItemAt(double mouseX, double mouseY) {
+        for (SelectedIngredient entry : selectedIngredients()) if (insideItem(mouseX,mouseY,entry.x(),entry.y())) return entry.stack();
+        return ItemStack.EMPTY;
+    }
+
+    private int selectedItemX() { return modifierIngredients.isEmpty() ? 10 : 30; }
+
+    public record SelectedIngredient(ItemStack stack, int x, int y) {}
+
+    public List<SelectedIngredient> selectedIngredients() {
         StructurePreview.Block selected = selectedBlock();
         if (selected == null) {
-            return ItemStack.EMPTY;
+            return List.of();
         }
         int variant = this.cycleBlocks ? (int) (Util.getMillis() / CYCLE_PERIOD_MILLIS) : 0;
         ItemStack main = itemFor(selected.variantState(variant));
-        if (insideItem(mouseX, mouseY, 10, 30)) {
-            return main;
-        }
+        if (main.isEmpty()) return List.of();
+        List<SelectedIngredient> result = new ArrayList<>();
+        result.add(new SelectedIngredient(main,selectedItemX(),30));
         List<ItemStack> alternatives = selected.alternatives().stream()
                 .map(PreviewPanel::itemFor)
                 .filter(stack -> !stack.isEmpty() && !ItemStack.isSameItem(stack, main))
                 .limit(6)
                 .toList();
         for (int index = 0; index < alternatives.size(); index++) {
-            if (insideItem(mouseX, mouseY, 10, 51 + index * 18)) {
-                return alternatives.get(index);
-            }
+            result.add(new SelectedIngredient(alternatives.get(index),selectedItemX(),51+index*18));
         }
-        return ItemStack.EMPTY;
+        return List.copyOf(result);
+    }
+
+    public ItemStack ingredientAt(double mouseX, double mouseY) {
+        ItemStack selected=selectedItemAt(mouseX,mouseY);
+        if (!selected.isEmpty()) return selected;
+        ItemStack component=componentAt(mouseX,mouseY);
+        return component==null ? ItemStack.EMPTY : component;
     }
 
     private void drawModifierIngredients(GuiGraphics graphics, int originX, int originY) {

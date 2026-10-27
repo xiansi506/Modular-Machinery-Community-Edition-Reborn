@@ -1,0 +1,29 @@
+{
+  "registryname": "tutorial:layered_processor",
+  "localizedname": "分层加工机",
+  "requires-blueprint": false,
+  "parts": [
+    { "x": -1, "y": 0, "z": 0, "elements": "modular_machinery_reborn:item_input_hatch", "selector-tag": "feed" },
+    { "x": 1, "y": 0, "z": 0, "elements": "modular_machinery_reborn:item_output_hatch", "selector-tag": "product" },
+    { "x": 0, "y": -1, "z": 0, "elements": "modular_machinery_reborn:energy_input_hatch" },
+    {
+      "x": 0, "y": 0, "z": 1, "elements": "minecraft:chest",
+      "preview-nbt": {
+        "CustomName": "{\"text\":\"仅用于预览的箱子\"}",
+        "Items": [{ "Slot": "0b", "id": "minecraft:diamond", "Count": "1b" }]
+      }
+    }
+  ],
+  "dynamic-patterns": [
+    {
+      "name": "tower",
+      "faces": ["UP"],
+      "minSize": 0,
+      "maxSize": 3,
+      "structure-size-offset-start": { "x": 0, "y": 0, "z": 0 },
+      "structure-size-offset": { "x": 0, "y": 1, "z": 0 },
+      "parts": [{ "x": 0, "y": 1, "z": 0, "elements": "minecraft:glass" }],
+      "parts-end": [{ "x": 0, "y": 1, "z": 0, "elements": "minecraft:gold_block" }]
+    }
+  ]
+}

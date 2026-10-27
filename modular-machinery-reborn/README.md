@@ -1,6 +1,6 @@
 # Modular Machinery: Community Edition Reborn
 
-> **当前源码 0.118.0（2026-10-27）**：植物魔法魔力、自然灵气、血魔法 3 的 LP／五种恶魔意志已接入，提供 8 种仓口、JSON／KubeJS 配方、逐 tick／并行／修改器、资源事务、界面及 JEI 说明。LP 使用绑定血球的真实 SoulNetwork；灵气和意志使用真实世界资源。魔法核心 52、真实模组 API 23、示例解析 6、完整套件 2669、既有专项 424、可选依赖类加载 85 项均零失败（合计 3259）；生产 build/reobf 33s、205 JSON、中英各 424 键、SRG 与协议 7 检查通过。其他魔法体系继续留空；不新增第三方配方适配器，能源仍只对接 FluxNetworks 和龙之研究。未实机、未部署；实例仍 0.110.0。使用见 [中文](docs/魔法资源.md)／[English](docs/Magic-resources.md)，接手见 [交接](docs/交接-2026-10-23.md)。下方保留历史记录。
+> **当前源码 0.118.3（2026-10-27）**：修复 JEI 定时轮换后材料表全部回退为控制器的问题；显示更新回调恢复材料，并校验槽位当前实际显示的种类和数量。新增 6 项真实 JEI 布局生命周期回归由红转绿；本轮连同此前预览 23、界面 28、主套件 2669，共 2726 项检查零失败。生产 build/reobf 32s，203 JSON、中英各 424 键及协议／SRG 检查通过。协议仍为 7。修复后画面待实机确认，实例仍为 0.118.2；本提交汇总源码、教程与独立教学包，未部署游戏或创建 Release。见 [修复记录](docs/修复记录-0.118.3.md)与 [交接](docs/交接-2026-10-23.md)。
 
 Forge 1.20.1 / Java 17 migration foundation for the archived Modular Machinery: Community Edition source.
 
@@ -10,7 +10,7 @@ had listed as unfinished: **KubeJS can write a complete machine definition** (al
 four silent defects behind one symptom (tag namespace, no loot tables at all, per-variant tables, and the generated
 data pack's namespace declaration and resource-id shape). **Verified in game** (mining speed and drops, by runtime
 probes), deployed, and archived under `releases/modular-machinery-reborn/v0.31.0/`. Its record is in
-`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.118.0 and is not a published release.**
+`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.118.3 and is not a published release.**
 
 > **0.31.0 supersedes 0.30.1**, which had corrected only the `license` / `authors` metadata in
 > `META-INF/mods.toml` and was otherwise functionally 0.29.0.
@@ -91,6 +91,10 @@ Two entry points, both optional (the mod loads without KubeJS):
 
 
 ## Structure preview
+
+0.118.3 fixes all material icons reverting to the focused controller after JEI ingredient cycling. It restores overrides through JEI’s displayed-ingredient lifecycle and checks the actual displayed stacks. See the [bilingual fix notes](docs/修复记录-0.118.3.md); repaired gameplay acceptance is pending.
+
+0.118.2 updates dynamic material counts in native JEI slots, adds ingredient interaction for selected blocks and alternatives, binds formed preview controllers, renders fluids, and fixes camera normals, side picking and failure cleanup. See the [bilingual preview guide](docs/结构预览.md). Code, offline checks and the production build passed; OpenGL/Forge gameplay acceptance is pending.
 
 Right-clicking a bound blueprint opens its machine's structure in 3D, with the blocks it needs listed along the
 bottom. Dragging turns it; scrolling zooms. JEI has a matching **Machine Structure** category with one entry

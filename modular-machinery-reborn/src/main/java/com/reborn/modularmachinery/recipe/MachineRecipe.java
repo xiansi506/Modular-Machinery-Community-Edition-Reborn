@@ -492,7 +492,7 @@ public final class MachineRecipe implements Recipe<Container> {
             return this.recipeTime;
         }
         double modified = modifiers.applyDuration(this.recipeTime);
-        return modified < 1.0 ? 1 : (int) Math.round(modified);
+        return RecipeTiming.duration(modified);
     }
 
     /**
@@ -809,8 +809,11 @@ public final class MachineRecipe implements Recipe<Container> {
 
     private boolean inPhase(MachineRequirement requirement, int phase, RecipeModifiers modifiers) {
         if (requirement.triggerTime() > 0) {
-            long due = (long) requirement.triggerTime() * Math.round(modifiers.applyDuration(1));
-            return phase == 1 && executionTick == due && (!requirement.triggered() || requirement.option("trigger-repeatable"));
+            // Finish also reserves unpaid delayed work: scripts may jump past the trigger tick.
+            if (phase == 2) return !requirement.triggered();
+            int due = RecipeTiming.triggerTick(recipeTime, requirement.triggerTime(), duration(modifiers));
+            return phase == 1 && executionTick >= due
+                    && (!requirement.triggered() || requirement.option("trigger-repeatable") && executionTick == due);
         }
         return switch (phase) {
             case 0 -> requirement.isStartPhase();
@@ -846,7 +849,7 @@ public final class MachineRecipe implements Recipe<Container> {
             if (inPhase(requirement, phase, modifiers) && !applyPhase(requirement, snapshot, random, modifiers)) return false;
         }
         if (!transaction.commit()) return false;
-        if (phase == 1) for (MachineRequirement requirement : requirements) {
+        if (phase == 1 || phase == 2) for (MachineRequirement requirement : requirements) {
             if (requirement.triggerTime() > 0 && inPhase(requirement, phase, modifiers)) requirement.setTriggered(true);
         }
         return true;

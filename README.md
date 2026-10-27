@@ -6,11 +6,11 @@
 
 ## 当前状态（2026-10-27）
 
-- **源码 0.118.0**，Minecraft 1.20.1 / Forge 47.2.0 / Java 17；通信协议 **7，两端一起升级**。
-- 植物魔法魔力、自然灵气、血魔法 3 的 LP／五种恶魔意志已接入，提供 8 种仓口、JSON／KubeJS 配方、逐 tick／并行／修改器、资源事务、界面及 JEI 说明。LP 使用绑定血球的真实 SoulNetwork；灵气和意志使用真实世界资源。
-- 魔法核心 52、真实模组 API 23、示例解析 6、完整套件 2669、既有专项 424、可选依赖类加载 85 项均零失败（合计 3259）；生产 build/reobf 33s、205 JSON、中英各 424 键、SRG 与协议 7 检查通过。
-- 其他魔法体系继续留空；不新增第三方配方适配器，能源仍只对接 FluxNetworks 和龙之研究。未实机、未部署；实例仍 0.110.0。
-- [魔法资源使用说明](modular-machinery-reborn/docs/魔法资源.md) · [English](modular-machinery-reborn/docs/Magic-resources.md) · [归档](releases/modular-machinery-reborn/v0.118.0/README.md) · [交接](modular-machinery-reborn/docs/交接-2026-10-23.md)。
+- **源码 0.118.3**，Minecraft 1.20.1 / Forge / Java 17。
+- 修复 JEI 定时轮换后材料表全部回退为控制器的问题；显示更新回调恢复材料，并校验槽位当前实际显示的种类和数量。
+- 新增 6 项真实 JEI 布局生命周期回归由红转绿；本轮连同此前预览 23、界面 28、主套件 2669，共 2726 项检查零失败。生产 build/reobf 32s，203 JSON、中英各 424 键及协议／SRG 检查通过。
+- 协议仍为 7。修复后画面待实机确认，实例仍为 0.118.2；本提交汇总源码、教程与独立教学包，未部署游戏或创建 Release。
+- [修复记录](modular-machinery-reborn/docs/修复记录-0.118.3.md) · [归档](releases/modular-machinery-reborn/v0.118.3/README.md) · [交接](modular-machinery-reborn/docs/交接-2026-10-23.md)。
 
 ## 从哪开始
 

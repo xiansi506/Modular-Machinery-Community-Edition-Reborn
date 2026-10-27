@@ -1,6 +1,6 @@
-# Long energy, gas sprites and model materials (0.117.0)
+# Long energy, gas sprites and model materials (0.118.3)
 
-These features have passed offline checks and a production build. In-game acceptance is pending. Update clients and servers together to protocol **6**. Back up the world before upgrading; energy values above the int range cannot be restored faithfully by older versions.
+These features have passed offline checks and a production build. In-game acceptance is pending. Update clients and servers together to current protocol **7**. Back up the world before upgrading; energy values above the int range cannot be restored faithfully by older versions.
 
 ## Energy hatches
 

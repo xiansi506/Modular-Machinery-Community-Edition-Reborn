@@ -1,0 +1,11 @@
+{
+  "type": "modular_machinery_reborn:machine",
+  "machine": "tutorial:layered_processor",
+  "recipeTime": 100,
+  "max-parallelism": 1,
+  "requirements": [
+    { "type": "item", "io-type": "input", "item": "minecraft:cobblestone", "amount": 1, "selector-tag": "feed" },
+    { "type": "energy", "io-type": "input", "energyPerTick": 20 },
+    { "type": "item", "io-type": "output", "item": "minecraft:stone", "amount": 1, "selector-tag": "product" }
+  ]
+}

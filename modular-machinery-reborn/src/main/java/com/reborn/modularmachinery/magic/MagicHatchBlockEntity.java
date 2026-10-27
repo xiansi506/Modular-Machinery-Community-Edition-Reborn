@@ -78,7 +78,15 @@ public class MagicHatchBlockEntity extends BlockEntity implements MenuProvider {
         MagicPort.Access access = backend.access(variants[index]);
         return access == null ? 0 : access.amount();
     }
-    public int menuWord(int index) { return level == null || level.isClientSide ? words[index] : (int)(Double.doubleToRawLongBits(value(index / 4)) >>> ((index % 4) * 16)) & 0xffff; }
+    /** Capture each value once so its four transport words form one coherent reading. */
+    public void refreshMenuData() {
+        if (level == null || level.isClientSide) return;
+        for (int i=0;i<6;i++) {
+            long bits=Double.doubleToRawLongBits(value(i));
+            for(int j=0;j<4;j++) words[i*4+j]=(int)(bits >>> (j*16)) & 0xffff;
+        }
+    }
+    public int menuWord(int index) { return words[index]; }
     public void menuWord(int index, int value) { words[index] = value & 0xffff; }
     private double decode(int index) {
         int at = index * 4; long bits = 0;

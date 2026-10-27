@@ -60,6 +60,7 @@ public final class GeneratedLootTablePack extends AbstractPackResources {
         this.files.putAll(FILES);
         this.files.putAll(MOC_FILES);
         this.files.putAll(TAG_FILES);
+        this.files.putAll(OptionalBlockLootTables.generate(id -> net.minecraftforge.fml.ModList.get() != null && net.minecraftforge.fml.ModList.get().isLoaded(id)));
         this.files.putAll(com.reborn.modularmachinery.magic.MagicLootTables.generate(id -> net.minecraftforge.fml.ModList.get() != null && net.minecraftforge.fml.ModList.get().isLoaded(id)));
     }
 

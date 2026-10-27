@@ -31,15 +31,31 @@ public final class PreviewBlockEntities {
     private final PreviewLevel level;
     private final List<StructurePreview.Block> blocks;
     private final List<BlockState> states;
+    private final net.minecraft.resources.ResourceLocation machineId;
+    private final boolean formed;
     private final Set<BlockPos> failedRenders = new HashSet<>();
+    private final Set<BlockPos> failedModels = new HashSet<>();
+
+    boolean modelFailed(BlockPos pos) { return failedModels.contains(pos); }
+    boolean rendererFailed(BlockPos pos) { return failedRenders.contains(pos); }
+    void failModel(BlockPos pos, Throwable error) {
+        if (failedModels.add(pos.immutable())) report("render model", pos, error);
+    }
 
     public PreviewBlockEntities(PreviewLevel level, List<StructurePreview.Block> blocks, int variant) {
-        this(level, null, blocks, variant);
+        this(level, null, blocks, variant,null,false);
+    }
+
+    public PreviewBlockEntities(PreviewLevel level, List<StructurePreview.Block> blocks, int variant,
+                                net.minecraft.resources.ResourceLocation machineId, boolean formed) {
+        this(level,null,blocks,variant,machineId,formed);
     }
 
     private PreviewBlockEntities(PreviewLevel level, @Nullable Level context,
-                                 List<StructurePreview.Block> blocks, int variant) {
+                                 List<StructurePreview.Block> blocks, int variant,
+                                 net.minecraft.resources.ResourceLocation machineId, boolean formed) {
         this.level = level;
+        this.machineId=machineId; this.formed=formed;
         this.context = new WeakReference<>(context);
         this.blocks = List.copyOf(blocks);
         this.states = blocks.stream().map(block -> block.variantState(variant)).toList();
@@ -60,12 +76,15 @@ public final class PreviewBlockEntities {
         for (var block : blocks) {
             BlockEntity tile = level.getBlockEntity(block.pos());
             CompoundTag nbt = block.previewNbt();
-            if (tile == null || nbt == null) continue;
+            boolean controller = tile instanceof com.reborn.modularmachinery.block.MachineControllerBlockEntity
+                    && block.pos().equals(BlockPos.ZERO) && machineId != null;
+            if (tile == null || nbt == null && !controller) continue;
             try {
                 // Type and coordinates belong to the chosen state, not to metadata copied from a save.
                 CompoundTag data = tile.saveWithFullMetadata();
                 String id = data.getString("id");
-                data.merge(nbt);
+                if (nbt != null) data.merge(nbt);
+                if (controller) bindController(data,machineId,formed);
                 data.putString("id", id);
                 data.putInt("x", block.pos().getX());
                 data.putInt("y", block.pos().getY());
@@ -84,17 +103,31 @@ public final class PreviewBlockEntities {
     /** Reuse entities across frames; rebuild only on a changed scene, visible slice or effective variant. */
     public static PreviewBlockEntities prepare(StructurePreview preview, List<StructurePreview.Block> blocks,
                                                int variant, Level context) {
+        return prepare(preview,blocks,variant,context,null,false);
+    }
+
+    public static PreviewBlockEntities prepare(StructurePreview preview, List<StructurePreview.Block> blocks,
+                                               int variant, Level context,
+                                               net.minecraft.resources.ResourceLocation machineId, boolean formed) {
         PreviewBlockEntities scene = CACHE.get(preview);
-        boolean matches = scene != null && scene.context.get() == context && scene.blocks.equals(blocks);
+        boolean matches = scene != null && scene.context.get() == context && scene.blocks.equals(blocks)
+                && Objects.equals(scene.machineId,machineId) && scene.formed==formed;
         if (matches) for (int i = 0; i < blocks.size(); i++) {
             if (!scene.states.get(i).equals(blocks.get(i).variantState(variant))) { matches = false; break; }
         }
         if (!matches) {
-            scene = new PreviewBlockEntities(new PreviewLevel(context), context, blocks, variant);
+            scene = new PreviewBlockEntities(new PreviewLevel(context), context, blocks, variant,machineId,formed);
             CACHE.put(preview, scene);
             if (CACHE.size() > MAX_SCENES) CACHE.remove(CACHE.keySet().iterator().next());
         }
         return scene;
+    }
+
+    static void bindController(CompoundTag data, net.minecraft.resources.ResourceLocation machineId, boolean formed) {
+        data.putString("machine",machineId.toString());
+        data.putBoolean("formed",formed);
+        data.putInt("status",com.reborn.modularmachinery.machine.ControllerStatus.IDLE.ordinal());
+        data.remove("activeRecipe");
     }
 
     public ModelData modelData(BlockPos pos) {
@@ -112,7 +145,12 @@ public final class PreviewBlockEntities {
     /** GUI rendering must not apply the real world's camera distance culling or invoke entity tickers. */
     public void render(BlockPos pos, PoseStack pose, MultiBufferSource buffers, int light,
                        BlockEntityRenderDispatcher dispatcher) {
-        if (!hasRenderer(pos, dispatcher)) return;
+        renderSafely(pos, pose, buffers, light, dispatcher);
+    }
+
+    boolean renderSafely(BlockPos pos, PoseStack pose, MultiBufferSource buffers, int light,
+                       BlockEntityRenderDispatcher dispatcher) {
+        if (!hasRenderer(pos, dispatcher)) return true;
         // A third-party renderer may throw after pushing a pose. Give it its own stack so even an
         // unbalanced failure cannot corrupt the caller's camera or the next block's transform.
         PoseStack entityPose = new PoseStack();
@@ -122,7 +160,9 @@ public final class PreviewBlockEntities {
             dispatcher.renderItem(entity(pos), entityPose, buffers, light, OverlayTexture.NO_OVERLAY);
         } catch (RuntimeException | LinkageError error) {
             failRender(pos, error);
+            return false;
         }
+        return true;
     }
 
     private void failRender(BlockPos pos, Throwable error) {

@@ -11,6 +11,7 @@ public final class MagicHatchMenu extends AbstractContainerMenu {
     public final MagicHatchBlockEntity hatch;
     public MagicHatchMenu(int id, Inventory inventory, MagicHatchBlockEntity hatch) {
         super(ModMenus.MAGIC_HATCH.get(), id); this.hatch = hatch;
+        hatch.refreshMenuData();
         for (int row = 0; row < 3; row++) for (int col = 0; col < 9; col++) addSlot(new Slot(inventory, col + row*9 + 9, 8+col*18, 84+row*18));
         for (int col = 0; col < 9; col++) addSlot(new Slot(inventory, col, 8+col*18, 142));
         if (hatch.orbs().getSlots() > 0) addSlot(new SlotItemHandler(hatch.orbs(), 0, 80, 49));
@@ -21,6 +22,7 @@ public final class MagicHatchMenu extends AbstractContainerMenu {
         });
     }
     public MagicHatchMenu(int id, Inventory inventory, FriendlyByteBuf buf) { this(id, inventory, (MagicHatchBlockEntity) inventory.player.level().getBlockEntity(buf.readBlockPos())); }
+    @Override public void broadcastChanges() { hatch.refreshMenuData(); super.broadcastChanges(); }
     @Override public boolean stillValid(Player player) { return !hatch.isRemoved() && player.level() == hatch.getLevel() && player.distanceToSqr(hatch.getBlockPos().getCenter()) <= 64; }
     @Override public ItemStack quickMoveStack(Player player, int index) {
         if (index < 0 || index >= slots.size()) return ItemStack.EMPTY;

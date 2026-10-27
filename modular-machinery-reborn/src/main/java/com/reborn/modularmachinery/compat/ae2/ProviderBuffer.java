@@ -23,10 +23,15 @@ public final class ProviderBuffer implements ResourceTransaction.OpaquePort {
     private final Runnable changed;
     private final BooleanSupplier accessible;
     private long revision;
+    private long keyRevision;
+    private final boolean retainEmptyKeys;
     private final Items items = new Items();
     private final Fluids fluids = new Fluids();
     private Object gas;
-    public ProviderBuffer(Runnable changed, BooleanSupplier accessible) { this.changed=changed; this.accessible=accessible; }
+    public ProviderBuffer(Runnable changed, BooleanSupplier accessible) { this(changed, accessible, false); }
+    private ProviderBuffer(Runnable changed, BooleanSupplier accessible, boolean retainEmptyKeys) {
+        this.changed=changed; this.accessible=accessible; this.retainEmptyKeys=retainEmptyKeys;
+    }
     public boolean accessible() { return accessible.getAsBoolean(); }
     public static boolean supports(AEKey key) { return key instanceof AEItemKey || key instanceof AEFluidKey || chemicalKey.test(key); }
     public long amount(AEKey key) { return contents.getOrDefault(key,0L); }
@@ -46,21 +51,30 @@ public final class ProviderBuffer implements ResourceTransaction.OpaquePort {
                 if(n>0) next.put(key,Math.addExact(next.getOrDefault(key,0L),n));
             }
         } catch(ArithmeticException overflow) { return false; }
-        contents.clear(); contents.putAll(next); changed(); return true;
+        contents.clear(); contents.putAll(next); keyRevision++; changed(); return true;
     }
     public long take(AEKey key,long requested,boolean execute) {
         if(!accessible() || requested<=0) return 0;
         long moved=Math.min(requested,amount(key));
-        if(moved>0&&execute){contents.put(key,amount(key)-moved);changed();}
+        if(moved>0&&execute){updateAmount(key,amount(key)-moved);changed();}
         return moved;
     }
     public long returnToNetwork(ToLongBiFunction<AEKey,Long> insert) {
         long total=0;
         for(var entry:entries().entrySet()) {
             long moved=Math.max(0,Math.min(entry.getValue(),insert.applyAsLong(entry.getKey(),entry.getValue())));
-            if(moved>0){contents.put(entry.getKey(),amount(entry.getKey())-moved);changed(); total=total>Long.MAX_VALUE-moved?Long.MAX_VALUE:total+moved;}
+            if(moved>0){updateAmount(entry.getKey(),amount(entry.getKey())-moved);changed(); total=total>Long.MAX_VALUE-moved?Long.MAX_VALUE:total+moved;}
         }
         return total;
+    }
+    private void updateAmount(AEKey key, long amount) {
+        if (amount == 0 && !retainEmptyKeys) { contents.remove(key); keyRevision++; }
+        else contents.put(key,amount);
+    }
+    private void replaceContents(Map<AEKey,Long> values, ListTag missing) {
+        contents.clear();
+        values.forEach((key,n)->{if (n>0 || retainEmptyKeys) contents.put(key,n);});
+        unresolved=missing.copy(); keyRevision++; changed();
     }
     public IItemHandler items() { return items; }
     public IFluidHandler fluids() { return fluids; }
@@ -82,7 +96,7 @@ public final class ProviderBuffer implements ResourceTransaction.OpaquePort {
             if(key==null || !supports(key) || amount(key)>Long.MAX_VALUE-n) {unresolved.add(value.copy());continue;}
             contents.put(key,amount(key)+n);
         }
-        revision++;
+        keyRevision++; revision++;
     }
     public int rowCount() { return (int)contents.values().stream().filter(n -> n > 0).count() + (unresolved.isEmpty() ? 0 : 1); }
     public List<CompoundTag> preview(int slot,int limit) { return preview(slot,limit,0); }
@@ -114,13 +128,19 @@ public final class ProviderBuffer implements ResourceTransaction.OpaquePort {
     }
     @Override public Object transactionView(ResourceTransaction tx) {
         var before=new LinkedHashMap<>(contents); var missing=unresolved.copy(); long expected=revision;
-        ProviderBuffer shadow=new ProviderBuffer(()->{},accessible);shadow.contents.putAll(before);shadow.unresolved=missing.copy();
-        tx.enlist(()->revision==expected && accessible(),()->{contents.clear();contents.putAll(before);unresolved=missing.copy();changed();});
-        tx.record(()->{contents.clear();contents.putAll(shadow.contents);unresolved=shadow.unresolved.copy();changed();return true;});
+        // Keep the shadow's slot order fixed while several requirements consume different keys.
+        ProviderBuffer shadow=new ProviderBuffer(()->{},accessible,true);shadow.contents.putAll(before);shadow.unresolved=missing.copy();
+        tx.enlist(()->revision==expected && accessible(),()->replaceContents(before,missing));
+        tx.record(()->{replaceContents(shadow.contents,shadow.unresolved);return true;});
         return shadow;
     }
     private final class Items implements IItemHandler,ResourceTransaction.OpaquePort {
-        private List<AEKey> keys(){return ProviderBuffer.this.keys(k->k instanceof AEItemKey);}
+        private long cachedRevision=-1;
+        private List<AEKey> cachedKeys=List.of();
+        private List<AEKey> keys(){
+            if(cachedRevision!=keyRevision){cachedKeys=ProviderBuffer.this.keys(k->k instanceof AEItemKey);cachedRevision=keyRevision;}
+            return cachedKeys;
+        }
         @Override public int getSlots(){return keys().size();}
         @Override public ItemStack getStackInSlot(int slot){var keys=keys();return !accessible()||slot<0||slot>=keys.size()?ItemStack.EMPTY:((AEItemKey)keys.get(slot)).toStack((int)Math.min(Integer.MAX_VALUE,amount(keys.get(slot))));}
         @Override public ItemStack insertItem(int slot,ItemStack stack,boolean simulate){return stack;}
@@ -130,7 +150,12 @@ public final class ProviderBuffer implements ResourceTransaction.OpaquePort {
         @Override public Object transactionView(ResourceTransaction tx){return ((ProviderBuffer)tx.opaque(ProviderBuffer.this)).items();}
     }
     private final class Fluids implements IFluidHandler,ResourceTransaction.OpaquePort {
-        private List<AEKey> keys(){return ProviderBuffer.this.keys(k->k instanceof AEFluidKey);}
+        private long cachedRevision=-1;
+        private List<AEKey> cachedKeys=List.of();
+        private List<AEKey> keys(){
+            if(cachedRevision!=keyRevision){cachedKeys=ProviderBuffer.this.keys(k->k instanceof AEFluidKey);cachedRevision=keyRevision;}
+            return cachedKeys;
+        }
         @Override public int getTanks(){return keys().size();}
         @Override public FluidStack getFluidInTank(int tank){var keys=keys();return !accessible()||tank<0||tank>=keys.size()?FluidStack.EMPTY:((AEFluidKey)keys.get(tank)).toStack((int)Math.min(Integer.MAX_VALUE,amount(keys.get(tank))));}
         @Override public int getTankCapacity(int tank){return Integer.MAX_VALUE;}

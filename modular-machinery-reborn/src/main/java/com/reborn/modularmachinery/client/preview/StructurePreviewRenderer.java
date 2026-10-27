@@ -47,6 +47,7 @@ import java.util.Set;
  * their normal GUI matrices.
  */
 public final class StructurePreviewRenderer {
+    private static long lastFailureReport;
 
     /** The original widget called the vertical angle yaw and started it at 25 degrees. */
     public static final float DEFAULT_YAW = 25.0F;
@@ -77,9 +78,8 @@ public final class StructurePreviewRenderer {
         }
         double nx = (mouseX - centerX) * 2.0 / boxPixels;
         double ny = (centerY - mouseY) * 2.0 / boxPixels;
-        if (nx < -1.0 || nx > 1.0 || ny < -1.0 || ny > 1.0) {
-            return null;
-        }
+        // The fitting square is smaller than the real viewport. The caller clips mouse input;
+        // rays outside this square can still hit geometry visible near the viewport's sides.
 
         BlockPos size = preview.size();
         float diagonal = (float) Math.sqrt(size.getX() * size.getX()
@@ -205,6 +205,15 @@ public final class StructurePreviewRenderer {
                               int variant, float centerX, float centerY, float boxPixels,
                               float yaw, float pitch, float zoom, BlockPos selectedBlock,
                               Set<BlockPos> modifierPositions) {
+        render(graphics,preview,blocks,variant,centerX,centerY,boxPixels,yaw,pitch,zoom,selectedBlock,
+                modifierPositions,null,false);
+    }
+
+    public static void render(GuiGraphics graphics, StructurePreview preview, List<StructurePreview.Block> blocks,
+                              int variant, float centerX, float centerY, float boxPixels,
+                              float yaw, float pitch, float zoom, BlockPos selectedBlock,
+                              Set<BlockPos> modifierPositions, net.minecraft.resources.ResourceLocation machineId,
+                              boolean formed) {
         if (preview == null || preview.isEmpty() || blocks.isEmpty()) {
             return;
         }
@@ -227,7 +236,6 @@ public final class StructurePreviewRenderer {
         float centerBlockZ = (preview.min().getZ() + preview.max().getZ() + 1.0F) / 2.0F;
 
         PoseStack pose = graphics.pose();
-        pose.pushPose();
         Matrix4f callerPose = new Matrix4f(pose.last().pose());
         float originX = callerPose.m30();
         float originY = callerPose.m31();
@@ -251,9 +259,11 @@ public final class StructurePreviewRenderer {
         // the depth range, so temporarily remove that translation and restore it
         // before returning to JEI/the screen.
         PoseStack modelView = RenderSystem.getModelViewStack();
-        RenderSystem.backupProjectionMatrix();
+        Matrix4f savedProjection = new Matrix4f(RenderSystem.getProjectionMatrix());
+        VertexSorting savedSorting = RenderSystem.getVertexSorting();
+        pose.pushPose();
         modelView.pushPose();
-        try {
+        try (PreviewBufferBatch batch = new PreviewBufferBatch()) {
             RenderSystem.setProjectionMatrix(projection, VertexSorting.DISTANCE_TO_ORIGIN);
             modelView.setIdentity();
             RenderSystem.applyModelViewMatrix();
@@ -263,7 +273,7 @@ public final class StructurePreviewRenderer {
             // when JEI has translated the category before calling draw().
             Matrix4f view = cameraView(cameraDistance, yaw, pitch);
             pose.translate(-originX, -originY, -originZ);
-            pose.mulPoseMatrix(view);
+            applyCameraView(pose,view);
             pose.translate(-centerBlockX, -centerBlockY, -centerBlockZ);
 
             // Light the blocks the way the world does. Terrain calls
@@ -280,7 +290,7 @@ public final class StructurePreviewRenderer {
             RenderSystem.depthMask(true);
             BlockRenderDispatcher dispatcher = minecraft.getBlockRenderer();
             PreviewBlockEntities entities = minecraft.level == null ? null
-                    : PreviewBlockEntities.prepare(preview, blocks, variant, minecraft.level);
+                    : PreviewBlockEntities.prepare(preview, blocks, variant, minecraft.level,machineId,formed);
             var entityDispatcher = minecraft.getBlockEntityRenderDispatcher();
             for (StructurePreview.Block block : blocks) {
                 pose.pushPose();
@@ -289,19 +299,33 @@ public final class StructurePreviewRenderer {
                     var state = block.variantState(variant);
                     // Animated blocks already have an item-render fallback in renderSingleBlock. Skip that
                     // fallback when drawing the actual preview entity, otherwise chests are rendered twice.
+                    if (entities != null && entities.modelFailed(block.pos())) continue;
                     if (state.getRenderShape() != net.minecraft.world.level.block.RenderShape.ENTITYBLOCK_ANIMATED
                             || entities == null || !entities.hasRenderer(block.pos(), entityDispatcher)) {
-                        dispatcher.renderSingleBlock(state, pose, graphics.bufferSource(),
+                        dispatcher.renderSingleBlock(state, pose, batch.source,
                                 LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY,
                                 entities == null ? net.minecraftforge.client.model.data.ModelData.EMPTY
                                         : entities.modelData(block.pos()), null);
                     }
-                    if (entities != null) entities.render(block.pos(), pose, graphics.bufferSource(),
-                            LightTexture.FULL_BRIGHT, entityDispatcher);
+                    if (entities != null && !entities.renderSafely(block.pos(), pose, batch.source,
+                            LightTexture.FULL_BRIGHT, entityDispatcher)) throw new IllegalStateException("Preview entity batch failed");
+                } catch (RuntimeException | LinkageError error) {
+                    if (entities != null && !entities.rendererFailed(block.pos())) entities.failModel(block.pos(), error);
+                    throw error;
                 } finally { pose.popPose(); }
             }
+            if (entities != null) for (StructurePreview.Block block : blocks) {
+                var state = block.variantState(variant);
+                if (state.getFluidState().isEmpty() || entities.modelFailed(block.pos())) continue;
+                try {
+                    PreviewFluidRenderer.render(dispatcher, entities.level(), block, variant, pose, batch.source);
+                } catch (RuntimeException | LinkageError error) {
+                    entities.failModel(block.pos(), error);
+                    throw error;
+                }
+            }
             if (!modifierPositions.isEmpty()) {
-                VertexConsumer lines = graphics.bufferSource().getBuffer(RenderType.lines());
+                VertexConsumer lines = batch.source.getBuffer(RenderType.lines());
                 for (BlockPos pos : modifierPositions) {
                     if (blocks.stream().anyMatch(block -> block.pos().equals(pos))) {
                         LevelRenderer.renderLineBox(pose, lines,
@@ -310,28 +334,50 @@ public final class StructurePreviewRenderer {
                                 0.0F, 1.0F, 0.5F, 1.0F);
                     }
                 }
-                graphics.bufferSource().endBatch(RenderType.lines());
+                batch.source.endBatch(RenderType.lines());
             }
             if (selectedBlock != null && blocks.stream().anyMatch(block -> block.pos().equals(selectedBlock))) {
-                VertexConsumer lines = graphics.bufferSource().getBuffer(RenderType.lines());
+                VertexConsumer lines = batch.source.getBuffer(RenderType.lines());
                 LevelRenderer.renderLineBox(pose, lines,
                         selectedBlock.getX() - 0.002, selectedBlock.getY() - 0.002, selectedBlock.getZ() - 0.002,
                         selectedBlock.getX() + 1.002, selectedBlock.getY() + 1.002, selectedBlock.getZ() + 1.002,
                         0.25F, 0.9F, 1.0F, 1.0F);
-                graphics.bufferSource().endBatch(RenderType.lines());
+                batch.source.endBatch(RenderType.lines());
             }
-            graphics.flush();
+            batch.submit();
+        } catch (RuntimeException | LinkageError error) {
+            // The scene records the offending block and skips it until rebuilt or reloaded.
+            // The private batch is discarded before the GUI projection is restored.
+            long now = net.minecraft.Util.getMillis();
+            if (now - lastFailureReport > 5000) {
+                lastFailureReport = now;
+                com.reborn.modularmachinery.ModularMachineryReborn.LOGGER.warn("Could not draw structure preview", error);
+            }
         } finally {
             // GameRenderer enters screen rendering with 3D item lighting.  Keep
             // that baseline for the ingredient row and any following widgets.
-            Lighting.setupFor3DItems();
-            RenderSystem.disableDepthTest();
-            RenderSystem.depthMask(true);
-            modelView.popPose();
-            RenderSystem.applyModelViewMatrix();
-            RenderSystem.restoreProjectionMatrix();
-            pose.popPose();
+            try {
+                Lighting.setupFor3DItems();
+                RenderSystem.disableDepthTest();
+                RenderSystem.depthMask(true);
+                RenderSystem.setShaderColor(1, 1, 1, 1);
+                RenderSystem.defaultBlendFunc();
+            } finally {
+                try {
+                    modelView.popPose();
+                    RenderSystem.applyModelViewMatrix();
+                } finally {
+                    try { RenderSystem.setProjectionMatrix(savedProjection, savedSorting); }
+                    finally { pose.popPose(); }
+                }
+            }
         }
+    }
+
+    /** PoseStack.mulPoseMatrix does not transform normals in 1.20.1. */
+    public static void applyCameraView(PoseStack pose, Matrix4f view) {
+        pose.mulPoseMatrix(view);
+        pose.last().normal().mul(new org.joml.Matrix3f(view).normal());
     }
 
     /** Builds a perspective camera projection whose viewport is the preview rectangle in GUI pixels. */
