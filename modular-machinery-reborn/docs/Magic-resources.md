@@ -1,8 +1,18 @@
-# Magic resources: Botania, Nature’s Aura and Blood Magic 3 (0.118.0)
+# Magic resources: Botania, Nature’s Aura and Blood Magic 3 (0.118.6)
 
-For Minecraft 1.20.1 / Forge. Each integration is optional; its hatches and requirement types register only when that mod is installed. API checks used **Botania 1.20.1-455-FORGE**, **Nature’s Aura 39.4** and **Blood Magic 3.3.8-50**. Install their own dependencies as well. Both client and server must use protocol **7**.
+For Minecraft 1.20.1 / Forge. Each integration is optional; its hatches and requirement types register only when that mod is installed. API checks used **Botania 1.20.1-455-FORGE**, **Nature’s Aura 39.4** and **Blood Magic 3.3.8-50**. Install their own dependencies as well. Both client and server must use protocol **8**. The magic serialization fix requires 0.118.5 or later.
 
 Custom machines can consume and produce these resources. This does not import recipes from third-party machines such as the Blood Altar. Other magic integrations remain deferred.
+
+## JEI Aura gauge
+
+Aura recipe requirements use a green 6×80 vertical gauge in separate input/output columns. Only Nature’s Aura and JEI are needed; gugu-utils is not a runtime dependency. Mana, LP and Demon Will retain colored text cells.
+
+- One-time requirements display amount. Per-tick requirements display amount × recipeTime as the total for one recipe execution.
+- Full scale is **166666 raw Aura units**, for display only. It is neither the local world balance nor a hatch capacity or processing limit. Amounts above the scale fill the bar and show “+”.
+- Hover anywhere along the full bar for the exact amount, Aura type and script tooltip. Per-tick requirements also show the exact total. Multiple requirements wrap into separate rows without covering item or fluid slots.
+
+For amount 800 and recipeTime 1200, a one-time requirement displays 800; perTick true totals 960000 and shows “+”. This display does not change payment, parallelism or modifiers. Real JEI visuals remain pending acceptance.
 
 ## Hatches and connections
 
@@ -28,7 +38,7 @@ The range is `0..2147483647`; zero disables storage. Restart and reload the bloc
 
 Each LP hatch has one Blood Orb slot. Bind the orb through Blood Magic first. Unbound or malformed bindings cannot access recipe LP. Every 5 ticks, input hatches pull from the owner’s SoulNetwork toward a cache of **one tenth of the orb’s capacity**. Outputs buffer up to the orb capacity and attempt to return cached LP every 5 ticks. Full networks or rejected API transfers leave the remainder cached for retry. Removing an orb preserves its cache but disables recipe access until a valid bound orb is inserted. No additional online-owner condition is imposed.
 
-Aura and Will have no independent tanks. The gauges use 1,000,000 Aura and 100 Will as visual scales; these are not hard world limits. All five Will types are displayed separately. Moving a hatch changes its environment. Multiple hatches in one chunk cannot count the same resource twice.
+Aura and Will have no independent tanks. The hatch-screen gauges use 1,000,000 Aura and 100 Will as visual scales; these are not hard world limits. All five Will types are displayed separately. Moving a hatch changes its environment. Multiple hatches in one chunk cannot count the same resource twice.
 
 ## JSON requirements
 
@@ -98,8 +108,8 @@ ServerEvents.recipes(event => {
 
 Reservations share the identity of the actual resource. Failed commits roll back executed steps, including the original distribution of Aura spots within a chunk. Overlapping environments that cannot commit safely fail and roll back. Tiny Will payments that cannot be represented at a very large balance are rejected to prevent free crafting.
 
-JEI shows colored text cells, complete descriptions and script tooltips. There is no separate magic ingredient index or R/U lookup. Split menu words preserve double readings, and chunk update packets omit the orb’s private binding NBT.
+JEI uses the green gauge for Aura and colored text cells for the other magic resources, with complete descriptions and script tooltips. There is no separate magic ingredient index or R/U lookup. Split menu words preserve double readings, and chunk update packets omit the orb’s private binding NBT.
 
-Offline checks used actual published APIs and resource classes for simulation, payment, cancellation, shared balances, rollback and persistent caches. No Forge game was launched. Real bursts, sparks, flowers, Aura effects, SoulNetwork persistence across game restarts, multiplayer synchronization and full Forge event dispatch still require in-game acceptance. No instance deployment, GitHub upload, commit or push was performed.
+Offline checks used actual published APIs and resource classes for simulation, payment, cancellation, shared balances, rollback and persistent caches. No Forge game was launched. Real bursts, sparks, flowers, Aura effects, SoulNetwork persistence across game restarts, multiplayer synchronization and full Forge event dispatch still require in-game acceptance. The current game instance was not modified by these checks.
 
 [中文说明](魔法资源.md) · [Recipe guide](KJS-配方指南.md) · [Documentation index](README.md)

@@ -2,15 +2,15 @@
 
 **Modular Machinery: Community Edition（1.12.2）在 Minecraft 1.20.1 / Forge 上的移植版。**
 
-它是一个**框架**：本模组不携带任何机器与配方，机器和配方由整合包作者或玩家通过数据包、配置目录或 KubeJS 提供。
+它是一个**框架**：JAR 不内置机器定义与机器加工配方，机器和配方由整合包作者或玩家通过数据包、配置目录或 KubeJS 提供。
 
 ## 当前状态（2026-10-27）
 
-- **源码 0.118.3**，Minecraft 1.20.1 / Forge / Java 17。
-- 修复 JEI 定时轮换后材料表全部回退为控制器的问题；显示更新回调恢复材料，并校验槽位当前实际显示的种类和数量。
-- 新增 6 项真实 JEI 布局生命周期回归由红转绿；本轮连同此前预览 23、界面 28、主套件 2669，共 2726 项检查零失败。生产 build/reobf 32s，203 JSON、中英各 424 键及协议／SRG 检查通过。
-- 协议仍为 7。修复后画面待实机确认，实例仍为 0.118.2；本提交汇总源码、教程与独立教学包，未部署游戏或创建 Release。
-- [修复记录](modular-machinery-reborn/docs/修复记录-0.118.3.md) · [归档](releases/modular-machinery-reborn/v0.118.3/README.md) · [交接](modular-machinery-reborn/docs/交接-2026-10-23.md)。
+- **源码 0.118.6**，Minecraft 1.20.1 / Forge / Java 17。
+- JEI 自然灵气需求改用 gugu-utils 风格的 6×80 绿色竖条，支持输入／输出、从下向上填充、超刻度“＋”及整条悬停提示。
+- 新增 29 项专项（另含 200 组布局场景），相关既有 2951 项，共 2980 项零失败；生产 build/reobf、203 JSON 和中英各 427 键检查通过。
+- 协议保持 8，配方格式与结算不变，不需要安装 gugu-utils；画面待实机验收。本次 Git 提交汇总 0.118.4–0.118.6 源码、教程和归档说明，未部署游戏或创建 GitHub Release。
+- [显示说明](modular-machinery-reborn/docs/魔法资源.md) · [修复记录](modular-machinery-reborn/docs/更新记录-0.118.6.md) · [归档](releases/modular-machinery-reborn/v0.118.6/README.md) · [交接](modular-machinery-reborn/docs/交接-2026-10-23.md)。
 
 ## 从哪开始
 

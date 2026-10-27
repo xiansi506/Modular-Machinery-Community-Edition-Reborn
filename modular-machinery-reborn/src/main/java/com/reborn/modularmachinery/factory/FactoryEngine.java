@@ -302,6 +302,7 @@ public final class FactoryEngine {
         HatchCollection ports = this.host.ports();
         RecipeModifiers modifiers = this.host.modifiers();
         List<Candidate> out = new ArrayList<>();
+        boolean threadRules = allThreads().stream().anyMatch(t -> !t.scriptState().modifiers().isEmpty());
         for (MachineRecipe recipe : this.host.availableRecipes()) {
             if (blocked.contains(recipe.getId()) || unavailable.contains(recipe.getId())) {
                 continue;
@@ -317,7 +318,6 @@ public final class FactoryEngine {
                 MachineRecipe candidate = recipe.executionCopy();
                 candidate.setParallelism(1);
                 MachineRecipe.StartPlan plan = candidate.prepareStart(groupPorts, modifiers);
-                boolean threadRules = allThreads().stream().anyMatch(t -> !t.scriptState().modifiers().isEmpty());
                 if (candidate.canStart(groupPorts, plan) || threadRules) {
                     out.add(new Candidate(recipe, group));
                 }
@@ -547,16 +547,17 @@ public final class FactoryEngine {
      * ({@code :142-159}): re-arm the same recipe for another settlement, and when it will not take, empty the
      * slot.
      *
-     * <p>A new settlement re-evaluates current resources and catalyst payments. The finished slot is
+     * <p>A new settlement resolves the current recipe definition after reload, then re-evaluates current
+     * resources and catalyst payments. The finished slot is
      * excluded from the machine's parallel ledger while computing its new allowance.
      */
     private void tryRestart(FactoryThread thread, ActiveCraft finished) {
-        if (!thread.accepts(finished.recipe()) || (thread.isCoreThread()
+        MachineRecipe current = host.currentRecipe(finished.recipeId());
+        if (current == null || !thread.accepts(current) || (thread.isCoreThread()
                 && host.coreThreads().stream().noneMatch(spec -> spec.name().equals(thread.threadName())))) {
             thread.clear(); dirty = true; host.onThreadIdle(thread); return;
         }
-        HatchCollection groupPorts = this.host.ports().withGroup(finished.group());
-        ActiveCraft again = prepareCraft(finished.recipe(), finished.group(), thread);
+        ActiveCraft again = prepareCraft(current, finished.group(), thread);
         if (again != null && begin(thread, again)) return;
         thread.clear();
         this.dirty = true;

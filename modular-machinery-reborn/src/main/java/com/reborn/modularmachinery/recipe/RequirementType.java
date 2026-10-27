@@ -61,6 +61,9 @@ public interface RequirementType {
     /**
      * 把一条需求的正文写进包。
      *
+     * <p>正文必须先写 {@code buf.writeUtf(requirement.ioType().name())}。统一读取器会先读掉方向，
+     * 再把剩余正文和方向一起交给 {@link #readBody}；不能只测试 writer 与 readBody 的直接往返。
+     *
      * <p><b>种类字符串不由这里写。</b>{@code readRequirement} 已经先写了
      * {@code requirement.type().id().toString()}，正文紧跟其后。让每个种类自己再写一遍种类，
      * 就是「同一个值有两处写入点」，而这两处迟早会分叉。

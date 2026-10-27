@@ -45,6 +45,7 @@ public final class MagicRequirements {
         }
         public void write(FriendlyByteBuf buf, MachineRequirement requirement) {
             MagicRequirement req = (MagicRequirement) requirement;
+            buf.writeUtf(req.ioType().name());
             buf.writeDouble(req.amount); buf.writeUtf(req.variant); buf.writeDouble(req.minimum); buf.writeDouble(req.maximum); buf.writeBoolean(req.perTick());
         }
         public MachineRequirement readBody(FriendlyByteBuf buf, IOType io) {

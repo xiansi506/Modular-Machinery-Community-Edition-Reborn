@@ -1,6 +1,8 @@
-# Long energy, gas sprites and model materials (0.118.3)
+# Long energy, gas sprites and model materials (0.118.6)
 
-These features have passed offline checks and a production build. In-game acceptance is pending. Update clients and servers together to current protocol **7**. Back up the world before upgrading; energy values above the int range cannot be restored faithfully by older versions.
+0.118.4 preserves JSON long energy integers through settlement, removes the premature quarter-long cap, and saturates only the final draw at `Long.MAX_VALUE`. Modifier coefficients retain their existing float aggregation semantics. JavaScript Number precision and ordinary Forge Energy int transfer limits still apply; see the [bilingual patch notes](修复记录-0.118.4.md).
+
+These features have passed offline checks and a production build. In-game acceptance is pending. Update clients and servers together to current protocol **8**. Back up the world before upgrading; energy values above the int range cannot be restored faithfully by older versions.
 
 ## Energy hatches
 

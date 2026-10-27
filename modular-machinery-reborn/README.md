@@ -1,6 +1,6 @@
 # Modular Machinery: Community Edition Reborn
 
-> **当前源码 0.118.3（2026-10-27）**：修复 JEI 定时轮换后材料表全部回退为控制器的问题；显示更新回调恢复材料，并校验槽位当前实际显示的种类和数量。新增 6 项真实 JEI 布局生命周期回归由红转绿；本轮连同此前预览 23、界面 28、主套件 2669，共 2726 项检查零失败。生产 build/reobf 32s，203 JSON、中英各 424 键及协议／SRG 检查通过。协议仍为 7。修复后画面待实机确认，实例仍为 0.118.2；本提交汇总源码、教程与独立教学包，未部署游戏或创建 Release。见 [修复记录](docs/修复记录-0.118.3.md)与 [交接](docs/交接-2026-10-23.md)。
+> **当前源码 0.118.6（2026-10-27）**：修复工厂配方重载、long 能耗精度、资源回滚与魔法配方同步崩溃，加入 JEI 自然灵气绿色条。协议 **8**。详见 [中文简介](docs/简介.md)／[English introduction](docs/Introduction.md)、[使用说明](docs/使用说明.md)及 [更新记录](docs/更新记录-0.118.6.md)。本次提交汇总 0.118.4–0.118.6 源码和文档；未部署游戏，修复后的实机验收仍待完成。
 
 Forge 1.20.1 / Java 17 migration foundation for the archived Modular Machinery: Community Edition source.
 
@@ -10,7 +10,7 @@ had listed as unfinished: **KubeJS can write a complete machine definition** (al
 four silent defects behind one symptom (tag namespace, no loot tables at all, per-variant tables, and the generated
 data pack's namespace declaration and resource-id shape). **Verified in game** (mining speed and drops, by runtime
 probes), deployed, and archived under `releases/modular-machinery-reborn/v0.31.0/`. Its record is in
-`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.118.3 and is not a published release.**
+`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.118.6 and is not a published release.**
 
 > **0.31.0 supersedes 0.30.1**, which had corrected only the `license` / `authors` metadata in
 > `META-INF/mods.toml` and was otherwise functionally 0.29.0.
@@ -18,7 +18,7 @@ probes), deployed, and archived under `releases/modular-machinery-reborn/v0.31.0
 > 🚀 **New here? Start at [docs/使用说明.md](docs/使用说明.md)** — "from an empty instance to a machine that runs",
 > in Chinese, with complete copy-pasteable machine definitions and recipes.
 >
-> **This mod ships no machines and no recipes.** The jar carries none of either on purpose (M10), and **no
+> **This mod ships no machine definitions or machine processing recipes.** The jar carries none of either on purpose (M10), and **no
 > example data pack is shipped either** — the documentation *is* the distribution for content. You supply
 > machines (data pack / config directory / KubeJS) and recipes (JSON / KubeJS) yourself.
 > *(Since 0.31.0 the jar's `data/` holds 13 files — two block tags (`mineable/pickaxe`, `needs_stone_tool`) and

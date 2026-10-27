@@ -44,7 +44,7 @@ import java.util.List;
  */
 final class MachineRecipeLayout {
 
-    /** Every part is 18 wide ({@code getComponentWidth}) with a 0 horizontal gap. */
+    /** Standard cells are 18 wide; the Aura column has its own dimensions and gaps. */
     static final int CELL = 18;
     /** {@code RequirementTip.LINE_HEIGHT}. */
     static final int LINE_HEIGHT = 9;
@@ -66,6 +66,8 @@ final class MachineRecipeLayout {
     enum Kind {
         /** {@code RecipeLayoutPart.Energy#getComponentHorizontalSortingOrder}. */
         ENERGY(1000),
+        /** gugu-utils' independent Aura column. */
+        AURA(200),
         /** {@code RecipeLayoutPart.FluidTank#getComponentHorizontalSortingOrder}. */
         FLUID(100),
         /** {@code RecipeLayoutPart.Item#getComponentHorizontalSortingOrder}. */
@@ -84,23 +86,27 @@ final class MachineRecipeLayout {
 
     private final List<Cell> inputEnergy;
     private final List<Cell> inputFluids;
+    private final List<Cell> inputAura;
     private final List<Cell> inputItems;
     private final List<Cell> outputItems;
     private final List<Cell> outputFluids;
+    private final List<Cell> outputAura;
     private final List<Cell> outputEnergy;
     private final int width;
     private final int height;
     private final int arrowX;
     private final int arrowY;
 
-    private MachineRecipeLayout(List<Cell> inputEnergy, List<Cell> inputFluids, List<Cell> inputItems,
-                                List<Cell> outputItems, List<Cell> outputFluids, List<Cell> outputEnergy,
+    private MachineRecipeLayout(List<Cell> inputEnergy, List<Cell> inputAura, List<Cell> inputFluids, List<Cell> inputItems,
+                                List<Cell> outputItems, List<Cell> outputFluids, List<Cell> outputAura, List<Cell> outputEnergy,
                                 int width, int height, int arrowX, int arrowY) {
         this.inputEnergy = List.copyOf(inputEnergy);
         this.inputFluids = List.copyOf(inputFluids);
+        this.inputAura = List.copyOf(inputAura);
         this.inputItems = List.copyOf(inputItems);
         this.outputItems = List.copyOf(outputItems);
         this.outputFluids = List.copyOf(outputFluids);
+        this.outputAura = List.copyOf(outputAura);
         this.outputEnergy = List.copyOf(outputEnergy);
         this.width = width;
         this.height = height;
@@ -115,6 +121,9 @@ final class MachineRecipeLayout {
     List<Cell> inputFluids() {
         return this.inputFluids;
     }
+
+    List<Cell> inputAura() { return this.inputAura; }
+    List<Cell> outputAura() { return this.outputAura; }
 
     List<Cell> inputItems() {
         return this.inputItems;
@@ -159,15 +168,18 @@ final class MachineRecipeLayout {
     static MachineRecipeLayout measure(List<MachineRecipe> recipes, Font font) {
         List<Cell> inputEnergy = new ArrayList<>();
         List<Cell> inputFluids = new ArrayList<>();
+        List<Cell> inputAura = new ArrayList<>();
         List<Cell> inputItems = new ArrayList<>();
         List<Cell> outputItems = new ArrayList<>();
         List<Cell> outputFluids = new ArrayList<>();
+        List<Cell> outputAura = new ArrayList<>();
         List<Cell> outputEnergy = new ArrayList<>();
 
         // The original tracked highestY across both sides in one variable, and the arrow's y depends on it.
         int[] highestY = {0};
         int offsetX = MARGIN;
         offsetX = place(Kind.ENERGY, maxCount(recipes, IOType.INPUT, Kind.ENERGY), offsetX, inputEnergy, highestY);
+        offsetX = place(Kind.AURA, maxCount(recipes, IOType.INPUT, Kind.AURA), offsetX, inputAura, highestY);
         offsetX = place(Kind.FLUID, maxCount(recipes, IOType.INPUT, Kind.FLUID), offsetX, inputFluids, highestY);
         offsetX = place(Kind.ITEM, maxCount(recipes, IOType.INPUT, Kind.ITEM), offsetX, inputItems, highestY);
 
@@ -178,6 +190,7 @@ final class MachineRecipeLayout {
 
         offsetX = place(Kind.ITEM, maxCount(recipes, IOType.OUTPUT, Kind.ITEM), offsetX, outputItems, highestY);
         offsetX = place(Kind.FLUID, maxCount(recipes, IOType.OUTPUT, Kind.FLUID), offsetX, outputFluids, highestY);
+        offsetX = place(Kind.AURA, maxCount(recipes, IOType.OUTPUT, Kind.AURA), offsetX, outputAura, highestY);
         offsetX = place(Kind.ENERGY, maxCount(recipes, IOType.OUTPUT, Kind.ENERGY), offsetX, outputEnergy, highestY);
 
         // offsetProcessArrow = new Point(tempArrowOffsetX, highestY / 2 / 2)
@@ -201,8 +214,8 @@ final class MachineRecipeLayout {
         int height = highestY[0] + longestTooltip;
         // A machine with no recipes still gets a category — the original did that too — and JEI must not be
         // handed a zero-sized drawable. The band alone is 34 wide (4 + 4 + 22 + 4) and empty otherwise.
-        return new MachineRecipeLayout(inputEnergy, inputFluids, inputItems, outputItems, outputFluids,
-                outputEnergy, Math.max(1, width), Math.max(1, height), arrowX, arrowY);
+        return new MachineRecipeLayout(inputEnergy, inputAura, inputFluids, inputItems, outputItems, outputFluids,
+                outputAura, outputEnergy, Math.max(1, width), Math.max(1, height), arrowX, arrowY);
     }
 
     /**
@@ -213,7 +226,10 @@ final class MachineRecipeLayout {
         if (amount <= 0) {
             return startX;
         }
-        int height = kind == Kind.ENERGY ? ENERGY_PART_HEIGHT : CELL;
+        int height = kind == Kind.AURA ? AuraBarDrawable.PART_HEIGHT : kind == Kind.ENERGY ? ENERGY_PART_HEIGHT : CELL;
+        int width = kind == Kind.AURA ? AuraBarDrawable.WIDTH : CELL;
+        int gapX = kind == Kind.AURA ? AuraBarDrawable.GAP_X : 0;
+        int gapY = kind == Kind.AURA ? AuraBarDrawable.GAP_Y : 0;
         int perRow = maxHorizontalCount(kind, amount);
         int offsetX = startX;
         int partOffsetX = startX;
@@ -221,13 +237,13 @@ final class MachineRecipeLayout {
         int partOffsetY = 0;
         for (int i = 0; i < amount; i++) {
             if (i > 0 && i % perRow == 0) {
-                // + getComponentVerticalGap(), which is 0 for all three parts.
-                partOffsetY += height;
+                // The Aura column keeps its source's 4px vertical gap.
+                partOffsetY += height + gapY;
                 partOffsetX = originalOffsetX;
             }
             out.add(new Cell(partOffsetX, partOffsetY));
-            // + getComponentHorizontalGap(), also 0 for all three parts.
-            partOffsetX += CELL;
+            // Aura also reserves room for the overflow marker beside its 6px bar.
+            partOffsetX += width + gapX;
             if (partOffsetX > offsetX) {
                 offsetX = partOffsetX;
             }
@@ -245,6 +261,7 @@ final class MachineRecipeLayout {
         }
         return switch (kind) {
             case ENERGY -> 1;
+            case AURA -> 2;
             // FluidTank/GasTank: Math.max((int) Math.ceil(partAmount / 4.0), 1)
             case FLUID -> Math.max((int) Math.ceil((double) amount / 4.0), 1);
             case ITEM -> itemMaxHorizontalCount(amount);
@@ -323,6 +340,7 @@ final class MachineRecipeLayout {
      * 「物品」也因此从默认桶变成一个**明确**的答案。
      */
     private static Kind kindOf(MachineRequirement requirement) {
+        if (AuraBarDrawable.supports(requirement)) return Kind.AURA;
         if (requirement instanceof EnergyRequirement) {
             return Kind.ENERGY;
         }

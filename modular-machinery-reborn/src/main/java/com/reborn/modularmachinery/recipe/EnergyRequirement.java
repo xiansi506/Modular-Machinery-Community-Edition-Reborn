@@ -35,6 +35,8 @@ public final class EnergyRequirement extends MachineRequirement {
 
     /** {@code duration / modifiedDuration}; pushed in by {@link MachineRecipe} when modifiers shorten a craft. */
     private float durationMultiplier = 1.0F;
+    private record ModifiedRate(RecipeModifiers modifiers, long value) {}
+    private volatile ModifiedRate cachedRate;
 
     public EnergyRequirement(IOType ioType, long energyPerTick) {
         super(ioType, true);
@@ -75,8 +77,11 @@ public final class EnergyRequirement extends MachineRequirement {
 
     /** The energy one copy draws or produces per tick, after this requirement's modifiers. */
     public long modifiedEnergyPerTick(RecipeModifiers modifiers) {
-        double modified = modifiers.apply(this, (double) this.energyPerTick, false);
-        return (long) Math.max(0.0, Math.floor(modified));
+        ModifiedRate cached = cachedRate;
+        if (cached != null && cached.modifiers() == modifiers) return cached.value();
+        long value = EnergyMath.modified(energyPerTick, modifiers, ioType());
+        cachedRate = new ModifiedRate(modifiers, value);
+        return value;
     }
 
     /** What one tick of this craft draws, across every copy and accounting for a shortened duration.
@@ -97,8 +102,7 @@ public final class EnergyRequirement extends MachineRequirement {
             return 0L;
         }
         int parallelism = isParallelizeUnaffected() ? 1 : Math.max(1, copies);
-        double scaled = (double) perCopy * parallelism * (durationMultiplier <= 0.0F ? 1.0F : durationMultiplier);
-        return (long) Math.min(Long.MAX_VALUE / 4L, Math.max(1.0, Math.floor(scaled)));
+        return EnergyMath.draw(perCopy, parallelism, durationMultiplier);
     }
 
     @Override
@@ -138,7 +142,7 @@ public final class EnergyRequirement extends MachineRequirement {
             return ceiling;
         }
         // The duration multiplier scales what a copy costs per tick, so it belongs in the per-copy divisor.
-        long perCopyPerTick = (long) Math.max(1.0, perCopy * this.durationMultiplier);
+        long perCopyPerTick = EnergyMath.draw(perCopy, 1, durationMultiplier);
         long available;
         if (this.ioType() == IOType.INPUT) {
             available = ports.storedEnergy();

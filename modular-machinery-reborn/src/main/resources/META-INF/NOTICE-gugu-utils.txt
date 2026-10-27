@@ -1,0 +1,13 @@
+This distribution includes an unmodified copy of recipes_ui.png from gugu-utils
+and an adaptation of its Aura JEI bar rendering/layout (RendererAura.java and
+JEIComponentAura.java). Only the Aura bar regions of the texture are used.
+
+Upstream: https://github.com/ParaParty/gugu-utils
+Source revision: a0724e43d3f73f3de5a5ce1691820741aaa8ea18
+Archive inspected on 2026-10-27
+Copyright (c) 2020 派瑞派对
+License: MIT (full text: META-INF/licenses/gugu-utils-LICENSE.txt)
+
+Changes: Forge 1.20.1 GuiGraphics rendering, scoped tint restoration, separate
+recipe layout band and full-bar tooltip, once/per-tick amount semantics,
+overflow-safe total arithmetic and explicit display-scale information.

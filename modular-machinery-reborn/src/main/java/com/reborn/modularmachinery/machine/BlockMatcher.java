@@ -78,10 +78,10 @@ public final class BlockMatcher {
         if (id == null) {
             throw new JsonParseException("Malformed block id '" + idPart + "' in descriptor '" + raw + "'");
         }
-        Block block = ForgeRegistries.BLOCKS.getValue(id);
-        if (block == null) {
+        if (!ForgeRegistries.BLOCKS.containsKey(id)) {
             throw new JsonParseException("Unknown block '" + id + "' in descriptor '" + raw + "'");
         }
+        Block block = ForgeRegistries.BLOCKS.getValue(id);
 
         Map<Property<?>, Comparable<?>> required = new LinkedHashMap<>();
         if (propsPart != null && !propsPart.isBlank()) {

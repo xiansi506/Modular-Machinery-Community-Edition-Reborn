@@ -5,8 +5,10 @@ import com.reborn.modularmachinery.machine.FailureAction;
 import com.reborn.modularmachinery.machine.HatchCollection;
 import com.reborn.modularmachinery.recipe.MachineRecipe;
 import com.reborn.modularmachinery.recipe.RecipeModifiers;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
 
+import javax.annotation.Nullable;
 import java.util.List;
 
 /**
@@ -53,14 +55,17 @@ public interface FactoryHost {
     List<FactoryThreadModel.CoreThreadSpec> coreThreads();
 
     /**
-     * Every recipe bound to this machine that is not already running in one of its threads, in registry order
-     * — the original's {@code RecipeRegistry.getRecipesFor(machine)} narrowed to the candidates this machine
-     * can still be asked to start.
-     *
-     * <p>Recipes already in progress are <b>not</b> candidates again: their inputs were paid at {@code start},
-     * and a second thread starting the same recipe would silently pay for them twice.
+     * Current recipe definitions bound to this machine, in recipe priority/weight order. The engine filters
+     * recipes already assigned to threads and checks live resources itself; this list may be cached until reload.
      */
     List<MachineRecipe> availableRecipes();
+
+    /** Current definition for a new batch, or null if removed. An already paid craft owns its execution copy.
+     * Hosts that prefilter candidates should override this lookup to include definitions currently in progress. */
+    @Nullable
+    default MachineRecipe currentRecipe(ResourceLocation id) {
+        return availableRecipes().stream().filter(recipe -> recipe.getId().equals(id)).findFirst().orElse(null);
+    }
 
     /**
      * The machine's parallelism ceiling for a fresh, thread-less settlement: the machine's own contribution

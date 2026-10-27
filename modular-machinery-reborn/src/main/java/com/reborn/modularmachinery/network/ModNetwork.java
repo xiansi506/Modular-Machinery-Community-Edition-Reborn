@@ -38,7 +38,8 @@ import net.minecraftforge.network.simple.SimpleChannel;
 public final class ModNetwork {
 
     // 0.109.0: provider actions and bounded buffer previews require both peers to update together.
-    private static final String PROTOCOL_VERSION = "7";
+    // 0.118.5: magic requirement bodies include the IO prefix consumed by the common recipe reader.
+    private static final String PROTOCOL_VERSION = "8";
     private static final int ID_PARALLEL_CONTROLLER_UPDATE = 0;
     private static final int ID_SMART_INTERFACE_UPDATE = 1;
     private static final int ID_SELECTION_SYNC = 2;

@@ -2,6 +2,7 @@ package com.reborn.modularmachinery.client.jei;
 
 import com.reborn.modularmachinery.block.ModBlocks;
 import com.reborn.modularmachinery.machine.MachineDefinition;
+import com.reborn.modularmachinery.magic.MagicRequirement;
 import com.reborn.modularmachinery.recipe.CatalystRequirement;
 import com.reborn.modularmachinery.recipe.FluidRequirement;
 import com.reborn.modularmachinery.recipe.IOType;
@@ -434,12 +435,25 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
             drawEnergyCell(graphics, cell, energyOut);
         }
 
+        drawAuraCells(graphics, recipe, IOType.INPUT, measured.inputAura());
+        drawAuraCells(graphics, recipe, IOType.OUTPUT, measured.outputAura());
+
         int revealed = revealedArrowWidth(recipe);
         if (revealed > 0) {
             MachineRecipeAtlas.ARROW_ACTIVE.drawPartial(graphics, measured.arrowX(), measured.arrowY(), revealed);
         }
 
         drawTips(graphics, recipe, measured.height());
+    }
+
+    private static void drawAuraCells(GuiGraphics graphics, MachineRecipe recipe, IOType side,
+                                      List<MachineRecipeLayout.Cell> cells) {
+        var requirements = MachineRecipeLayout.components(recipe, side, MachineRecipeLayout.Kind.AURA);
+        for (int i = 0; i < Math.min(requirements.size(), cells.size()); i++) {
+            var cell = cells.get(i);
+            new AuraBarDrawable((MagicRequirement) requirements.get(i), recipe.recipeTime())
+                    .draw(graphics, cell.x(), cell.y() + AuraBarDrawable.PADDING_Y);
+        }
     }
 
     /**
@@ -542,6 +556,17 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
             tooltip.add(MachineRecipeText.duration(recipe));
         }
         addGasCellTooltip(tooltip, recipe, measured, mouseX, mouseY);
+        addAuraTooltip(tooltip, recipe, IOType.INPUT, measured.inputAura(), mouseX, mouseY);
+        addAuraTooltip(tooltip, recipe, IOType.OUTPUT, measured.outputAura(), mouseX, mouseY);
+    }
+
+    private static void addAuraTooltip(ITooltipBuilder tooltip, MachineRecipe recipe, IOType side,
+                                       List<MachineRecipeLayout.Cell> cells, double mouseX, double mouseY) {
+        var requirements = MachineRecipeLayout.components(recipe, side, MachineRecipeLayout.Kind.AURA);
+        for (int i = 0; i < Math.min(requirements.size(), cells.size()); i++) {
+            if (AuraBarDrawable.contains(cells.get(i), mouseX, mouseY))
+                AuraBarDrawable.addTooltip(tooltip, (MagicRequirement) requirements.get(i), recipe.recipeTime());
+        }
     }
 
     /**

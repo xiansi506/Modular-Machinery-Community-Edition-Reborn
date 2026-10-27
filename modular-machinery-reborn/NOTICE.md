@@ -30,6 +30,15 @@
 
 本模组包含源自上游的资源文件。若有第三方对该资源的主张，请通过项目 issue 联系。
 
+## gugu-utils 灵气条（0.118.6）
+
+JEI 灵气条的绘制和布局改编自 [gugu-utils](https://github.com/ParaParty/gugu-utils)
+的 `RendererAura.java`／`JEIComponentAura.java`；`gugu_recipes_ui.png` 是其
+`textures/gui/recipes_ui.png` 的未修改副本，仅使用灵气条区域。
+上游版权为 `Copyright (c) 2020 派瑞派对`，许可证 MIT。
+完整许可和修改说明随包附在 `META-INF/licenses/gugu-utils-LICENSE.txt`
+及 `META-INF/NOTICE-gugu-utils.txt`，源码检视日期为 2026-10-27。
+
 ## 第三方依赖
 
 本模组在运行时依赖（**不随本仓库分发**）：

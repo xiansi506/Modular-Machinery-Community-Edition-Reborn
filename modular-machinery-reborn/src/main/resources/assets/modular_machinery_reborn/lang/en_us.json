@@ -422,5 +422,8 @@
   "gui.modular_machinery_reborn.magic.orb_bound": "Bound Blood Orb",
   "gui.modular_machinery_reborn.magic.orb_unbound": "Insert a bound Blood Orb",
   "craftcheck.failure.magic.input": "Magic resource missing, wrong type or below minimum",
-  "craftcheck.failure.magic.output": "Magic output hatch or orb missing, or resource limit exceeded"
+  "craftcheck.failure.magic.output": "Magic output hatch or orb missing, or resource limit exceeded",
+  "tooltip.modular_machinery_reborn.aura.total": "Total Aura: %s",
+  "tooltip.modular_machinery_reborn.aura.scale": "Full scale: %s Aura (display only)",
+  "tooltip.modular_machinery_reborn.aura.overflow": "Amount exceeds the bar scale; see the exact total above."
 }

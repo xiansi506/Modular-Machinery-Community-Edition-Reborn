@@ -35,14 +35,26 @@ public final class ResourceTransaction {
         boolean failed = false;
         try {
             for (BooleanSupplier step : operations) if (!step.getAsBoolean()) { failed = true; break; }
-        } catch (RuntimeException failure) {
-            try { rollback(); } catch (RuntimeException secondary) { failure.addSuppressed(secondary); }
+        } catch (RuntimeException | Error failure) {
+            try { rollback(); }
+            catch (RuntimeException | Error secondary) { if (secondary != failure) failure.addSuppressed(secondary); }
             throw failure;
         }
         if (failed) { rollback(); return false; }
         return true;
     }
-    private void rollback() { for (int i=restores.size()-1;i>=0;i--) restores.get(i).run(); }
+    private void rollback() {
+        Throwable failure = null;
+        for (int i = restores.size() - 1; i >= 0; i--) {
+            try { restores.get(i).run(); }
+            catch (RuntimeException | Error error) {
+                if (failure == null) failure = error;
+                else if (failure != error) failure.addSuppressed(error);
+            }
+        }
+        if (failure instanceof RuntimeException runtime) throw runtime;
+        if (failure instanceof Error error) throw error;
+    }
     public IItemHandler items(IItemHandler source) {
         return source instanceof OpaquePort ? (IItemHandler) opaque(source)
                 : (IItemHandler) views.computeIfAbsent(source,k->new Items(source));

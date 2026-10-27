@@ -422,5 +422,8 @@
   "gui.modular_machinery_reborn.magic.orb_bound": "已绑定气血宝珠",
   "gui.modular_machinery_reborn.magic.orb_unbound": "请放入已绑定的气血宝珠",
   "craftcheck.failure.magic.input": "魔法资源不足、类型不符或未达到下限",
-  "craftcheck.failure.magic.output": "缺少魔法输出仓、宝珠或超过资源上限"
+  "craftcheck.failure.magic.output": "缺少魔法输出仓、宝珠或超过资源上限",
+  "tooltip.modular_machinery_reborn.aura.total": "总灵气量：%s",
+  "tooltip.modular_machinery_reborn.aura.scale": "满格刻度：%s 灵气（仅用于显示）",
+  "tooltip.modular_machinery_reborn.aura.overflow": "总量超出条形刻度，请以上方精确数值为准。"
 }
