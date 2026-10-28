@@ -44,7 +44,8 @@ public final class ModRecipeSerializers {
     public static final RegistryObject<RecipeSerializer<MachineRecipe>> MACHINE =
             SERIALIZERS.register("machine", MachineSerializer::new);
 
-    private static final class MachineSerializer implements RecipeSerializer<MachineRecipe> {
+    /** Shared parser for loading and authoring; constructing it does not require a registered serializer. */
+    public static final class MachineSerializer implements RecipeSerializer<MachineRecipe> {
 
         @Override
         public MachineRecipe fromJson(ResourceLocation id, JsonObject json) {

@@ -291,7 +291,7 @@ public final class RequirementTypes {
         }
 
         private static NbtPredicate readNbt(com.google.gson.JsonElement raw, String key, Object where) {
-            if (raw == null || !raw.isJsonObject()) {
+            if (raw == null || (!raw.isJsonObject() && !LiteralNbt.isEncoded(raw))) {
                 throw new JsonParseException("The ComponentType '" + key + "' expects a json compound that "
                         + "defines the NBT tag" + ("nbt-display".equals(key)
                         ? " meant to be used for displaying!" : "!"));

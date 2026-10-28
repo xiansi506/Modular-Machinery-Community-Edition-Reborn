@@ -21,12 +21,12 @@ public final class MachineFragmentWriter {
     }
 
     public static Path write(Path directory, String fileName, String json) throws IOException {
-        if (!fileName.matches("[a-z0-9_.-]+\\.json")) {
+        if (!fileName.matches("[a-z0-9_.-]+\\.(json|js)")) {
             throw new IOException("Invalid export file name: " + fileName);
         }
         Files.createDirectories(directory);
         for (int suffix = 0; ; suffix++) {
-            String name = suffix == 0 ? fileName : fileName.substring(0, fileName.length() - 5) + "_" + suffix + ".json";
+            String name = suffix == 0 ? fileName : fileName.substring(0, fileName.lastIndexOf('.')) + "_" + suffix + fileName.substring(fileName.lastIndexOf('.'));
             Path target = directory.resolve(name);
             java.io.OutputStream stream;
             try {

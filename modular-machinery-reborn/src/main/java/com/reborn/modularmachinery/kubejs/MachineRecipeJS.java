@@ -26,9 +26,9 @@ import dev.latvian.mods.kubejs.recipe.RecipeKey;
  * })
  * }</pre>
  *
- * <p>{@link #deserialize(boolean)} is intentionally empty: datapack recipes and
- * {@code event.custom(...)} already carry a complete JSON body and do not have a
- * {@code machine} key at the top level, so requiring the schema key there would reject them.
+ * <p>Raw recipes retain their complete body as the schema value. KubeJS checks required schema keys in
+ * {@code afterLoaded}, including for {@code event.custom(...)}, so leaving that value null rejects an
+ * otherwise valid raw recipe before it reaches the serializer.
  * {@link #serialize()} decides which shape the current recipe is from the key's type.
  */
 public final class MachineRecipeJS extends RecipeJS {
@@ -143,7 +143,7 @@ public final class MachineRecipeJS extends RecipeJS {
 
     @Override
     public void deserialize(boolean merge) {
-        // Raw recipes keep their own body; there is nothing to read from a machine key.
+        if (this.json != null && this.json.has("machine")) setValue(MACHINE, this.json.deepCopy());
     }
 
     @Override

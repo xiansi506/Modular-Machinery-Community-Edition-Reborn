@@ -61,7 +61,8 @@ public final class SelectionHighlight {
             return;
         }
         List<BlockPos> selected = ClientSelection.positions(minecraft.level.dimension().location());
-        if (selected.isEmpty()) {
+        BlockPos corner = ConstructToolClient.corner();
+        if (selected.isEmpty() && corner == null) {
             return;
         }
 
@@ -79,6 +80,7 @@ public final class SelectionHighlight {
             AABB box = new AABB(pos).inflate(0.005D).move(-camera.x, -camera.y, -camera.z);
             LevelRenderer.renderLineBox(pose, lines, box, 1.0F, 1.0F, 1.0F, 1.0F);
         }
+        if (corner != null) LevelRenderer.renderLineBox(pose, lines, new AABB(corner).inflate(0.009D).move(-camera.x, -camera.y, -camera.z), 0.3F, 1.0F, 0.3F, 1.0F);
         buffers.endBatch(RenderType.lines());
     }
 
@@ -94,10 +96,11 @@ public final class SelectionHighlight {
      * after joining this one.
      */
     public static void onLevelUnload(net.minecraftforge.event.level.LevelEvent.Unload event) {
-        if (event.getLevel().isClientSide()) ClientSelection.clear();
+        if (event.getLevel().isClientSide()) { ClientSelection.clear(); ConstructToolClient.clear(); }
     }
 
     public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         ClientSelection.clear();
+        ConstructToolClient.clear();
     }
 }

@@ -13,7 +13,7 @@ import java.util.UUID;
 
 /** Server-owned selections are scoped to one player and one dimension. */
 public final class ServerSelections {
-    private record Bound(ResourceKey<Level> dimension, StructureSelection selection) {}
+    private record Bound(ResourceKey<Level> dimension, ConstructSession session) {}
     private static final Map<UUID, Bound> SELECTIONS = new HashMap<>();
     private ServerSelections() {}
 
@@ -24,10 +24,14 @@ public final class ServerSelections {
     static StructureSelection get(UUID player, ResourceKey<Level> dimension) {
         Bound bound = SELECTIONS.get(player);
         if (bound == null || !bound.dimension().equals(dimension)) {
-            bound = new Bound(dimension, new StructureSelection());
+            bound = new Bound(dimension, new ConstructSession());
             SELECTIONS.put(player, bound);
         }
-        return bound.selection();
+        return bound.session().selection;
+    }
+
+    public static ConstructSession session(Player player) {
+        get(player); return SELECTIONS.get(player.getUUID()).session();
     }
 
     public static StructureSelection toggle(Player player, BlockPos pos) {
@@ -48,7 +52,7 @@ public final class ServerSelections {
     private static void clearAndSync(Player player) {
         purge(player);
         if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
-            SelectionSyncPacket.sendTo(serverPlayer, List.of());
+            ConstructToolService.sync(serverPlayer, false, 0, "", "");
         }
     }
 }

@@ -1,8 +1,19 @@
 # Modular Machinery: Community Edition Reborn
 
-> **当前源码 0.119.1（2026-10-28），协议 10**：修复建造选择工具的 NBT 往返、方块状态旋转、右键交互、跨维度选区、失败后丢失选区、区块漏导出和文件名问题。片段改存 `config/modular_machinery_reborn/exports/`。专项 50 项、完整主套件 2668 项及既有集成专项合计 **3003 项零失败**，另有 200 组 JEI 几何场景；Java 17 `clean build --offline --no-daemon`／reobf **45s** 成功，JAR 含 215 个合法 JSON、中英各 441 个键。 未启动／部署游戏，真实点击、高亮、多人及跨维度传送仍待实机验收；本次源码提交包含 0.119.1 修复、文档和两项创作者工具计划，未创建 Release。 [操作说明](docs/建造选择工具.md)／[English](docs/Construct-tool.md)／[修复记录](docs/修复记录-0.119.1.md)。
+> **当前源码 0.121.0，协议 12**：可视化配方编辑器首版：机器与配方参数表单、十类资源、JEI 材料拖入、注册 ID 检索、NBT／概率／标签、高级原文保留，以及服务端校验、基础用量预览和 JSON／KubeJS 导出。合计 **3112 项离线检查零失败**（编辑器专项 54、建造增强 33、工具修复 50、主套件 2668、依赖隔离 110 及既有资源／JEI 专项），另有 200 组 JEI 几何场景；Java 17 clean build/reobf 48s 成功，215 个 JSON、中英各 564 个语言键通过检查。 未启动或部署游戏；真实 GUI、拖拽、输入、资源供给、重载和多人网络仍待实机验收。本次源码提交包含 0.120.0 与 0.121.0 的创作工具功能和文档；尚未创建二进制 GitHub Release。 [中文操作](docs/可视化配方编辑器.md)／[English](docs/Visual-recipe-editor.md)／[更新记录](docs/更新记录-0.121.0.md)。
 
-创作者工具计划：[结构构造工具增强／可视化配方编辑器](docs/创作者工具计划.md)（待实施）。
+创作者工具计划：[结构构造工具增强／可视化配方编辑器](docs/创作者工具计划.md)（两项首版均已实现，待实机验收）。
+
+## 新增创作工具 / New creator tools
+
+| 功能 | 主要能力 | 入口与教程 |
+|---|---|---|
+| **结构构造工具增强 / Enhanced structure tool**（0.120.0） | 两点框选、选区增减与撤销、材料替换、状态／NBT 筛选，完整机器 JSON／KubeJS 导出 | 手持工具潜行右键；[中文](docs/建造选择工具.md)／[English](docs/Construct-tool.md) |
+| **可视化配方编辑器 / Visual recipe editor**（0.121.0） | 机器与资源表单、JEI 材料拖入、NBT／概率／标签、原文保留、校验预览，JSON／KubeJS 导出 | `/mm-recipe_editor`；[中文](docs/可视化配方编辑器.md)／[English](docs/Visual-recipe-editor.md) |
+
+两项首版均包含在 **0.121.0**，需要创造模式与权限等级 2，通信协议 **12**。本次提交包含源码和文档；真实游戏验收待完成，二进制 GitHub Release 尚未创建。
+
+Both creator tools are included in **0.121.0**. Creative mode and permission level 2 are required. Machine and recipe exports are validated on the server; offline checks and the production build passed, with gameplay acceptance pending.
 
 Forge 1.20.1 / Java 17 migration foundation for the archived Modular Machinery: Community Edition source.
 
@@ -12,7 +23,7 @@ had listed as unfinished: **KubeJS can write a complete machine definition** (al
 four silent defects behind one symptom (tag namespace, no loot tables at all, per-variant tables, and the generated
 data pack's namespace declaration and resource-id shape). **Verified in game** (mining speed and drops, by runtime
 probes), deployed, and archived under `releases/modular-machinery-reborn/v0.31.0/`. Its record is in
-`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.119.0 and is not a published release.**
+`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.121.0 and has no binary GitHub Release yet.**
 
 > **0.31.0 supersedes 0.30.1**, which had corrected only the `license` / `authors` metadata in
 > `META-INF/mods.toml` and was otherwise functionally 0.29.0.

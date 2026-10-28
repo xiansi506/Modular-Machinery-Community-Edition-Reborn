@@ -41,7 +41,9 @@ public final class ModNetwork {
     // 0.118.5: magic requirement bodies include the IO prefix consumed by the common recipe reader.
     // 0.119.0: compressed-air requirements and two additional optional hatch families.
     // 0.119.1: selection snapshots carry a dimension; generated NBT snapshots retain literal tag types.
-    private static final String PROTOCOL_VERSION = "10";
+    // 0.120.0: server-authoritative authoring actions and paged export previews.
+    // 0.121.0: recipe editor validation tickets and bounded draft/export packets.
+    private static final String PROTOCOL_VERSION = "12";
     private static final int ID_PARALLEL_CONTROLLER_UPDATE = 0;
     private static final int ID_SMART_INTERFACE_UPDATE = 1;
     private static final int ID_SELECTION_SYNC = 2;
@@ -54,6 +56,10 @@ public final class ModNetwork {
     private static final int ID_ME_PATTERN_PROVIDER_ACTION = 9;
     private static final int ID_PROJECTOR_REQUEST = 10;
     private static final int ID_PROJECTOR_RESPONSE = 11;
+    private static final int ID_CONSTRUCT_ACTION = 12;
+    private static final int ID_CONSTRUCT_STATE = 13;
+    private static final int ID_RECIPE_EDITOR_ACTION = 14;
+    private static final int ID_RECIPE_EDITOR_STATE = 15;
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(ModularMachineryReborn.MOD_ID, "main"),
@@ -110,6 +116,10 @@ public final class ModNetwork {
                 ProjectorResponsePacket::encode,
                 ProjectorResponsePacket::new,
                 ProjectorResponsePacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(ID_CONSTRUCT_ACTION, ConstructToolActionPacket.class, ConstructToolActionPacket::encode, ConstructToolActionPacket::new, ConstructToolActionPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(ID_CONSTRUCT_STATE, ConstructToolStatePacket.class, ConstructToolStatePacket::encode, ConstructToolStatePacket::new, ConstructToolStatePacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(ID_RECIPE_EDITOR_ACTION, RecipeEditorActionPacket.class, RecipeEditorActionPacket::encode, RecipeEditorActionPacket::new, RecipeEditorActionPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(ID_RECIPE_EDITOR_STATE, RecipeEditorStatePacket.class, RecipeEditorStatePacket::encode, RecipeEditorStatePacket::new, RecipeEditorStatePacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     private ModNetwork() {

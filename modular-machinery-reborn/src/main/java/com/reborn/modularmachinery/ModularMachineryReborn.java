@@ -89,6 +89,11 @@ public final class ModularMachineryReborn {
         MinecraftForge.EVENT_BUS.addListener(
                 com.reborn.modularmachinery.command.PerformanceReportCommand::onRegisterCommands);
         MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.command.SyntaxCommand::onRegisterCommands);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.command.RecipeEditorCommand::register);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.authoring.RecipeEditorService::logout);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.authoring.RecipeEditorService::dimension);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.authoring.RecipeEditorService::respawn);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.authoring.RecipeEditorService::stopped);
         // 0.29.0: the construct tool's per-player selection lives on the server, and the original dropped it when
         // the connection did (PlayerStructureSelectionHelper:128-134). A new session must not inherit one.
         MinecraftForge.EVENT_BUS.addListener(

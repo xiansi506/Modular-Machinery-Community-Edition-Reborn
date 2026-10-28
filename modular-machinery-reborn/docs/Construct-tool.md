@@ -1,30 +1,40 @@
-# Construct tool
+# Structure authoring tool
 
-For **Reborn 0.119.1 / Minecraft 1.20.1 / Forge**, protocol **10**. Update both client and server.
+For **0.121.0 / Minecraft 1.20.1 / Forge**, protocol **12**. Update both peers. Creative mode and permission level 2 are required.
 
-## Select and export
+## Workflow
 
-1. Use creative mode with command permission level 2. Right-click individual blocks to select them; click again to deselect. White outlines appear while holding the tool, within 32 blocks.
-2. Right-click the machine controller to export. The tool now runs before block GUI interaction, so sneaking is unnecessary for selecting hatches or exporting. Unauthorized players retain normal block interaction.
-3. Find the JSON fragment in the server instance's `config/modular_machinery_reborn/exports/` directory. In singleplayer this is your local instance; on a dedicated server ask its administrator for the file.
-4. Names use a lowercase player name and timestamp; collisions add `_1`, `_2`, etc. Existing exports are never replaced.
-5. The selection clears only after a complete successful write. Write errors, unreadable positions and NBT that cannot round trip preserve the selection. Load missing chunks and retry; the tool does not force chunk loading.
-6. Changing dimension, respawning or disconnecting clears the selection. Players have separate selections.
+1. Hold the construct tool and sneak-right-click air or a block to open settings.
+2. Choose single-block or two-corner box selection, toggle/add/remove, and air filtering. Return to the world and click blocks. Boxes include both corners and create one undo step; a green outline marks the pending first corner.
+3. Right-click a machine controller to bind the origin and open export settings. Fill in the machine ID and name, choose field filters and format, then validate and preview.
+4. Scroll the read-only source preview, switch pages, and confirm export. Copy page copies only the current page.
 
-Selection remains per block; box selection, undo and a quick-clear gesture are not provided. The outline range does not limit the selection size or keep remote chunks loaded.
+Clicking a controller now opens confirmation instead of immediately writing a fragment. Unauthorized players retain ordinary block interaction.
 
-## Use the fragment
+## Selection and substitutions
 
-The file contains only `parts` and is not automatically loaded. Copy its parts into a full machine definition with `registryname` and other required fields, then save that definition in `data/<namespace>/machinery/` in a data pack or in `config/modular_machinery_reborn/machinery/`. Use `/reload`; new dedicated controller registration requires a restart. Configuration file names must follow lowercase resource-path rules.
+Selections and box volumes are limited to **32768 blocks**. Unloaded chunks or oversized edits reject the entire operation and keep the existing selection and corner. Undo/redo retain up to 32 operations and a bounded total coordinate count. Undo with a pending corner cancels only that corner. Clear is undoable; new edits discard the redo branch.
 
-Positions and native block states are normalized together to a north-facing controller, including stairs, log axes and rail shapes. Do not rotate them again manually. Every block-state property is captured; remove constraints that should remain flexible.
+The HUD shows count, bounds, mode and corner. White selection outlines remain limited to 32 blocks. Material substitutions use source block IDs and validated target descriptors, up to 16 mappings. They affect exported data only and do not inherit unrelated source block entity NBT. Settings reset pending corners. Dimension changes, respawns and disconnects clear the temporary session; preferences do not persist across restarts.
 
-Old fragments in `machinery/` are preserved and are not migrated automatically. Move or complete those files yourself if the loader reports missing machine metadata.
+## Field filters
 
-## NBT snapshots
+Block-state fields accept `*`, empty, or a comma-separated list such as `facing,half`. Native states and positions normalize together to a north-facing controller.
 
-Generated `nbt` uses a versioned literal envelope, for example `["mmr:literal_nbt_v1", "{Items:[]}"]`. It retains numeric types, typed arrays, empty containers and literal strings. Snapshot fields are required while additional compound fields are allowed; list order and empty lists are matched literally. Coordinates and transient casing tint are excluded.
+Matching and preview NBT have separate filters, both empty by default. Use `*` for all fields, `Energy,Mode` for top-level fields, or `/nested/tier,/ForgeCaps/example:cap` for nested compound paths. JSON Pointer escapes `~0` and `~1` are supported; list indices are not. Missing fields are skipped per block. Check the source preview for typing errors and intended constraints.
 
-Inventory, energy and progress fields can still become structure requirements. Remove unnecessary `nbt` conditions or replace them with a focused hand-written template. Existing hand-written regex/range templates keep their previous behavior. `preview-nbt` remains available for separate display data.
+Snapshots preserve literal strings, numeric types, typed arrays and empty containers. Inventory, energy and progress become structure conditions if included in matching NBT. Keep only stable fields. Existing hand-written regex/range templates retain their behavior.
 
-The targeted offline suite uses real production export/parsing/matching methods and native chest/furnace data, with lightweight world and player fixtures. In-game clicks, outlines, portals, multiplayer and real OpenGL behavior still require acceptance. See the [fix record](修复记录-0.119.1.md) for build and validation details.
+## Formats and saving
+
+All files go to the server instance's `config/modular_machinery_reborn/exports/`. Lowercase names and numbered suffixes prevent replacement of old exports. Dedicated-server files must be retrieved from that server.
+
+- parts fragment: merge the parts into a complete definition.
+- Full JSON: copy into a data pack's `data/<namespace>/machinery/` or the configuration machinery directory, then reload.
+- KubeJS: copy the generated `.js` into `kubejs/server_scripts/`, install KubeJS and reload. Generating the file does not require KubeJS. Install either the JSON or equivalent script to avoid duplicate IDs.
+
+The complete definition is checked with the production parser; generated scripts use the existing `.field("parts", ...)` API. New dedicated controller registration still requires a restart. Processing recipes remain separate.
+
+Saving checks the current session and world again. A stale preview, unreadable chunk, controller beyond 64 blocks or disk failure preserves the selection. Successful writes clear it; undo can restore it. Previews are paged at 8000 UTF-16 code units and complete exports are limited to approximately 4M code units.
+
+The new 33-case offline suite drives production selection/filter/export code and the real Rhino/builder path using lightweight world fixtures. Actual GUI rendering, clicks, outlines, multiplayer and portal transitions still need in-game acceptance. See the [update record](更新记录-0.120.0.md).

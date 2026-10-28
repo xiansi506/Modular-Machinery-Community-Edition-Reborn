@@ -4,6 +4,19 @@
 
 它是一个**框架**：JAR 不内置机器定义与机器加工配方，机器和配方由整合包作者或玩家通过数据包、配置目录或 KubeJS 提供。
 
+## 新增创作工具 / New creator tools
+
+**0.121.0 已包含以下两项首版功能：**
+
+| 功能 | 主要能力 | 入口与教程 |
+|---|---|---|
+| **结构构造工具增强**（0.120.0 新增） | 两点框选、选区增减、撤销／恢复、材料替换、状态与 NBT 筛选，预览并导出完整机器 JSON／KubeJS | 手持工具潜行右键打开面板；[中文教程](modular-machinery-reborn/docs/建造选择工具.md)／[English](modular-machinery-reborn/docs/Construct-tool.md) |
+| **可视化配方编辑器**（0.121.0 新增） | 机器选择、十类资源表单、JEI 材料拖入、NBT／概率／标签、高级原文编辑、校验预览与 JSON／KubeJS 导出 | 命令 `/mm-recipe_editor`；[中文教程](modular-machinery-reborn/docs/可视化配方编辑器.md)／[English](modular-machinery-reborn/docs/Visual-recipe-editor.md) |
+
+两项工具均需要**创造模式与权限等级 2**。当前通信协议为 **12**，客户端和服务端需同时更新。导出写入服务端独立目录，安装定义并重载后使用；首版已通过离线回归与正式构建，游戏内操作仍待验收。
+
+**Included in 0.121.0:** the enhanced structure authoring tool and the visual recipe editor. Select and export machines, or edit and validate recipes with JEI ingredient drops, typed NBT and JSON/KubeJS export. Both tools require creative mode and permission level 2. Gameplay acceptance remains pending; see the English guides above.
+
 ## 可选联动模组
 
 按需要选装对应的 **Minecraft 1.20.1 / Forge** 版本，并满足各模组自身的依赖。气动工艺与余烬是 **0.119.0** 新增联动；请核对所用版本，实际验证范围见下方[验证边界](#验证边界)。
@@ -27,12 +40,12 @@
 
 ## 当前状态（2026-10-28）
 
-- **源码 0.119.1**，Minecraft 1.20.1 / Forge / Java 17，协议 **10**。
-- 修复建造选择工具的 NBT 往返、方块状态旋转、右键交互、跨维度选区、失败后丢失选区、区块漏导出和文件名问题。片段改存 `config/modular_machinery_reborn/exports/`。专项 50 项、完整主套件 2668 项及既有集成专项合计 **3003 项零失败**，另有 200 组 JEI 几何场景；Java 17 `clean build --offline --no-daemon`／reobf **45s** 成功，JAR 含 215 个合法 JSON、中英各 441 个键。
-- 未启动／部署游戏，真实点击、高亮、多人及跨维度传送仍待实机验收；本次源码提交包含 0.119.1 修复、文档和两项创作者工具计划，未创建 Release。
-- 建造选择工具：[中文](modular-machinery-reborn/docs/建造选择工具.md)／[English](modular-machinery-reborn/docs/Construct-tool.md) · [修复记录](modular-machinery-reborn/docs/修复记录-0.119.1.md) · [本地归档](releases/modular-machinery-reborn/v0.119.1/README.md)。
-
-后续开发：[结构构造工具增强与可视化配方编辑器](modular-machinery-reborn/docs/创作者工具计划.md)已列入计划，均待实施。
+- **源码版本 0.121.0**，Minecraft 1.20.1 / Forge / Java 17，协议 **12**；本次源码提交同时包含 0.120.0 的结构构造工具增强。
+- 可视化配方编辑器首版：机器与配方参数表单、十类资源、JEI 材料拖入、注册 ID 检索、NBT／概率／标签、高级原文保留，以及服务端校验、基础用量预览和 JSON／KubeJS 导出。合计 **3112 项离线检查零失败**（编辑器专项 54、建造增强 33、工具修复 50、主套件 2668、依赖隔离 110 及既有资源／JEI 专项），另有 200 组 JEI 几何场景；Java 17 clean build/reobf 48s 成功，215 个 JSON、中英各 564 个语言键通过检查。
+- 未启动或部署游戏；真实 GUI、拖拽、输入、资源供给、重载和多人网络仍待实机验收。本次更新发布源码与文档，尚未创建二进制 GitHub Release。
+- 游戏内创造模式、权限等级 2 执行 `/mm-recipe_editor` 打开编辑器。
+- [中文操作](modular-machinery-reborn/docs/可视化配方编辑器.md)／[English](modular-machinery-reborn/docs/Visual-recipe-editor.md) · [更新记录](modular-machinery-reborn/docs/更新记录-0.121.0.md) · [本地归档](releases/modular-machinery-reborn/v0.121.0/README.md)。
+- [创作者工具计划](modular-machinery-reborn/docs/创作者工具计划.md)：结构构造工具与可视化配方编辑器首版均已实现，待实机验收。
 
 ## 从哪开始
 
@@ -60,7 +73,7 @@ cd modular-machinery-reborn
 ./gradlew build
 ```
 
-`build` 会执行 `reobfJar`；0.119.1 的正式构建产物为 **`modular-machinery-reborn/build/libs/modular_machinery_reborn-0.119.1.jar`**。本地归档使用 `modular-machinery-reborn-0.119.1.jar` 文件名。
+`build` 会执行 `reobfJar`；0.121.0 的正式构建产物为 **`modular-machinery-reborn/build/libs/modular_machinery_reborn-0.121.0.jar`**。本地归档使用 `modular-machinery-reborn-0.121.0.jar` 文件名。
 
 `gradle.properties` 默认 `use_local_deps=false`，走 Maven 依赖。离线构建需要把本地依赖 jar 放进 `modular-machinery-reborn/libs/` 并设置 `use_local_deps=true`；这些 jar 不随本仓库分发。
 
@@ -74,7 +87,7 @@ cd modular-machinery-reborn
 
 - 二进制 jar 通过 **GitHub Releases** 分发，**不入 Git 历史**。
 - 版本索引、SHA-256 与各版本说明见 [releases/modular-machinery-reborn/README.md](releases/modular-machinery-reborn/README.md)。
-- 已有至 0.119.1 的本地构建归档；Git 中保留版本说明和 SHA-256，二进制下载以实际创建的 GitHub Release 为准。
+- 已有至 0.121.0 的本地构建归档；Git 中保留版本说明和 SHA-256，二进制下载以实际创建的 GitHub Release 为准。
 
 ## 项目贡献者
 

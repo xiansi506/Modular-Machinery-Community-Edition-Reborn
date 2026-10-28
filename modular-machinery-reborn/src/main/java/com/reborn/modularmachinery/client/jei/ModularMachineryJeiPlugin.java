@@ -111,6 +111,20 @@ public final class ModularMachineryJeiPlugin implements IModPlugin {
     }
 
     @Override
+    public void registerGuiHandlers(mezz.jei.api.registration.IGuiHandlerRegistration registration) {
+        registration.addGhostIngredientHandler(com.reborn.modularmachinery.client.RecipeEditorScreen.class,new RecipeEditorGhostHandler());
+        registration.addGuiScreenHandler(com.reborn.modularmachinery.client.RecipeEditorScreen.class,screen -> new mezz.jei.api.gui.handlers.IGuiProperties() {
+            public Class<? extends net.minecraft.client.gui.screens.Screen> getScreenClass(){return screen.getClass();}
+            public int getGuiLeft(){return screen.editorArea().getX();}
+            public int getGuiTop(){return 0;}
+            public int getGuiXSize(){return screen.editorArea().getWidth();}
+            public int getGuiYSize(){return screen.height;}
+            public int getScreenWidth(){return screen.width;}
+            public int getScreenHeight(){return screen.height;}
+        });
+    }
+
+    @Override
     public void registerCategories(IRecipeCategoryRegistration registration) {
         IGuiHelper helper = registration.getJeiHelpers().getGuiHelper();
         registration.addRecipeCategories(new StructurePreviewCategory(helper));

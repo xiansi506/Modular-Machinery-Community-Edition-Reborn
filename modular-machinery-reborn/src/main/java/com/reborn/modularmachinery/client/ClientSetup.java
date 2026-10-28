@@ -60,6 +60,7 @@ public final class ClientSetup {
                     SelectionHighlight::onRenderLevelStage);
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(SelectionHighlight::onLoggingOut);
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(SelectionHighlight::onLevelUnload);
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(ConstructToolClient::onGui);
             // 0.104.0（C6 第一片）：投影仪的世界幽灵预览，与选区高亮同一注册纪律——Forge 总线 +
             // 仅从本客户端入口注册，服务器永远不加载 WorldGhostPreview。
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
