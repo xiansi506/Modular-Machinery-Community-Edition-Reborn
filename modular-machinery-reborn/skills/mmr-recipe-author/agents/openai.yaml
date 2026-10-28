@@ -1,0 +1,4 @@
+interface:
+  display_name: "MMR 配方编写"
+  short_description: "为 Modular Machinery Reborn 编写和排查 JSON、KubeJS 配方"
+  default_prompt: "使用 $mmr-recipe-author 为这台机器编写配方，核对端口、资源和重载方式。"

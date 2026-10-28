@@ -126,3 +126,17 @@ description='''A Forge 1.20.1 reimplementation foundation for Modular Machinery:
     ordering="AFTER"
     side="BOTH"
 
+# Optional 1.20.1 resource APIs. These must initialize before their hatches are used.
+[[dependencies.${mod_id}]]
+    modId="pneumaticcraft"
+    mandatory=false
+    versionRange="[6.0.23,7)"
+    ordering="AFTER"
+    side="BOTH"
+[[dependencies.${mod_id}]]
+    modId="embers"
+    mandatory=false
+    versionRange="[1.20.1-1.4.7,)"
+    ordering="AFTER"
+    side="BOTH"
+

@@ -6,7 +6,7 @@
 
 ## 可选联动模组
 
-按需要选装对应的 **Minecraft 1.20.1 / Forge** 版本，并满足各模组自身的依赖。气动工艺与余烬是 **0.119.0 本地开发版**新增联动；请核对所用版本，实际验证范围见下方[验证边界](#验证边界)。
+按需要选装对应的 **Minecraft 1.20.1 / Forge** 版本，并满足各模组自身的依赖。气动工艺与余烬是 **0.119.0** 新增联动；请核对所用版本，实际验证范围见下方[验证边界](#验证边界)。
 
 | 模组 | 联动内容 | 接入状态 |
 |---|---|---|
@@ -22,16 +22,14 @@
 | Draconic Evolution（龙之研究） | 通过 Brandon’s Core 的 OP／long 能源接口连接能量仓 | 已接入 |
 | Jade | 仓口能量／流体信息、控制器与工厂线程能量读数 | 已接入 |
 | GeckoLib | 自定义控制器模型与动画，全亮、透明及光晕效果 | 已接入 |
-| PneumaticCraft: Repressurized（气动工艺） | 压缩空气输入／输出仓、压力／真空条件、一次性及逐 tick 空气需求 | 0.119.0 本地开发版 |
-| [Embers Rekindled（余烬复刻版）](https://github.com/RCXcrafter/EmbersRekindled) | Ember 输入／输出仓、小数能量结算与余烬传输接口 | 0.119.0 本地开发版 |
+| PneumaticCraft: Repressurized（气动工艺） | 压缩空气输入／输出仓、压力／真空条件、一次性及逐 tick 空气需求 | 已接入（0.119.0） |
+| [Embers Rekindled（余烬复刻版）](https://github.com/RCXcrafter/EmbersRekindled) | Ember 输入／输出仓、小数能量结算与余烬传输接口 | 已接入（0.119.0） |
 
-## 当前状态（2026-10-27）
+## 当前状态（2026-10-28）
 
-- **源码 0.118.6**，Minecraft 1.20.1 / Forge / Java 17。
-- JEI 自然灵气需求改用 gugu-utils 风格的 6×80 绿色竖条，支持输入／输出、从下向上填充、超刻度“＋”及整条悬停提示。
-- 新增 29 项专项（另含 200 组布局场景），相关既有 2951 项，共 2980 项零失败；生产 build/reobf、203 JSON 和中英各 427 键检查通过。
-- 协议保持 8，配方格式与结算不变，不需要安装 gugu-utils；画面待实机验收。本次 Git 提交汇总 0.118.4–0.118.6 源码、教程和归档说明，未部署游戏或创建 GitHub Release。
-- [显示说明](modular-machinery-reborn/docs/魔法资源.md) · [修复记录](modular-machinery-reborn/docs/更新记录-0.118.6.md) · [归档](releases/modular-machinery-reborn/v0.118.6/README.md) · [交接](modular-machinery-reborn/docs/交接-2026-10-23.md)。
+- **源码 0.119.0**，Minecraft 1.20.1 / Forge / Java 17，协议 **9**。
+- 新增气动工艺与指定 Embers Rekindled 复刻版联动，提供 4 种仓口、压力／真空与空气数量需求、逐 tick 结算、余烬小数能量、KubeJS 方法、JEI 资源显示、持久化和共享事务。协议 **9**，两端同时更新。相关离线回归 **2954 项零失败**，另含 200 组 JEI 布局场景；生产 clean build/reobf 通过，本次提交同步 0.119.0 源码、资源、教学包、文档和配方技能；未实机或部署游戏，未创建 GitHub Release。
+- [中文说明](modular-machinery-reborn/docs/气动工艺与余烬.md)／[English](modular-machinery-reborn/docs/PneumaticCraft-and-Embers.md) · [更新记录](modular-machinery-reborn/docs/更新记录-0.119.0.md) · [归档](releases/modular-machinery-reborn/v0.119.0/README.md) · [交接](modular-machinery-reborn/docs/交接-2026-10-23.md)。
 
 ## 从哪开始
 
@@ -59,21 +57,21 @@ cd modular-machinery-reborn
 ./gradlew build
 ```
 
-正式产物是 **`modular-machinery-reborn/build/reobfJar/output.jar`**，不是 `build/libs` 下的开发期 jar。
+`build` 会执行 `reobfJar`；0.119.0 的正式构建产物为 **`modular-machinery-reborn/build/libs/modular_machinery_reborn-0.119.0.jar`**。本地归档使用 `modular-machinery-reborn-0.119.0.jar` 文件名。
 
 `gradle.properties` 默认 `use_local_deps=false`，走 Maven 依赖。离线构建需要把本地依赖 jar 放进 `modular-machinery-reborn/libs/` 并设置 `use_local_deps=true`；这些 jar 不随本仓库分发。
 
 ## 验证边界
 
 - 离线复现器位于 [`_audit/m6c-verify/`](_audit/m6c-verify/)，它不是构建的一部分，但改动逻辑时应连带运行。
-- 0.118.0 的离线证据见 [本轮更新](_audit/magic-0.118.0/本轮更新.md)；完整套件与构建日志保留在本机，不随仓库提交。
+- 0.119.0 的验证摘要见 [更新记录](modular-machinery-reborn/docs/更新记录-0.119.0.md)；详细 API、回归与构建日志保留在本机 `_audit/pneumatic-embers-0.119.0/`，不随仓库提交。
 - **未验证**：真实游戏内运行、真实 AE2 网络与样板供应器、多人联机与断线重连、JEI 页面与模型渲染、真实存档升级、工厂长期运行。
 
 ## 发布与归档
 
 - 二进制 jar 通过 **GitHub Releases** 分发，**不入 Git 历史**。
 - 版本索引、SHA-256 与各版本说明见 [releases/modular-machinery-reborn/README.md](releases/modular-machinery-reborn/README.md)。
-- 0.108.0–0.118.0 已有本地归档目录；在创建 GitHub Release 之前，请不要把“仓库中存在版本目录”理解为“已公开发布”。
+- 已有至 0.119.0 的本地构建归档；Git 中保留版本说明和 SHA-256，二进制下载以实际创建的 GitHub Release 为准。
 
 ## 致谢
 

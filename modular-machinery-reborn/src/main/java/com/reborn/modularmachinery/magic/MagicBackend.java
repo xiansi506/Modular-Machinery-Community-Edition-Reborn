@@ -6,6 +6,10 @@ import net.minecraftforge.common.util.LazyOptional;
 
 /** Optional API code stays behind this common boundary. */
 public interface MagicBackend extends MagicPort {
+    default void save(net.minecraft.nbt.CompoundTag tag) {}
+    default void read(net.minecraft.nbt.CompoundTag tag) {}
+    default void neighborChanged() {}
+    default void clientTick() {}
     default void tick() {}
     default void load() {}
     default void revive() {}

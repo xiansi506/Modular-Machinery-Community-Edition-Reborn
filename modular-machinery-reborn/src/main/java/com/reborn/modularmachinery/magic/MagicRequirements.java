@@ -21,7 +21,7 @@ public final class MagicRequirements {
     }
     private record Handler(MagicFamily family) implements RequirementType.Handler {
         public MachineRequirement read(JsonObject json, IOType io, Object where) {
-            if (!json.has("amount")) throw new JsonParseException("Missing magic amount in " + where);
+            if (!json.has("amount") && !(family == MagicFamily.EMBER && json.has("ember"))) throw new JsonParseException("Missing magic amount in " + where);
             String variant = "";
             if (family == MagicFamily.AURA) {
                 if (!json.has("aura-type") || !json.get("aura-type").isJsonPrimitive() || !json.get("aura-type").getAsJsonPrimitive().isString())
@@ -39,8 +39,8 @@ public final class MagicRequirements {
             if (json.has("perTick") && (!json.get("perTick").isJsonPrimitive() || !json.get("perTick").getAsJsonPrimitive().isBoolean()))
                 throw new JsonParseException("perTick must be a boolean");
             double min = number(json, family == MagicFamily.AURA ? "min-aura" : "min", family == MagicFamily.AURA ? Integer.MIN_VALUE : 0);
-            double max = number(json, family == MagicFamily.AURA ? "max-aura" : "max", family == MagicFamily.WILL ? 100 : Integer.MAX_VALUE);
-            try { return new MagicRequirement(io, family, number(json,"amount",0), variant, min, max, json.has("perTick") && json.get("perTick").getAsBoolean()); }
+            double max = number(json, family == MagicFamily.AURA ? "max-aura" : "max", family == MagicFamily.WILL ? 100 : family == MagicFamily.EMBER ? Double.MAX_VALUE : Integer.MAX_VALUE);
+            try { return new MagicRequirement(io, family, number(json,json.has("amount") ? "amount" : "ember",0), variant, min, max, json.has("perTick") && json.get("perTick").getAsBoolean()); }
             catch (IllegalArgumentException error) { throw new JsonParseException(error.getMessage() + " in " + where, error); }
         }
         public void write(FriendlyByteBuf buf, MachineRequirement requirement) {

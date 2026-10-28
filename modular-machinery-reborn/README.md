@@ -1,6 +1,6 @@
 # Modular Machinery: Community Edition Reborn
 
-> **当前源码 0.118.6（2026-10-27）**：修复工厂配方重载、long 能耗精度、资源回滚与魔法配方同步崩溃，加入 JEI 自然灵气绿色条。协议 **8**。详见 [中文简介](docs/简介.md)／[English introduction](docs/Introduction.md)、[使用说明](docs/使用说明.md)及 [更新记录](docs/更新记录-0.118.6.md)。本次提交汇总 0.118.4–0.118.6 源码和文档；未部署游戏，修复后的实机验收仍待完成。
+> **当前源码 0.119.0（2026-10-28）**：新增气动工艺与指定 Embers Rekindled 复刻版联动，提供 4 种仓口、压力／真空与空气数量需求、逐 tick 结算、余烬小数能量、KubeJS 方法、JEI 资源显示、持久化和共享事务。协议 **9**，两端同时更新。相关离线回归 **2954 项零失败**，另含 200 组 JEI 布局场景；生产 clean build/reobf 通过，本次提交同步 0.119.0 源码、资源、教学包、文档和配方技能；未实机或部署游戏，未创建 GitHub Release。 见 [中文说明](docs/气动工艺与余烬.md)／[English](docs/PneumaticCraft-and-Embers.md)、[更新记录](docs/更新记录-0.119.0.md)。
 
 Forge 1.20.1 / Java 17 migration foundation for the archived Modular Machinery: Community Edition source.
 
@@ -10,7 +10,7 @@ had listed as unfinished: **KubeJS can write a complete machine definition** (al
 four silent defects behind one symptom (tag namespace, no loot tables at all, per-variant tables, and the generated
 data pack's namespace declaration and resource-id shape). **Verified in game** (mining speed and drops, by runtime
 probes), deployed, and archived under `releases/modular-machinery-reborn/v0.31.0/`. Its record is in
-`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.118.6 and is not a published release.**
+`迁移日志.md` (the 0.31.0 section) and its build data is in `交接文档.md` §1b. **This paragraph records 0.31.0 history, not current status; the current source is 0.119.0 and is not a published release.**
 
 > **0.31.0 supersedes 0.30.1**, which had corrected only the `license` / `authors` metadata in
 > `META-INF/mods.toml` and was otherwise functionally 0.29.0.

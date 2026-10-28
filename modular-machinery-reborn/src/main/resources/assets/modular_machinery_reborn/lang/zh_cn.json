@@ -425,5 +425,17 @@
   "craftcheck.failure.magic.output": "缺少魔法输出仓、宝珠或超过资源上限",
   "tooltip.modular_machinery_reborn.aura.total": "总灵气量：%s",
   "tooltip.modular_machinery_reborn.aura.scale": "满格刻度：%s 灵气（仅用于显示）",
-  "tooltip.modular_machinery_reborn.aura.overflow": "总量超出条形刻度，请以上方精确数值为准。"
+  "tooltip.modular_machinery_reborn.aura.overflow": "总量超出条形刻度，请以上方精确数值为准。",
+  "block.modular_machinery_reborn.compressed_air_input_hatch": "压缩空气输入仓",
+  "block.modular_machinery_reborn.compressed_air_output_hatch": "压缩空气输出仓",
+  "block.modular_machinery_reborn.ember_input_hatch": "余烬输入仓",
+  "block.modular_machinery_reborn.ember_output_hatch": "余烬输出仓",
+  "magic.modular_machinery_reborn.compressed_air": "mL 压缩空气",
+  "magic.modular_machinery_reborn.ember": "余烬能量",
+  "gui.modular_machinery_reborn.air.pressure": "压力：%s bar",
+  "gui.modular_machinery_reborn.air.volume": "容积：%s mL",
+  "gui.modular_machinery_reborn.air.limits": "危险／临界压力：%s / %s bar",
+  "jei.modular_machinery_reborn.resource.base_total": "基础总量：%s（%s tick）",
+  "craftcheck.failure.compressed_air.input": "压缩空气不足或压力未达要求",
+  "craftcheck.failure.compressed_air.output": "压缩空气输出仓空间不足"
 }

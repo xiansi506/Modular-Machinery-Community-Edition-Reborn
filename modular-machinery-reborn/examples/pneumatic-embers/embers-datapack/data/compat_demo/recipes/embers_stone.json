@@ -1,0 +1,26 @@
+{
+  "type": "modular_machinery_reborn:machine",
+  "machine": "compat_demo:embers_processor",
+  "registryName": "embers_stone",
+  "recipeTime": 100,
+  "max-parallelism": 1,
+  "requirements": [
+    {
+      "type": "item",
+      "io-type": "input",
+      "item": "minecraft:cobblestone",
+      "amount": 1
+    },
+    {
+      "type": "ember",
+      "io-type": "input",
+      "amount": 100.5
+    },
+    {
+      "type": "item",
+      "io-type": "output",
+      "item": "minecraft:stone",
+      "amount": 1
+    }
+  ]
+}

@@ -425,5 +425,17 @@
   "craftcheck.failure.magic.output": "Magic output hatch or orb missing, or resource limit exceeded",
   "tooltip.modular_machinery_reborn.aura.total": "Total Aura: %s",
   "tooltip.modular_machinery_reborn.aura.scale": "Full scale: %s Aura (display only)",
-  "tooltip.modular_machinery_reborn.aura.overflow": "Amount exceeds the bar scale; see the exact total above."
+  "tooltip.modular_machinery_reborn.aura.overflow": "Amount exceeds the bar scale; see the exact total above.",
+  "block.modular_machinery_reborn.compressed_air_input_hatch": "Compressed Air Input Hatch",
+  "block.modular_machinery_reborn.compressed_air_output_hatch": "Compressed Air Output Hatch",
+  "block.modular_machinery_reborn.ember_input_hatch": "Ember Input Hatch",
+  "block.modular_machinery_reborn.ember_output_hatch": "Ember Output Hatch",
+  "magic.modular_machinery_reborn.compressed_air": "mL compressed air",
+  "magic.modular_machinery_reborn.ember": "Ember",
+  "gui.modular_machinery_reborn.air.pressure": "Pressure: %s bar",
+  "gui.modular_machinery_reborn.air.volume": "Volume: %s mL",
+  "gui.modular_machinery_reborn.air.limits": "Danger / critical: %s / %s bar",
+  "jei.modular_machinery_reborn.resource.base_total": "Base total: %s over %s ticks",
+  "craftcheck.failure.compressed_air.input": "Not enough compressed air or required pressure not reached",
+  "craftcheck.failure.compressed_air.output": "Not enough space in compressed air output hatches"
 }

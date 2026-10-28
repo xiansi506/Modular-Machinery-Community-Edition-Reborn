@@ -78,7 +78,7 @@ public record RecipeModifier(@Nullable Target target, @Nullable IOType ioTarget,
         ENERGY("energy"),
         DURATION("duration"),
         /** Only reachable from the JSON wildcard {@code "*"}; matches every requirement kind. */
-        ALL("*"), MANA("mana"), AURA("aura"), LIFEESSENCE("lifeessence"), WILL("will");
+        ALL("*"), MANA("mana"), AURA("aura"), LIFEESSENCE("lifeessence"), WILL("will"), AIR("compressed_air"), EMBER("ember");
 
         private final String name;
 
@@ -190,6 +190,8 @@ public record RecipeModifier(@Nullable Target target, @Nullable IOType ioTarget,
             case "aura": return Target.AURA;
             case "lifeessence": return Target.LIFEESSENCE;
             case "will": return Target.WILL;
+            case "compressed_air": case "compressed_air_pertick": return Target.AIR;
+            case "ember": return Target.EMBER;
             case "duration":
                 return Target.DURATION;
             case "*":

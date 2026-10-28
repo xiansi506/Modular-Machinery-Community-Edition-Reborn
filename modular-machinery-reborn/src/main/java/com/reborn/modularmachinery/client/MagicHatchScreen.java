@@ -33,6 +33,11 @@ public final class MagicHatchScreen extends AbstractContainerScreen<MagicHatchMe
         }
         if (family == MagicFamily.LIFEESSENCE) graphics.drawString(font,Component.translatable(menu.hatch.boundOrb()
                 ? "gui.modular_machinery_reborn.magic.orb_bound" : "gui.modular_machinery_reborn.magic.orb_unbound"),x+8,y+36,0xFF404040,false);
+        if (family == MagicFamily.AIR) {
+            graphics.drawString(font,Component.translatable("gui.modular_machinery_reborn.air.pressure", format(menu.hatch.value(1))),x+8,y+36,0xFF404040,false);
+            graphics.drawString(font,Component.translatable("gui.modular_machinery_reborn.air.volume", format(menu.hatch.value(2))),x+8,y+48,0xFF404040,false);
+            graphics.drawString(font,Component.translatable("gui.modular_machinery_reborn.air.limits", format(menu.hatch.value(4)), format(menu.hatch.value(3))),x+8,y+60,0xFF404040,false);
+        }
     }
     private static String format(double n) { return n == Math.floor(n) ? GuiAmounts.compact((long)n) : String.format(Locale.ROOT,"%,.3f",n); }
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float tick) {

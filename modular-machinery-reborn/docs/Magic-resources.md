@@ -1,4 +1,6 @@
-# Magic resources: Botania, Nature’s Aura and Blood Magic 3 (0.118.6)
+# Magic resources: Botania, Nature’s Aura and Blood Magic 3 (0.119.0)
+
+> **0.119.0 / protocol 9**: [PneumaticCraft and Embers Rekindled](PneumaticCraft-and-Embers.md) adds optional resource hatches and recipes. Update both client and server. Earlier version notes below are historical.
 
 For Minecraft 1.20.1 / Forge. Each integration is optional; its hatches and requirement types register only when that mod is installed. API checks used **Botania 1.20.1-455-FORGE**, **Nature’s Aura 39.4** and **Blood Magic 3.3.8-50**. Install their own dependencies as well. Both client and server must use protocol **8**. The magic serialization fix requires 0.118.5 or later.
 

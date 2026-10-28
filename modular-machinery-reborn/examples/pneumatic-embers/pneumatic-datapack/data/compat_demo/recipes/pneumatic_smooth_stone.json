@@ -1,0 +1,27 @@
+{
+  "type": "modular_machinery_reborn:machine",
+  "machine": "compat_demo:pneumatic_processor",
+  "registryName": "pneumatic_smooth_stone",
+  "recipeTime": 100,
+  "max-parallelism": 1,
+  "requirements": [
+    {
+      "type": "item",
+      "io-type": "input",
+      "item": "minecraft:stone",
+      "amount": 1
+    },
+    {
+      "type": "compressed_air_pertick",
+      "io-type": "input",
+      "pressure": 4.5,
+      "air": 10
+    },
+    {
+      "type": "item",
+      "io-type": "output",
+      "item": "minecraft:smooth_stone",
+      "amount": 1
+    }
+  ]
+}

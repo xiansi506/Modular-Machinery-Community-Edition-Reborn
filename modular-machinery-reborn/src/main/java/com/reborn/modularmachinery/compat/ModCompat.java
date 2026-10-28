@@ -106,6 +106,8 @@ public final class ModCompat {
         all.add(new com.reborn.modularmachinery.magic.MagicModule("botania"));
         all.add(new com.reborn.modularmachinery.magic.MagicModule("naturesaura"));
         all.add(new com.reborn.modularmachinery.magic.MagicModule("bloodmagic"));
+        all.add(new com.reborn.modularmachinery.magic.MagicModule("pneumaticcraft"));
+        all.add(new com.reborn.modularmachinery.magic.MagicModule("embers"));
         all.addAll(EXTERNAL_MODULES);
         return all;
     }

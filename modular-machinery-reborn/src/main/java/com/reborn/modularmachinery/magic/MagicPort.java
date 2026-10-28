@@ -26,6 +26,8 @@ public interface MagicPort {
         double amount();
         double minimum();
         double maximum();
+        /** Effective mL volume, for a pneumatic pressure gate; zero for other resources. */
+        default double volume() { return 0; }
         /** Signed change; returns the signed amount actually moved. */
         double move(double delta, boolean simulate);
         default boolean valid() { return true; }
@@ -58,6 +60,7 @@ public interface MagicPort {
         public double amount() { return working; }
         public double minimum() { return source.minimum(); }
         public double maximum() { return source.maximum(); }
+        public double volume() { return source.volume(); }
         public boolean valid() { return source.valid(); }
         public double move(double delta, boolean simulate) {
             if (!Double.isFinite(delta) || !valid()) return 0;

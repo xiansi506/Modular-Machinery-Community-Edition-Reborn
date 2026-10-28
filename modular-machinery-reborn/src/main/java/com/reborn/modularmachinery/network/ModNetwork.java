@@ -39,7 +39,8 @@ public final class ModNetwork {
 
     // 0.109.0: provider actions and bounded buffer previews require both peers to update together.
     // 0.118.5: magic requirement bodies include the IO prefix consumed by the common recipe reader.
-    private static final String PROTOCOL_VERSION = "8";
+    // 0.119.0: compressed-air requirements and two additional optional hatch families.
+    private static final String PROTOCOL_VERSION = "9";
     private static final int ID_PARALLEL_CONTROLLER_UPDATE = 0;
     private static final int ID_SMART_INTERFACE_UPDATE = 1;
     private static final int ID_SELECTION_SYNC = 2;

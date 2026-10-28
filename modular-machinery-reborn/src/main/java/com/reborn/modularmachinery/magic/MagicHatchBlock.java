@@ -19,7 +19,13 @@ public final class MagicHatchBlock extends BaseEntityBlock {
     @Override public RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
     @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new MagicHatchBlockEntity(pos, state); }
     @Override @Nullable public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
-        return level.isClientSide || MagicBlocks.TYPE == null ? null : createTickerHelper(type, MagicBlocks.TYPE.get(), (world, pos, blockState, hatch) -> hatch.serverTick());
+        return MagicBlocks.TYPE == null ? null : createTickerHelper(type, MagicBlocks.TYPE.get(), (world, pos, blockState, hatch) -> {
+            if (world.isClientSide) hatch.clientTick(); else hatch.serverTick();
+        });
+    }
+    @Override public void neighborChanged(BlockState state, Level level, BlockPos pos, Block block, BlockPos from, boolean moving) {
+        super.neighborChanged(state, level, pos, block, from, moving);
+        if (level.getBlockEntity(pos) instanceof MagicHatchBlockEntity hatch) hatch.backend().neighborChanged();
     }
     @Override public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
         if (!level.isClientSide && player instanceof ServerPlayer server && level.getBlockEntity(pos) instanceof MagicHatchBlockEntity hatch)

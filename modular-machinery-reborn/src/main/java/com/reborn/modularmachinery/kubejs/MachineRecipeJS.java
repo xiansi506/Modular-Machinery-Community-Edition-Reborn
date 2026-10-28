@@ -90,6 +90,18 @@ public final class MachineRecipeJS extends RecipeJS {
         builder.requirement(req); return this;
     }
     public MachineRecipeJS manaInput(int amount) { return manaInput(amount,false); }
+    public MachineRecipeJS compressedAirInput(double pressure, int air) { return compressedAir(pressure, air, "input", false); }
+    public MachineRecipeJS compressedAirOutput(int air) { return compressedAir(0, air, "output", false); }
+    public MachineRecipeJS compressedAirPerTick(double pressure, int air, String io) { return compressedAir(pressure, air, io, true); }
+    private MachineRecipeJS compressedAir(double pressure, int air, String io, boolean perTick) {
+        new com.reborn.modularmachinery.magic.CompressedAirRequirement(com.reborn.modularmachinery.recipe.IOType.valueOf(io.toUpperCase(java.util.Locale.ROOT)),air,pressure,perTick);
+        JsonObject req = new JsonObject(); req.addProperty("type",perTick ? "compressed_air_pertick" : "compressed_air");
+        req.addProperty("io-type",io); req.addProperty("pressure",pressure); req.addProperty("air",air); return requirement(req);
+    }
+    public MachineRecipeJS emberInput(double amount) { return emberInput(amount,false); }
+    public MachineRecipeJS emberInput(double amount, boolean perTick) { return magic("EMBER","input",amount,"",0,Double.MAX_VALUE,perTick); }
+    public MachineRecipeJS emberOutput(double amount) { return emberOutput(amount,false); }
+    public MachineRecipeJS emberOutput(double amount, boolean perTick) { return magic("EMBER","output",amount,"",0,Double.MAX_VALUE,perTick); }
     public MachineRecipeJS manaInput(int amount, boolean perTick) { return magic("MANA","input",amount,"",0,Integer.MAX_VALUE,perTick); }
     public MachineRecipeJS manaOutput(int amount) { return manaOutput(amount,false); }
     public MachineRecipeJS manaOutput(int amount, boolean perTick) { return magic("MANA","output",amount,"",0,Integer.MAX_VALUE,perTick); }

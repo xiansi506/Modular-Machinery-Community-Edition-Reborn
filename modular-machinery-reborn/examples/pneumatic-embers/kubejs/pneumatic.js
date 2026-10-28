@@ -1,0 +1,25 @@
+// Alternative to pneumatic-datapack. Install only one equivalent definition.
+MachineRegistryEvents.registry(event => {
+  event.machine('compat_demo:pneumatic_processor')
+    .localizedName('气动加工机')
+    .requiresBlueprint(false).parallelizable(false)
+    .part(-1, 0, 0, 'modular_machinery_reborn:item_input_hatch')
+    .part(1, 0, 0, 'modular_machinery_reborn:item_output_hatch')
+    .part(0, -1, 0, 'modular_machinery_reborn:compressed_air_input_hatch')
+    .register()
+})
+ServerEvents.recipes(event => {
+  event.recipes.modular_machinery_reborn.machine('compat_demo:pneumatic_processor')
+    .registryName('pneumatic_stone').time(100).parallelism(1)
+    .itemInput('minecraft:cobblestone', 1)
+    .compressedAirInput(4.5, 1000)
+    .itemOutput('minecraft:stone', 1)
+    .id('compat_demo:pneumatic_stone')
+
+  event.recipes.modular_machinery_reborn.machine('compat_demo:pneumatic_processor')
+    .registryName('pneumatic_smooth_stone').time(100).parallelism(1)
+    .itemInput('minecraft:stone', 1)
+    .compressedAirPerTick(4.5, 10, 'input')
+    .itemOutput('minecraft:smooth_stone', 1)
+    .id('compat_demo:pneumatic_smooth_stone')
+})

@@ -596,6 +596,12 @@ public final class MachineRecipeCategory implements IRecipeCategory<MachineRecip
                 String text = requirement.describe();
                 if (text != null && !text.isEmpty()) {
                     tooltip.add(Component.literal(text));
+                    if (requirement instanceof MagicRequirement resource && resource.perTick()
+                            && (resource.family == com.reborn.modularmachinery.magic.MagicFamily.AIR
+                            || resource.family == com.reborn.modularmachinery.magic.MagicFamily.EMBER)) {
+                        String total = java.math.BigDecimal.valueOf(resource.amount).multiply(java.math.BigDecimal.valueOf(recipe.recipeTime())).stripTrailingZeros().toPlainString();
+                        tooltip.add(Component.translatable("jei.modular_machinery_reborn.resource.base_total",total,recipe.recipeTime()));
+                    }
                     MachineRecipeText.addScriptTooltip(tooltip, requirement);
                 }
             }

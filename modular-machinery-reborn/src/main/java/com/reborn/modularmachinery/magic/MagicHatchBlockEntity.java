@@ -49,6 +49,8 @@ public class MagicHatchBlockEntity extends BlockEntity implements MenuProvider {
             case MANA -> new com.reborn.modularmachinery.compat.magic.BotaniaBackend(this);
             case AURA -> new com.reborn.modularmachinery.compat.magic.AuraBackend(this);
             case LIFEESSENCE, WILL -> new com.reborn.modularmachinery.compat.magic.BloodMagicBackend(this);
+            case AIR -> new com.reborn.modularmachinery.compat.magic.PneumaticBackend(this);
+            case EMBER -> new com.reborn.modularmachinery.compat.magic.EmberBackend(this);
         };
         itemCapability = LazyOptional.of(() -> orbs);
     }
@@ -63,6 +65,7 @@ public class MagicHatchBlockEntity extends BlockEntity implements MenuProvider {
         if (next != stored) { stored = next; changed(); }
     }
     public void changed() { setChanged(); displayDirty = true; }
+    public void clientTick() { if (level != null && level.isClientSide && !isRemoved()) backend.clientTick(); }
     public void serverTick() {
         if (level == null || level.isClientSide || isRemoved()) return;
         backend.tick();
@@ -72,6 +75,15 @@ public class MagicHatchBlockEntity extends BlockEntity implements MenuProvider {
     }
     public double value(int index) {
         if (level == null || level.isClientSide) return decode(index);
+        if (family == MagicFamily.AIR) {
+            var air = (com.reborn.modularmachinery.compat.magic.PneumaticBackend)backend;
+            return switch (index) {
+                case 0 -> air.air(); case 1 -> air.pressure(); case 2 -> air.volume();
+                case 3 -> air.criticalPressure(); case 4 -> air.dangerPressure();
+                case 5 -> Math.floor(air.volume()*air.dangerPressure()); default -> 0;
+            };
+        }
+        if (family == MagicFamily.EMBER && index == 5) return ((com.reborn.modularmachinery.compat.magic.EmberBackend)backend).capacity();
         if (index == 5) return family == MagicFamily.MANA ? manaCapacity : family == MagicFamily.LIFEESSENCE ? (input ? backend.orbCapacity()/10 : backend.orbCapacity()) : family == MagicFamily.WILL ? 100 : 1000000;
         String[] variants = backend.variants();
         if (index >= variants.length) return 0;
@@ -107,15 +119,17 @@ public class MagicHatchBlockEntity extends BlockEntity implements MenuProvider {
     @Override public void onLoad() { super.onLoad(); backend.load(); }
     @Override public void setRemoved() { backend.unload(); super.setRemoved(); }
     @Override public void onChunkUnloaded() { backend.unload(); super.onChunkUnloaded(); }
-    @Override protected void saveAdditional(CompoundTag tag) { super.saveAdditional(tag); tag.putInt("stored", stored); tag.put("orb", orbs.serializeNBT()); if (machineColor != null) tag.putInt("machineColor",machineColor); }
-    @Override public void load(CompoundTag tag) { super.load(tag); orbs.deserializeNBT(tag.getCompound("orb")); stored = Math.max(0, tag.getInt("stored")); if (family == MagicFamily.MANA) stored = Math.min(stored, manaCapacity); machineColor = tag.contains("machineColor") ? tag.getInt("machineColor") : null; }
+    @Override protected void saveAdditional(CompoundTag tag) { super.saveAdditional(tag); tag.putInt("stored", stored); tag.put("orb", orbs.serializeNBT()); backend.save(tag); if (machineColor != null) tag.putInt("machineColor",machineColor); }
+    @Override public void load(CompoundTag tag) { super.load(tag); orbs.deserializeNBT(tag.getCompound("orb")); stored = Math.max(0, tag.getInt("stored")); if (family == MagicFamily.MANA) stored = Math.min(stored, manaCapacity); machineColor = tag.contains("machineColor") ? tag.getInt("machineColor") : null; backend.read(tag); }
     @Override public CompoundTag getUpdateTag() {
         CompoundTag tag = new CompoundTag();
         for (int i = 0; i < 6; i++) tag.putDouble("value" + i, value(i));
+        backend.save(tag);
         tag.putBoolean("bound", backend.boundOrb()); tag.putInt("orbCapacity", backend.orbCapacity()); if (machineColor != null) tag.putInt("machineColor",machineColor); return tag;
     }
     @Override public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
     @Override public void handleUpdateTag(CompoundTag tag) {
+        backend.read(tag);
         Integer previous = machineColor;
         machineColor = tag.contains("machineColor") ? tag.getInt("machineColor") : null;
         for (int i = 0; i < 6; i++) { long bits = Double.doubleToRawLongBits(tag.getDouble("value"+i)); for (int j = 0; j < 4; j++) words[i*4+j] = (int)(bits >>> (j*16)) & 0xffff; }
