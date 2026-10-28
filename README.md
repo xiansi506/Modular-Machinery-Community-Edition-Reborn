@@ -4,6 +4,27 @@
 
 它是一个**框架**：JAR 不内置机器定义与机器加工配方，机器和配方由整合包作者或玩家通过数据包、配置目录或 KubeJS 提供。
 
+## 可选联动模组
+
+按需要选装对应的 **Minecraft 1.20.1 / Forge** 版本，并满足各模组自身的依赖。气动工艺与余烬是 **0.119.0 本地开发版**新增联动；请核对所用版本，实际验证范围见下方[验证边界](#验证边界)。
+
+| 模组 | 联动内容 | 接入状态 |
+|---|---|---|
+| JEI（Just Enough Items） | 机器配方浏览、多方块结构预览、材料表和资源需求显示 | 已接入 |
+| KubeJS 6 | 定义机器与配方，提供服务端生命周期事件和客户端 GUI／模型／动画脚本 | 已接入 |
+| Applied Energistics 2（AE2） | 统一 ME 输入／输出总线、ME机械样板供应器、ME机械样板镜像及物品／流体自动化 | 已接入 |
+| Mekanism | 气体配方、仓口气体存储／传输和 JEI 气体贴图 | 已接入 |
+| Applied Mekanistics 1.4.3 | 配合 AE2 与 Mekanism，为 ME 总线和加工样板接入气体 | 已接入 |
+| Botania（植物魔法） | 魔力输入／输出仓及魔力网络接口 | 已接入 |
+| Nature’s Aura（自然灵气） | 真实环境灵气、类型与阈值控制，以及 JEI 绿色灵气条 | 已接入 |
+| Blood Magic 3（血魔法 3） | 绑定血球与 SoulNetwork 的 LP，以及区块恶魔意志资源 | 已接入 |
+| Flux Networks（通量网络） | 通过 long 能源接口连接能量仓与 Flux 网络 | 已接入 |
+| Draconic Evolution（龙之研究） | 通过 Brandon’s Core 的 OP／long 能源接口连接能量仓 | 已接入 |
+| Jade | 仓口能量／流体信息、控制器与工厂线程能量读数 | 已接入 |
+| GeckoLib | 自定义控制器模型与动画，全亮、透明及光晕效果 | 已接入 |
+| PneumaticCraft: Repressurized（气动工艺） | 压缩空气输入／输出仓、压力／真空条件、一次性及逐 tick 空气需求 | 0.119.0 本地开发版 |
+| [Embers Rekindled（余烬复刻版）](https://github.com/RCXcrafter/EmbersRekindled) | Ember 输入／输出仓、小数能量结算与余烬传输接口 | 0.119.0 本地开发版 |
+
 ## 当前状态（2026-10-27）
 
 - **源码 0.118.6**，Minecraft 1.20.1 / Forge / Java 17。
@@ -53,6 +74,14 @@ cd modular-machinery-reborn
 - 二进制 jar 通过 **GitHub Releases** 分发，**不入 Git 历史**。
 - 版本索引、SHA-256 与各版本说明见 [releases/modular-machinery-reborn/README.md](releases/modular-machinery-reborn/README.md)。
 - 0.108.0–0.118.0 已有本地归档目录；在创建 GitHub Release 之前，请不要把“仓库中存在版本目录”理解为“已公开发布”。
+
+## 致谢
+
+- 感谢 [Modular Machinery: Community Edition（MMCE）](https://github.com/NovaEngineering-Source/ModularMachinery-Community-Edition) 的 **KasumiNova、youyihj、ikexing** 及所有社区贡献者。社区版的开源代码、资源与功能设计，是本项目进行 1.20.1 移植的基础。
+- 感谢原版 Modular Machinery 的 **HellFirePvP** 与美术作者 **wiiv**，为模块化机械提供最初的框架与美术资源。
+- 感谢 [咕咕工具（GuGu Utils）](https://github.com/ParaParty/gugu-utils) 的 **WarmthDawn、yuedu233_、Month_Hare** 及派瑞派对团队，提供资源联动与 JEI 显示的开源实现。本项目自然灵气条的绘制／贴图，以及气动工艺、余烬联动的适配，受益于这些工作。
+
+来源、资源使用与许可证说明见 [NOTICE.md](modular-machinery-reborn/NOTICE.md)。
 
 ## 许可证与来源
 
