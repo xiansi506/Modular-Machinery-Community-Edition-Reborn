@@ -1,26 +1,9 @@
 package com.reborn.modularmachinery.selection;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonNull;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.ByteArrayTag;
-import net.minecraft.nbt.ByteTag;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.DoubleTag;
-import net.minecraft.nbt.FloatTag;
-import net.minecraft.nbt.IntArrayTag;
-import net.minecraft.nbt.IntTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.LongArrayTag;
-import net.minecraft.nbt.LongTag;
-import net.minecraft.nbt.ShortTag;
-import net.minecraft.nbt.StringTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -29,40 +12,13 @@ import net.minecraft.world.level.block.state.properties.Property;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
 /**
- * The construct tool's export arithmetic: what the original's {@code PlayerStructureSelectionHelper} and
- * {@code BlockArray.serializeAsMachineJson} did, with everything that does not need a {@code Level} separated out
- * so it can be asserted offline.
- *
- * <h2>What the original does, with line references</h2>
- *
- * <ol>
- *   <li>{@code compressAsArray} ({@code PlayerStructureSelectionHelper.java:159-179}) turns each selected
- *       position into {@code pos.subtract(controllerPos)} with the block's state descriptor and, for a tile
- *       entity, its NBT with {@code x}/{@code y}/{@code z} removed.</li>
- *   <li>{@code finalizeSelection} ({@code :84-94}) then rotates that whole array counter-clockwise until the
- *       clicked controller faces north, counting 90° per step for the player's message.</li>
- *   <li>{@code serializeAsMachineJson} ({@code BlockArray.java:395-443}) writes the fragment: {@code parts} is the
- *       <b>only</b> root field, each part carries {@code x}, {@code y}, {@code z}, an optional {@code nbt}, and an
- *       {@code elements} array.</li>
- * </ol>
- *
- * <h2>Two deliberate translations of the block-state descriptor</h2>
- *
- * <p>The original wrote {@code ns:block@meta} ({@code BlockArray.java:422-424}), where the metadata is the whole
- * state. 1.20.1 has no metadata, so the faithful equivalent of "the state that was there" is <b>every property,
- * named</b>: {@code ns:block[facing=north,half=bottom,…]}. That is also exactly what this project's own
- * {@code BlockMatcher} reads, so the tool's output is accepted by the same schema a data pack uses (asserted in
- * harness section AA4). The properties are written in name order rather than in the block's own registration
- * order, so the file is stable across releases.
- *
- * <p>The {@code nbt} object's keys are sorted for the same reason: 1.20.1's {@code CompoundTag} is backed by a
- * {@code HashMap}, so its iteration order is not defined. JSON objects are unordered, so sorting changes nothing
- * but the file's readability.
+ * Exports selected world blocks as north-oriented structure fragments. Positions and native block states
+ * use the same rotation. NBT is a literal, typed snapshot; hand-written regex/range templates are unchanged.
+ * Unloaded positions are counted without loading chunks, and an incomplete plan cannot be saved.
  */
 public final class SelectionExport {
 
@@ -193,88 +149,24 @@ public final class SelectionExport {
         return out;
     }
 
-    /** One NBT tag as JSON — the shape the original's {@code NBTJsonSerializer} wrote into {@code "nbt"}. */
+    /** Literal snapshots are separate from hand-written regex/range templates. */
     public static String nbtToJson(CompoundTag tag) {
-        return toJson(tag).toString();
+        return com.reborn.modularmachinery.recipe.LiteralNbt.encode(tag).toString();
     }
 
-    private static JsonElement toJson(Tag tag) {
-        if (tag instanceof CompoundTag compound) {
-            JsonObject out = new JsonObject();
-            List<String> keys = new ArrayList<>(compound.getAllKeys());
-            Collections.sort(keys);
-            for (String key : keys) {
-                out.add(key, toJson(compound.get(key)));
-            }
-            return out;
+    /** A complete write is the commit point: failures retain every selected position. */
+    public static java.nio.file.Path saveComplete(StructureSelection selection, ExportPlan plan,
+                                                  java.nio.file.Path directory, String fileName)
+            throws java.io.IOException {
+        if (plan.unavailable() != 0 || plan.parts().isEmpty()) {
+            throw new java.io.IOException("The selection is incomplete or empty; no fragment was written.");
         }
-        if (tag instanceof ListTag list) {
-            JsonArray out = new JsonArray();
-            for (int i = 0; i < list.size(); i++) {
-                out.add(toJson(list.get(i)));
-            }
-            return out;
-        }
-        if (tag instanceof StringTag string) {
-            return new JsonPrimitive(string.getAsString());
-        }
-        if (tag instanceof ByteTag number) {
-            return new JsonPrimitive(number.getAsByte());
-        }
-        if (tag instanceof ShortTag number) {
-            return new JsonPrimitive(number.getAsShort());
-        }
-        if (tag instanceof IntTag number) {
-            return new JsonPrimitive(number.getAsInt());
-        }
-        if (tag instanceof LongTag number) {
-            return new JsonPrimitive(number.getAsLong());
-        }
-        if (tag instanceof FloatTag number) {
-            return new JsonPrimitive(number.getAsFloat());
-        }
-        if (tag instanceof DoubleTag number) {
-            return new JsonPrimitive(number.getAsDouble());
-        }
-        if (tag instanceof ByteArrayTag array) {
-            JsonArray out = new JsonArray();
-            for (byte value : array.getAsByteArray()) {
-                out.add(value);
-            }
-            return out;
-        }
-        if (tag instanceof IntArrayTag array) {
-            JsonArray out = new JsonArray();
-            for (int value : array.getAsIntArray()) {
-                out.add(value);
-            }
-            return out;
-        }
-        if (tag instanceof LongArrayTag array) {
-            JsonArray out = new JsonArray();
-            for (long value : array.getAsLongArray()) {
-                out.add(value);
-            }
-            return out;
-        }
-        // The end tag is the only other kind, and it cannot appear as a value.
-        return JsonNull.INSTANCE;
+        java.nio.file.Path written = MachineFragmentWriter.write(directory, fileName, toMachineJson(plan.parts()));
+        selection.clear();
+        return written;
     }
 
-    /**
-     * The machine-definition fragment, byte for byte as the original's {@code serializeAsMachineJson} wrote it:
-     * four-space indents, the platform line separator, and {@code parts} as the only root field.
-     *
-     * <p><b>No {@code registryname}</b>: the original wrote a fragment for the author to paste into a definition,
-     * not a definition, and this project's loader therefore logs a load failure for the file while it sits in the
-     * machinery directory. That is the original's behaviour, kept deliberately — writing a {@code registryname}
-     * would register a controller block for the file at the next launch, which is a different thing entirely.
-     * {@code ConstructToolItem} says so in the log when it writes the file.
-     *
-     * <p>Every part carries exactly one element, because the tool reads exactly one state per position. (The
-     * original's {@code elements} array could hold several samples for the preview's cycle-replaceable blocks;
-     * nothing the construct tool reads produces more than one.)
-     */
+    /** Only parts are exported. Files live outside machinery/ until the author supplies a full definition. */
     public static String toMachineJson(List<ExportPart> parts) {
         String newline = System.lineSeparator();
         String move = "    ";
@@ -333,14 +225,14 @@ public final class SelectionExport {
      * This project's structure matching already refuses to do that ({@code MachinePattern.matches} guards with
      * {@code level.isLoaded}), so a position in an unloaded chunk is <b>skipped and counted</b> rather than
      * silently read as air — a fragment that says {@code minecraft:air} at a position would be a wrong definition
-     * that looks deliberate. The caller reports the count; the original had no such case to report because it
+     * that looks deliberate. The caller reports the count and retains the selection; the original had no such case because it
      * simply loaded the chunk.
      */
     public static ExportPlan plan(Level level, List<BlockPos> selection, BlockPos controller, Direction facing) {
         List<BlockSample> samples = new ArrayList<>(selection.size());
         int unavailable = 0;
         for (BlockPos pos : selection) {
-            BlockSample sample = sampleAt(level, pos);
+            BlockSample sample = sampleAt(level, pos, rotationSteps(facing));
             if (sample == null) {
                 unavailable++;
             }
@@ -358,12 +250,21 @@ public final class SelectionExport {
      */
     @Nullable
     public static BlockSample sampleAt(Level level, BlockPos pos) {
+        return sampleAt(level, pos, 0);
+    }
+
+    @Nullable
+    public static BlockSample sampleAt(Level level, BlockPos pos, int steps) {
         if (!level.isLoaded(pos)) {
             return null;
         }
         String descriptor;
         try {
-            descriptor = describe(level.getBlockState(pos));
+            BlockState state = level.getBlockState(pos);
+            for (int turn = 0; turn < Math.floorMod(steps, 4); turn++) {
+                state = state.rotate(net.minecraft.world.level.block.Rotation.COUNTERCLOCKWISE_90);
+            }
+            descriptor = describe(state);
         } catch (IllegalStateException exception) {
             return null;
         }

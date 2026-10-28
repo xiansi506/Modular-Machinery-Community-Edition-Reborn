@@ -1,6 +1,8 @@
 # Modular Machinery: Community Edition Reborn
 
-> **当前源码 0.119.0（2026-10-28）**：新增气动工艺与指定 Embers Rekindled 复刻版联动，提供 4 种仓口、压力／真空与空气数量需求、逐 tick 结算、余烬小数能量、KubeJS 方法、JEI 资源显示、持久化和共享事务。协议 **9**，两端同时更新。相关离线回归 **2954 项零失败**，另含 200 组 JEI 布局场景；生产 clean build/reobf 通过，本次提交同步 0.119.0 源码、资源、教学包、文档和配方技能；未实机或部署游戏，未创建 GitHub Release。 见 [中文说明](docs/气动工艺与余烬.md)／[English](docs/PneumaticCraft-and-Embers.md)、[更新记录](docs/更新记录-0.119.0.md)。
+> **当前源码 0.119.1（2026-10-28），协议 10**：修复建造选择工具的 NBT 往返、方块状态旋转、右键交互、跨维度选区、失败后丢失选区、区块漏导出和文件名问题。片段改存 `config/modular_machinery_reborn/exports/`。专项 50 项、完整主套件 2668 项及既有集成专项合计 **3003 项零失败**，另有 200 组 JEI 几何场景；Java 17 `clean build --offline --no-daemon`／reobf **45s** 成功，JAR 含 215 个合法 JSON、中英各 441 个键。 未启动／部署游戏，真实点击、高亮、多人及跨维度传送仍待实机验收；本次源码提交包含 0.119.1 修复、文档和两项创作者工具计划，未创建 Release。 [操作说明](docs/建造选择工具.md)／[English](docs/Construct-tool.md)／[修复记录](docs/修复记录-0.119.1.md)。
+
+创作者工具计划：[结构构造工具增强／可视化配方编辑器](docs/创作者工具计划.md)（待实施）。
 
 Forge 1.20.1 / Java 17 migration foundation for the archived Modular Machinery: Community Edition source.
 

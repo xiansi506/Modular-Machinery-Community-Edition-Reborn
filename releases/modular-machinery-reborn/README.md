@@ -1,4 +1,4 @@
-> **最新本地归档 0.119.0**：[说明](v0.119.0/README.md)，协议 **9**，1513188 字节，SHA-256 `E14011CFACA9A3DB2B9514FBC72FD48A7C1B8DD4161EB7BD33073C1E229B92FC`。新增气动工艺与指定 Embers Rekindled 复刻版联动，提供 4 种仓口、压力／真空与空气数量需求、逐 tick 结算、余烬小数能量、KubeJS 方法、JEI 资源显示、持久化和共享事务。协议 **9**，两端同时更新。相关离线回归 **2954 项零失败**，另含 200 组 JEI 布局场景；生产 clean build/reobf 通过，本次提交同步 0.119.0 源码、资源、教学包、文档和配方技能；未实机或部署游戏，未创建 GitHub Release。
+> **最新本地归档 0.119.1**：[说明](v0.119.1/README.md)，协议 **10**，1518407 字节，SHA-256 `5A2696FA11AE4DCFBC10E1A42B266FA502E3D3930F5A7214B570B9AFD3D61983`。修复建造选择工具的 NBT 往返、方块状态旋转、右键交互、跨维度选区、失败后丢失选区、区块漏导出和文件名问题。片段改存 `config/modular_machinery_reborn/exports/`。未启动／部署游戏，真实点击、高亮、多人及跨维度传送仍待实机验收；本次源码提交包含 0.119.1 修复、文档和两项创作者工具计划，未创建 Release。
 
 # Modular Machinery: Community Edition Reborn 版本索引
 

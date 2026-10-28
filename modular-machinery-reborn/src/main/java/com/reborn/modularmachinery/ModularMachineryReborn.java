@@ -93,6 +93,9 @@ public final class ModularMachineryReborn {
         // the connection did (PlayerStructureSelectionHelper:128-134). A new session must not inherit one.
         MinecraftForge.EVENT_BUS.addListener(
                 com.reborn.modularmachinery.selection.ServerSelections::onPlayerLoggedOut);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.selection.ServerSelections::onPlayerChangedDimension);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.selection.ServerSelections::onPlayerRespawn);
+        MinecraftForge.EVENT_BUS.addListener(com.reborn.modularmachinery.selection.ServerSelections::onServerStopped);
         // A8（0.106.0）：自动搭建的事件接线（蓝图入槽 / 搭建触发 / 逐 tick 推进 / 登出清理）。
         // 它是实例监听器（三个 @SubscribeEvent 一组），走 register 而不是逐方法 addListener。
         MinecraftForge.EVENT_BUS.register(new com.reborn.modularmachinery.common.assembly.AssemblyHandler());

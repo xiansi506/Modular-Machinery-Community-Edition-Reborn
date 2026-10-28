@@ -1,6 +1,6 @@
 # PneumaticCraft and Embers Rekindled (0.119.0)
 
-Minecraft 1.20.1 / Forge / Java 17. This integration targets **PneumaticCraft: Repressurized 6.0.23** and **Embers Rekindled 1.20.1-1.4.7** from [RCXcrafter's repository](https://github.com/RCXcrafter/EmbersRekindled). Each mod is optional and requires its own dependencies. Update both client and server to Reborn 0.119.0, protocol **9**.
+Minecraft 1.20.1 / Forge / Java 17. This integration targets **PneumaticCraft: Repressurized 6.0.23** and **Embers Rekindled 1.20.1-1.4.7** from [RCXcrafter's repository](https://github.com/RCXcrafter/EmbersRekindled). Each mod is optional and requires its own dependencies. Update both client and server to Reborn 0.119.1, protocol **10**.
 
 ## Hatches
 

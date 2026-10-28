@@ -317,8 +317,8 @@
   "message.structurebuild.confirmrotation.rotating": "Rotating structure for saving by %s degrees...",
   "message.structurebuild.empty": "You have nothing selected to save.",
   "message.structurebuild.warndedicated": "You're saving the machine on a dedicated server! Be sure to download it from the server!",
-  "message.structurebuild.save": "Machine saved as %s in the machinery directory!",
-  "message.structurebuild.fail": "Failed to save the machine to a file! Check the log for more information!",
+  "message.structurebuild.save": "Structure fragment saved to config/modular_machinery_reborn/exports/%s. Copy its parts into a machine definition.",
+  "message.structurebuild.fail": "Structure export failed; selection retained. Check the log and retry.",
   "message.machine_projector.projected": "Projection started: fill in the highlighted layers, from bottom to top.",
   "message.machine_projector.cleared": "Projection cleared.",
   "tooltip.modular_machinery_reborn.machine_projector": "Use on a formed machine controller to project the remaining structure, layer by layer. Use again on the same controller to stop.",
@@ -437,5 +437,7 @@
   "gui.modular_machinery_reborn.air.limits": "Danger / critical: %s / %s bar",
   "jei.modular_machinery_reborn.resource.base_total": "Base total: %s over %s ticks",
   "craftcheck.failure.compressed_air.input": "Not enough compressed air or required pressure not reached",
-  "craftcheck.failure.compressed_air.output": "Not enough space in compressed air output hatches"
+  "craftcheck.failure.compressed_air.output": "Not enough space in compressed air output hatches",
+  "tooltip.constructtool.usage": "Right-click blocks to select/deselect; click a controller to export. Requires permission level 2.",
+  "message.structurebuild.incomplete": "Cannot read %s selected positions. Nothing was exported; selection retained. Load the chunks and retry."
 }

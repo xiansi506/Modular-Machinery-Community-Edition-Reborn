@@ -60,7 +60,7 @@ public final class SelectionHighlight {
         if (!holdsTool(player)) {
             return;
         }
-        List<BlockPos> selected = ClientSelection.positions();
+        List<BlockPos> selected = ClientSelection.positions(minecraft.level.dimension().location());
         if (selected.isEmpty()) {
             return;
         }
@@ -93,6 +93,10 @@ public final class SelectionHighlight {
      * ({@code SelectionBoxRenderHelper.java:73-77}); a selection belonging to another server must not be drawn
      * after joining this one.
      */
+    public static void onLevelUnload(net.minecraftforge.event.level.LevelEvent.Unload event) {
+        if (event.getLevel().isClientSide()) ClientSelection.clear();
+    }
+
     public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         ClientSelection.clear();
     }

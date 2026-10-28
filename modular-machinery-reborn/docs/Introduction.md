@@ -17,13 +17,15 @@ Machine definitions load on the server and synchronize to clients. Most data cha
 
 ## Current status
 
-Current version: **0.119.0**, October 28, 2026; network protocol **9**. Adds PneumaticCraft: Repressurized 6.0.23 and RCXcrafter’s Embers Rekindled 1.20.1-1.4.7: four resource hatches, pressure/vacuum conditions, air and fractional Ember costs, per-tick recipes, KubeJS APIs and JEI displays. Offline regressions and production clean build/reobf passed; real transfer networks, multiplayer and visuals still need in-game acceptance. See the [integration guide](PneumaticCraft-and-Embers.md) and [update notes](更新记录-0.119.0.md).
+Current version: **0.119.1**, October 28, 2026; network protocol **10**. Repairs construct-tool NBT round trips, block-state orientation, item-first interaction, dimension isolation, failed/incomplete exports and file names. Fragments now go to a separate exports directory. The targeted suite, existing regressions and production clean build/reobf passed; real gameplay and visuals still need acceptance. See the [construct tool guide](Construct-tool.md) and [fix record](修复记录-0.119.1.md).
 
-This is a reimplementation, so existing scripts and pack content need migration. The old CraftTweaker / ZenScript API does not run directly, and the original third-party recipe adapters are not all available. GT / IC2 energy integration remains unavailable. Preview NBT now drives block entity rendering in the isolated preview scene; third-party visual behavior still needs in-game verification. Client GUI information, model selection and animation hooks are now available; their visual behavior still needs in-game verification. ME gas features require AE2, Mekanism and Applied Mekanistics 1.4.3; clients and servers must update together to protocol **9**. See [Known limitations](已知限制.md) (Chinese) for the current scope.
+This is a reimplementation, so existing scripts and pack content need migration. The old CraftTweaker / ZenScript API does not run directly, and the original third-party recipe adapters are not all available. GT / IC2 energy integration remains unavailable. Preview NBT now drives block entity rendering in the isolated preview scene; third-party visual behavior still needs in-game verification. Client GUI information, model selection and animation hooks are now available; their visual behavior still needs in-game verification. ME gas features require AE2, Mekanism and Applied Mekanistics 1.4.3; clients and servers must update together to protocol **10**. See [Known limitations](已知限制.md) (Chinese) for the current scope.
 
 Configuration and fallback rules are documented in [World model hiding](世界模型隐藏.md) (Chinese). Hiding changes visuals only; collisions, ports and structure checks continue to work.
 
 See [Factory energy information](工厂能量信息.md) (Chinese) for display and rate semantics.
+
+Creator tooling roadmap: [structure-tool enhancements and a visual recipe editor](创作者工具计划.md). Both remain planned.
 
 ## Getting started
 

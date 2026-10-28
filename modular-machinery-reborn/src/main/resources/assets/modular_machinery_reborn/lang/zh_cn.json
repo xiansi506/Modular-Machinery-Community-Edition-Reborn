@@ -317,8 +317,8 @@
   "message.structurebuild.confirmrotation.rotating": "保存时将结构旋转 %s 度……",
   "message.structurebuild.empty": "你没有选中任何东西。",
   "message.structurebuild.warndedicated": "你现在是在服务器上保存机器配置！请不要忘记从服务器上下载对应文件！",
-  "message.structurebuild.save": "机器配置已保存在机器文件夹下的 '%s' 中！",
-  "message.structurebuild.fail": "机器配置保存失败！请查阅日志文件获取详细信息！",
+  "message.structurebuild.save": "结构片段已保存到 config/modular_machinery_reborn/exports/%s；请将 parts 复制到机器定义中。",
+  "message.structurebuild.fail": "结构片段导出失败，选区已保留；请查阅日志后重试。",
   "message.machine_projector.projected": "投影已开始：从下往上逐层补齐高亮的方块。",
   "message.machine_projector.cleared": "投影已取消。",
   "tooltip.modular_machinery_reborn.machine_projector": "对已成型的机器控制器使用，逐层投影剩余结构；再次对同一控制器使用可取消投影。",
@@ -437,5 +437,7 @@
   "gui.modular_machinery_reborn.air.limits": "危险／临界压力：%s / %s bar",
   "jei.modular_machinery_reborn.resource.base_total": "基础总量：%s（%s tick）",
   "craftcheck.failure.compressed_air.input": "压缩空气不足或压力未达要求",
-  "craftcheck.failure.compressed_air.output": "压缩空气输出仓空间不足"
+  "craftcheck.failure.compressed_air.output": "压缩空气输出仓空间不足",
+  "tooltip.constructtool.usage": "右键方块选择／取消，右键控制器导出；需要命令权限 2",
+  "message.structurebuild.incomplete": "%s 个选中位置无法读取；未导出，选区已保留。请加载对应区块后重试。"
 }

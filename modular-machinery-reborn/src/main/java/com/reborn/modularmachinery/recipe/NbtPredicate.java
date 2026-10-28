@@ -98,6 +98,9 @@ public final class NbtPredicate {
      * requirement reader already carries.
      */
     public static NbtPredicate parse(JsonElement json, Object where) {
+        if (LiteralNbt.isEncoded(json)) {
+            return new NbtPredicate(literalCompound(LiteralNbt.decode(json, where)), json.toString());
+        }
         if (json == null || !json.isJsonObject()) {
             throw new JsonParseException("The ComponentType 'nbt' expects a json compound that defines the NBT "
                     + "tag! (in " + where + ")");
@@ -109,6 +112,7 @@ public final class NbtPredicate {
 
     /** Concrete display data: strings are literal, so JSON text components and texture URLs are valid. */
     public static CompoundTag previewTag(JsonElement json, Object where) {
+        if (LiteralNbt.isEncoded(json)) return LiteralNbt.decode(json, where);
         if (json == null || !json.isJsonObject()) {
             throw new JsonParseException("The ComponentType 'preview-nbt' expects a json compound! (in " + where + ")");
         }
@@ -202,6 +206,25 @@ public final class NbtPredicate {
             return object;
         }
         return new JsonPrimitive(String.valueOf(tag));
+    }
+
+    private static CompoundNode literalCompound(CompoundTag tag) {
+        Map<String, Node> children = new LinkedHashMap<>();
+        tag.getAllKeys().stream().sorted().forEach(key -> {
+            Tag value = tag.get(key);
+            children.put(key, value instanceof CompoundTag compound
+                    ? literalCompound(compound) : new LiteralNode(value));
+        });
+        return new CompoundNode(children);
+    }
+
+    /** Literal snapshots keep scalar types, list order, empty containers and typed arrays. */
+    private static final class LiteralNode implements Node {
+        private final Tag value;
+        private LiteralNode(Tag value) { this.value = value.copy(); }
+        @Override public byte tagType() { return value.getId(); }
+        @Override public boolean matches(Tag actual) { return value.equals(actual); }
+        @Override public Tag toTag() { return value.copy(); }
     }
 
     // ------------------------------------------------------------------ nodes

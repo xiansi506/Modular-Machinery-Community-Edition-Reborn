@@ -31,50 +31,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * The construct tool ({@code itemconstructtool}): the original's {@code ItemConstructTool} (70 lines), which is a
- * <b>selection-to-JSON tool and not a builder</b>.
- *
- * <h2>What the original does, with line references</h2>
- *
- * <p>There is exactly one handler, {@code onItemUse} — a right click ({@code ItemConstructTool.java:53-68}).
- * Repository-wide searches for {@code onLeftClick}, {@code LeftClick}, {@code attackEntity},
- * {@code setBlockState}, {@code buildStructure} and {@code placeStructure} find nothing for this item: the tool
- * <b>never places a block</b>, and there is no "build" half to port. What it does:
- *
- * <ol>
- *   <li>Gate ({@code :54}): server side, {@code player.isCreative()}, and
- *       {@code server.getPlayerList().canSendCommands(player.getGameProfile())}. Nothing else — no permission
- *       level for the machine, no blueprint, no limit on how many positions may be selected.</li>
- *   <li>Clicked block is a {@code BlockController} ({@code :57-61}): finalize. The selection is compressed to
- *       offsets relative to that controller, rotated until the controller faces north, and written to
- *       {@code machine-<player>-<timestamp>.json} in the machinery directory as a {@code {"parts": …}} fragment;
- *       then the selection is purged and the now-empty selection is synced to the client.</li>
- *   <li>Any other block ({@code :63-64}): toggle that position in the selection and sync it.</li>
- *   <li>Returns {@code EnumActionResult.SUCCESS} unconditionally ({@code :67}).</li>
- * </ol>
- *
- * <h2>Three translations this class has to make, and why</h2>
- *
- * <ol>
- *   <li><b>{@code canSendCommands} → {@code hasPermissions(2)}.</b> 1.12.2's
- *       {@code PlayerList#canSendCommands(GameProfile)} is the "may this player use commands" hook; its body was
- *       not available to read here, so the check is written against 1.20.1's own equivalent, the standard command
- *       permission level 2 ({@code Entity#hasPermissions(int)}, verified present with {@code javap}). Both
- *       candidate readings (op-list membership, or the level-2 permission) answer {@code true} for an ordinary
- *       operator in creative, which is the case the tool exists for. Recorded as D21.</li>
- *   <li><b>Returning {@code PASS} when the gate refuses.</b> 1.20.1 asks the item <i>before</i> the block
- *       ({@code PlayerInteractionManager#useItemOn}), so returning success unconditionally would stop a survival
- *       player from opening a controller's own GUI — which 1.12.2, where the block was asked first, did not do.
- *       Refusing with {@code PASS} is what keeps the original's <i>effective</i> behaviour.</li>
- *   <li><b>One log line the original does not have.</b> The fragment has no {@code registryname} on purpose (see
- *       {@link SelectionExport#toMachineJson}), so this project's loader logs a failure for it while it sits in
- *       the machinery directory — the original logged one too. Rather than leave the author with a scary error
- *       and no next step, the write says in the log what the file is and what to do with it, warns when
- *       positions had to be skipped, and warns when the fragment is very large. Warnings only: nothing is
- *       refused, and the file's bytes are exactly what the original would have written. Recorded as D21.</li>
- * </ol>
- */
+/** Selects individual blocks and exports a complete, dimension-bound fragment from a controller click. */
 public final class ConstructToolItem extends Item {
 
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -98,21 +55,19 @@ public final class ConstructToolItem extends Item {
     }
 
     @Override
+    public InteractionResult onItemUseFirst(ItemStack stack, UseOnContext context) {
+        return useOn(context);
+    }
+
+    @Override
     public InteractionResult useOn(UseOnContext context) {
         Level level = context.getLevel();
         Player player = context.getPlayer();
         if (player == null) {
             return InteractionResult.PASS;
         }
-        if (level.isClientSide) {
-            // The click is the tool's on both sides, exactly as the original's unconditional SUCCESS.
-            return InteractionResult.SUCCESS;
-        }
-        // javap-verified: Entity#hasPermissions(int) is 1.20.1's command-permission check (see the class comment).
-        if (!maySelect(false, player.isCreative(), player.hasPermissions(2))) {
-            // The block keeps its own action: see translation (2) in the class comment.
-            return InteractionResult.PASS;
-        }
+        if (!player.isCreative() || !player.hasPermissions(2)) return InteractionResult.PASS;
+        if (level.isClientSide) return InteractionResult.SUCCESS;
         if (!(player instanceof ServerPlayer serverPlayer)) {
             return InteractionResult.PASS;
         }
@@ -120,10 +75,9 @@ public final class ConstructToolItem extends Item {
         BlockPos pos = context.getClickedPos();
         BlockState state = level.getBlockState(pos);
         if (state.getBlock() instanceof MachineControllerBlock) {
-            finalizeSelection(serverPlayer, level, pos, state.getValue(MachineControllerBlock.FACING));
-            // The original's own order (:60-61): purge, then sync the (now empty) selection.
-            ServerSelections.purge(serverPlayer);
-            SelectionSyncPacket.sendTo(serverPlayer, List.of());
+            boolean saved = finalizeSelection(serverPlayer, level, pos, state.getValue(MachineControllerBlock.FACING));
+            if (saved) ServerSelections.purge(serverPlayer);
+            SelectionSyncPacket.sendTo(serverPlayer, saved ? List.of() : ServerSelections.get(serverPlayer).positions());
         } else {
             StructureSelection selection = ServerSelections.toggle(serverPlayer, pos);
             SelectionSyncPacket.sendTo(serverPlayer, selection.positions());
@@ -131,65 +85,42 @@ public final class ConstructToolItem extends Item {
         return InteractionResult.SUCCESS;
     }
 
-    /**
-     * The original's {@code finalizeSelection} ({@code PlayerStructureSelectionHelper.java:77-126}): messages
-     * first, then the fragment, then the file.
-     */
-    private static void finalizeSelection(ServerPlayer player, Level level, BlockPos controller, Direction facing) {
+    private static boolean finalizeSelection(ServerPlayer player, Level level, BlockPos controller, Direction facing) {
         StructureSelection selection = ServerSelections.get(player);
         if (selection.isEmpty()) {
             player.displayClientMessage(Component.translatable("message.structurebuild.empty"), false);
-            return;
+            return false;
         }
-        player.displayClientMessage(Component.translatable("message.structurebuild.confirmrotation",
-                facing.getName()), false);
-        int steps = SelectionExport.rotationSteps(facing);
-        if (steps != 0) {
-            player.displayClientMessage(Component.translatable("message.structurebuild.confirmrotation.rotating",
-                    String.valueOf(steps * 90)), false);
-        }
-
-        SelectionExport.ExportPlan plan = SelectionExport.plan(level, selection.positions(), controller, facing);
-        if (plan.unavailable() > 0) {
-            LOGGER.warn("[{}] {} of {} selected position(s) were left out of the fragment: a chunk without them "
-                            + "loaded is skipped rather than read as air, and a block with no registry name cannot "
-                            + "be named in a definition. The fragment describes {} of them.",
-                    ModularMachineryReborn.MOD_ID, plan.unavailable(), plan.selected(), plan.parts().size());
-        }
-        if (plan.parts().size() >= LARGE_FRAGMENT) {
-            LOGGER.warn("[{}] This fragment has {} parts; the file will be large. Nothing is refused — the "
-                            + "original has no size limit either — but consider exporting a smaller selection.",
-                    ModularMachineryReborn.MOD_ID, plan.parts().size());
-        }
-        String json = SelectionExport.toMachineJson(plan.parts());
-
-        MinecraftServer server = player.getServer();
-        if (server != null && server.isDedicatedServer()) {
-            player.displayClientMessage(Component.translatable("message.structurebuild.warndedicated"), false);
-        }
-
+        player.displayClientMessage(Component.translatable("message.structurebuild.confirmrotation", facing.getName()), false);
         String fileName = MachineFragmentWriter.fileNameFor(player.getGameProfile().getName(), LocalDateTime.now());
         try {
-            Path written = MachineFragmentWriter.write(MachineDirectory.directory(), fileName, json);
-            player.displayClientMessage(Component.translatable("message.structurebuild.save",
-                    written.getFileName().toString()), false);
-            // The hint translation (3): the file is a fragment, and the loader will say so. Say the next step
-            // here instead of leaving the author to find the loader's own complaint.
-            LOGGER.info("[{}] Wrote a machine <fragment> to {}. It deliberately has no 'registryname', so the "
-                            + "loader cannot read it as a machine: copy its \"parts\" array into a machine "
-                            + "definition under data/<namespace>/machinery/ (or config/{}/machinery/) and give "
-                            + "that definition a \"registryname\".",
-                    ModularMachineryReborn.MOD_ID, written, ModularMachineryReborn.MOD_ID);
-        } catch (IOException exception) {
-            LOGGER.error("[{}] Could not save the machine fragment {}", ModularMachineryReborn.MOD_ID, fileName,
-                    exception);
+            SelectionExport.ExportPlan plan = SelectionExport.plan(level, selection.positions(), controller, facing);
+            if (plan.unavailable() > 0) {
+                player.displayClientMessage(Component.translatable("message.structurebuild.incomplete", plan.unavailable()), false);
+                return false;
+            }
+            if (plan.parts().size() >= LARGE_FRAGMENT) {
+                LOGGER.warn("Large construct-tool export: {} parts", plan.parts().size());
+            }
+            Path directory = MachineDirectory.directory().resolveSibling("exports");
+            Path written = SelectionExport.saveComplete(selection, plan, directory, fileName);
+            MinecraftServer server = player.getServer();
+            if (server != null && server.isDedicatedServer()) {
+                player.displayClientMessage(Component.translatable("message.structurebuild.warndedicated"), false);
+            }
+            player.displayClientMessage(Component.translatable("message.structurebuild.save", written.getFileName().toString()), false);
+            LOGGER.info("Wrote structure fragment to {}. Copy its parts into a machine definition and add registryname.", written);
+            return true;
+        } catch (IOException | RuntimeException exception) {
+            LOGGER.error("Could not export structure fragment {}. Selection retained.", fileName, exception);
             player.displayClientMessage(Component.translatable("message.structurebuild.fail"), false);
+            return false;
         }
     }
 
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
-        // The original's own tooltip line (ItemConstructTool.java:48-50), verbatim.
         tooltip.add(Component.translatable("tooltip.constructtool.creative").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.translatable("tooltip.constructtool.usage").withStyle(ChatFormatting.GRAY));
     }
 }

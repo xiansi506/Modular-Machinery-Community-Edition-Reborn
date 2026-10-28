@@ -27,9 +27,12 @@
 
 ## 当前状态（2026-10-28）
 
-- **源码 0.119.0**，Minecraft 1.20.1 / Forge / Java 17，协议 **9**。
-- 新增气动工艺与指定 Embers Rekindled 复刻版联动，提供 4 种仓口、压力／真空与空气数量需求、逐 tick 结算、余烬小数能量、KubeJS 方法、JEI 资源显示、持久化和共享事务。协议 **9**，两端同时更新。相关离线回归 **2954 项零失败**，另含 200 组 JEI 布局场景；生产 clean build/reobf 通过，本次提交同步 0.119.0 源码、资源、教学包、文档和配方技能；未实机或部署游戏，未创建 GitHub Release。
-- [中文说明](modular-machinery-reborn/docs/气动工艺与余烬.md)／[English](modular-machinery-reborn/docs/PneumaticCraft-and-Embers.md) · [更新记录](modular-machinery-reborn/docs/更新记录-0.119.0.md) · [归档](releases/modular-machinery-reborn/v0.119.0/README.md) · [交接](modular-machinery-reborn/docs/交接-2026-10-23.md)。
+- **源码 0.119.1**，Minecraft 1.20.1 / Forge / Java 17，协议 **10**。
+- 修复建造选择工具的 NBT 往返、方块状态旋转、右键交互、跨维度选区、失败后丢失选区、区块漏导出和文件名问题。片段改存 `config/modular_machinery_reborn/exports/`。专项 50 项、完整主套件 2668 项及既有集成专项合计 **3003 项零失败**，另有 200 组 JEI 几何场景；Java 17 `clean build --offline --no-daemon`／reobf **45s** 成功，JAR 含 215 个合法 JSON、中英各 441 个键。
+- 未启动／部署游戏，真实点击、高亮、多人及跨维度传送仍待实机验收；本次源码提交包含 0.119.1 修复、文档和两项创作者工具计划，未创建 Release。
+- 建造选择工具：[中文](modular-machinery-reborn/docs/建造选择工具.md)／[English](modular-machinery-reborn/docs/Construct-tool.md) · [修复记录](modular-machinery-reborn/docs/修复记录-0.119.1.md) · [本地归档](releases/modular-machinery-reborn/v0.119.1/README.md)。
+
+后续开发：[结构构造工具增强与可视化配方编辑器](modular-machinery-reborn/docs/创作者工具计划.md)已列入计划，均待实施。
 
 ## 从哪开始
 
@@ -57,7 +60,7 @@ cd modular-machinery-reborn
 ./gradlew build
 ```
 
-`build` 会执行 `reobfJar`；0.119.0 的正式构建产物为 **`modular-machinery-reborn/build/libs/modular_machinery_reborn-0.119.0.jar`**。本地归档使用 `modular-machinery-reborn-0.119.0.jar` 文件名。
+`build` 会执行 `reobfJar`；0.119.1 的正式构建产物为 **`modular-machinery-reborn/build/libs/modular_machinery_reborn-0.119.1.jar`**。本地归档使用 `modular-machinery-reborn-0.119.1.jar` 文件名。
 
 `gradle.properties` 默认 `use_local_deps=false`，走 Maven 依赖。离线构建需要把本地依赖 jar 放进 `modular-machinery-reborn/libs/` 并设置 `use_local_deps=true`；这些 jar 不随本仓库分发。
 
@@ -71,7 +74,7 @@ cd modular-machinery-reborn
 
 - 二进制 jar 通过 **GitHub Releases** 分发，**不入 Git 历史**。
 - 版本索引、SHA-256 与各版本说明见 [releases/modular-machinery-reborn/README.md](releases/modular-machinery-reborn/README.md)。
-- 已有至 0.119.0 的本地构建归档；Git 中保留版本说明和 SHA-256，二进制下载以实际创建的 GitHub Release 为准。
+- 已有至 0.119.1 的本地构建归档；Git 中保留版本说明和 SHA-256，二进制下载以实际创建的 GitHub Release 为准。
 
 ## 致谢
 
