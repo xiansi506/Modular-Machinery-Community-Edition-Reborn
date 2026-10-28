@@ -50,7 +50,7 @@
 - 归档：`releases/modular-machinery-reborn/v0.112.0/modular-machinery-reborn-0.112.0.jar`。
 - 大小：**1,268,932 字节**。
 - SHA-256：`5D23FAB3279C2539C0301CF33E931129361B78FD9A714E6681A3245AD530F197`。
-- [JSON／KubeJS 示例](../../modular-machinery-reborn/examples/preview-nbt/README.md) · [高级脚本指南](../../modular-machinery-reborn/docs/高级脚本指南.md)。
+- [JSON／KubeJS 示例](../../modular-machinery-reborn/examples/preview-nbt/README.md) · [高级脚本指南](../../modular-machinery-reborn/docs/进阶/高级脚本指南.md)。
 
 蓝图／JEI 显示字段按目标模组的 1.20.1 实体格式填写。预览不执行加工、开容器或赠送物品；需要 `lit`、朝向等状态时，写在方块状态描述符中。世界投影仪继续使用方块模型，这与本轮 GUI 显示 NBT 分开。
 

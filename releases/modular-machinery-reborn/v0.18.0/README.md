@@ -8,7 +8,7 @@
 roughly 3600–4800 new lines. This release is the reconnaissance, the split, and the first slice: the **upgrade data
 layer**, which is the only slice with no runtime behaviour and the prerequisite the other four share.
 
-See **[M6-升级与并行-分册.md](../../../modular-machinery-reborn/docs/专项/M6-升级与并行-分册.md)** for the full survey,
+See **[M6-升级与并行-分册.md](../../../modular-machinery-reborn/docs/归档/专项/M6-升级与并行-分册.md)** for the full survey,
 dependency-ordered split, data-model design and risks.
 
 ## Three premises overturned during reconnaissance

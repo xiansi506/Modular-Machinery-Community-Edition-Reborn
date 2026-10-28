@@ -10,7 +10,7 @@ The preview **works**: the user confirmed in game that JEI's Machine Structure p
 the component block row along the bottom. A separate, still-undescribed problem remains, and this part of the
 mod has been **handed to someone else**.
 
-**Read [`交接-3D结构预览.md`](../../../modular-machinery-reborn/docs/专项/交接-3D结构预览.md) before touching it.** That
+**Read [`交接-3D结构预览.md`](../../../modular-machinery-reborn/docs/归档/专项/交接-3D结构预览.md) before touching it.** That
 document is the handover: code map, the original's layout numbers with sources, every verified 1.20.1 API fact,
 **nine assumptions that were never verified**, and a ranked list of candidate problems with how to tell them
 apart.

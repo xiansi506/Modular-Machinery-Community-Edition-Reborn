@@ -8,4 +8,4 @@ SHA-256：`8865D828E53C53EE4B709EE630EA7996B90C764401AC96A36FE947DDFFB718E9`
 
 完整套件 2669、新增专项 58、既有回归 366、可选依赖类加载 67 项均零失败（合计 3160）；生产 build/reobf 34s、181 JSON、中英各 403 键、SRG 与协议 6 检查通过。
 
-Minecraft 1.20.1 / Forge 47.2.0 / Java 17；协议 6，两端同时更新。来自 build/reobfJar/output.jar。未实机、未部署、未上传。详见 [使用说明](../../../modular-machinery-reborn/docs/能源与特殊渲染.md)。
+Minecraft 1.20.1 / Forge 47.2.0 / Java 17；协议 6，两端同时更新。来自 build/reobfJar/output.jar。未实机、未部署、未上传。详见 [使用说明](../../../modular-machinery-reborn/docs/联动/能源与特殊渲染.md)。

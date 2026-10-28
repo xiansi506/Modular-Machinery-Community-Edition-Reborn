@@ -13,7 +13,7 @@ Minecraft 1.20.1 / Forge / Java 17，协议 **7**。
 
 未启动 Forge 游戏或进行 OpenGL 视觉验收。JEI runtime 服务和液体调度器在专项中使用相应测试替身；实际物品提示、R/U 操作、流体混合及 GeckoLib 模型／动画仍待实机。未部署、暂存、提交、推送、上传 GitHub 或创建 Release；实例仍为原有 0.118.0。第三方配方适配器、其他魔法及 Flux／DE 之外的能源不扩展。
 
-[中英文预览指南](../../../modular-machinery-reborn/docs/结构预览.md) · [修复记录](../../../modular-machinery-reborn/docs/修复记录-0.118.2.md) · [交接](../../../modular-machinery-reborn/docs/交接-2026-10-23.md)
+[中英文预览指南](../../../modular-machinery-reborn/docs/进阶/结构预览.md) · [修复记录](../../../modular-machinery-reborn/docs/归档/版本记录/修复记录-0.118.2.md) · [交接](../../../modular-machinery-reborn/docs/开发/交接-2026-10-23.md)
 
 ## English
 

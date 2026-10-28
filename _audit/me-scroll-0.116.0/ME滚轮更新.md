@@ -22,4 +22,4 @@
 
 自动任务 ID `automation`，已通过工具创建并查看，配置在本聊天的 heartbeat；需保持电脑与应用运行。游戏实例 0.110.0 未修改；未提交／推送／部署。实际后续进度以聊天和交接为准。
 
-[使用说明](../../modular-machinery-reborn/docs/ME总线滚轮.md) · [后续计划](../../modular-machinery-reborn/docs/后续移植计划.md) · [交接](../../modular-machinery-reborn/docs/交接-2026-10-23.md)
+[使用说明](../../modular-machinery-reborn/docs/联动/ME总线滚轮.md) · [后续计划](../../modular-machinery-reborn/docs/开发/后续移植计划.md) · [交接](../../modular-machinery-reborn/docs/开发/交接-2026-10-23.md)

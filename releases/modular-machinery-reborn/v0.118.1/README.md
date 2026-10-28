@@ -13,4 +13,4 @@ Minecraft 1.20.1 / Forge / Java 17，协议 **7**。
 
 没有新增集成，其他魔法体系、第三方配方适配器及 Flux／DE 之外的能源仍不做。本轮未实机、未部署、未提交／推送；实例实查已由其他会话更新到 0.118.0，本次 0.118.1 修复包尚未部署。
 
-[中英文修复说明](../../../modular-machinery-reborn/docs/修复记录-0.118.1.md) · [交接](../../../modular-machinery-reborn/docs/交接-2026-10-23.md)
+[中英文修复说明](../../../modular-machinery-reborn/docs/归档/版本记录/修复记录-0.118.1.md) · [交接](../../../modular-machinery-reborn/docs/开发/交接-2026-10-23.md)

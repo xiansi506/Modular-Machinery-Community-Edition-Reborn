@@ -10,4 +10,4 @@
 - SHA-256：`3C7160D5926E170F9DBCFA574F53AC4913D1E067EF5F9E54DA32813B0FDB74AC`。
 - 来源：`modular-machinery-reborn/build/reobfJar/output.jar`。
 
-[中英文修复记录](../../../modular-machinery-reborn/docs/修复记录-0.118.5.md) · [交接](../../../modular-machinery-reborn/docs/交接-2026-10-23.md)。
+[中英文修复记录](../../../modular-machinery-reborn/docs/归档/版本记录/修复记录-0.118.5.md) · [交接](../../../modular-machinery-reborn/docs/开发/交接-2026-10-23.md)。

@@ -6,4 +6,4 @@ JAR：`modular-machinery-reborn-0.119.0.jar`，1513188 字节。
 
 SHA-256：`E14011CFACA9A3DB2B9514FBC72FD48A7C1B8DD4161EB7BD33073C1E229B92FC`。
 
-[更新记录](../../../modular-machinery-reborn/docs/更新记录-0.119.0.md) · [教程](../../../modular-machinery-reborn/docs/气动工艺与余烬.md)。
+[更新记录](../../../modular-machinery-reborn/docs/归档/版本记录/更新记录-0.119.0.md) · [教程](../../../modular-machinery-reborn/docs/联动/气动工艺与余烬.md)。

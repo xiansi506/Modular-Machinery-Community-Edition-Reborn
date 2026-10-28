@@ -13,7 +13,7 @@ Minecraft 1.20.1 / Forge / Java 17，协议 **7**。
 
 没有启动游戏或验证修复后的 OpenGL 画面，没有部署、暂存、提交、推送或上传 GitHub。实例仍为用户已安装的 0.118.2；原包哈希已核对并保持不变。
 
-[中英文修复记录](../../../modular-machinery-reborn/docs/修复记录-0.118.3.md) · [预览指南](../../../modular-machinery-reborn/docs/结构预览.md) · [交接](../../../modular-machinery-reborn/docs/交接-2026-10-23.md)
+[中英文修复记录](../../../modular-machinery-reborn/docs/归档/版本记录/修复记录-0.118.3.md) · [预览指南](../../../modular-machinery-reborn/docs/进阶/结构预览.md) · [交接](../../../modular-machinery-reborn/docs/开发/交接-2026-10-23.md)
 
 ## English
 

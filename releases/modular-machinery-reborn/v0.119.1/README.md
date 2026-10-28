@@ -10,4 +10,4 @@ SHA-256：`5A2696FA11AE4DCFBC10E1A42B266FA502E3D3930F5A7214B570B9AFD3D61983`。
 
 未启动／部署游戏，真实点击、高亮、多人及跨维度传送仍待实机验收；本次源码提交包含 0.119.1 修复、文档和两项创作者工具计划，未创建 Release。
 
-[修复记录](../../../modular-machinery-reborn/docs/修复记录-0.119.1.md) · [中文教程](../../../modular-machinery-reborn/docs/建造选择工具.md) · [English](../../../modular-machinery-reborn/docs/Construct-tool.md)。
+[修复记录](../../../modular-machinery-reborn/docs/归档/版本记录/修复记录-0.119.1.md) · [中文教程](../../../modular-machinery-reborn/docs/建造选择工具.md) · [English](../../../modular-machinery-reborn/docs/en/Construct-tool.md)。

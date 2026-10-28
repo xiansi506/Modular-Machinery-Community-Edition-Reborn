@@ -10,4 +10,4 @@ SHA-256：`4E2A6956FCB69296F0B83610EDB8B84B839E148AC245A477D8E972DE64BD3E19`。
 
 未启动或部署游戏，真实 GUI、点击、高亮、跨维度和多人仍待实机验收；本轮未暂存、提交、推送或创建 Release。
 
-[更新记录](../../../modular-machinery-reborn/docs/更新记录-0.120.0.md) · [中文操作](../../../modular-machinery-reborn/docs/建造选择工具.md) · [English](../../../modular-machinery-reborn/docs/Construct-tool.md)。
+[更新记录](../../../modular-machinery-reborn/docs/归档/版本记录/更新记录-0.120.0.md) · [中文操作](../../../modular-machinery-reborn/docs/建造选择工具.md) · [English](../../../modular-machinery-reborn/docs/en/Construct-tool.md)。

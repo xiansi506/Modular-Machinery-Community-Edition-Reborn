@@ -24,4 +24,4 @@ With a north-facing generic controller at the origin, put item input at `(-1,0,0
 
 These recipes are demonstration content, not conversions imported from third-party machines. Parser checks are offline; in-game construction and resource behavior remain to be verified. Remove the selected pack and reload to uninstall it.
 
-[完整中文说明](../../docs/魔法资源.md) · [English guide](../../docs/Magic-resources.md)
+[完整中文说明](../../docs/联动/魔法资源.md) · [English guide](../../docs/en/Magic-resources.md)

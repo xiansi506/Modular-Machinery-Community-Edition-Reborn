@@ -13,4 +13,4 @@ Minecraft 1.20.1 / Forge 47.2.0 / Java 17。协议 **7**，两端一起升级。
 
 其他魔法体系继续留空；不新增第三方配方适配器，能源仍只对接 FluxNetworks 和龙之研究。未实机、未部署、未上传、未提交或推送；实例仍 0.110.0。本地构建归档不代表已发布或完成实机验收。
 
-[中文说明](../../../modular-machinery-reborn/docs/魔法资源.md) · [English](../../../modular-machinery-reborn/docs/Magic-resources.md) · [交接](../../../modular-machinery-reborn/docs/交接-2026-10-23.md)
+[中文说明](../../../modular-machinery-reborn/docs/联动/魔法资源.md) · [English](../../../modular-machinery-reborn/docs/en/Magic-resources.md) · [交接](../../../modular-machinery-reborn/docs/开发/交接-2026-10-23.md)

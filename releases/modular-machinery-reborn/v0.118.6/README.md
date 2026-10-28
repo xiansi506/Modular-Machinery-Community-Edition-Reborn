@@ -10,4 +10,4 @@ JEI 自然灵气需求改用 gugu-utils 风格的 6×80 绿色竖条，支持输
 - SHA-256：`0B69905FBA631FE6FDE087B7693C8BD2078F6DE4E4D174C4603741BFD5761736`。
 - 来源：`modular-machinery-reborn/build/reobfJar/output.jar`。
 
-[中英文更新记录](../../../modular-machinery-reborn/docs/更新记录-0.118.6.md) · [显示说明](../../../modular-machinery-reborn/docs/魔法资源.md) · [交接](../../../modular-machinery-reborn/docs/交接-2026-10-23.md)。
+[中英文更新记录](../../../modular-machinery-reborn/docs/归档/版本记录/更新记录-0.118.6.md) · [显示说明](../../../modular-machinery-reborn/docs/联动/魔法资源.md) · [交接](../../../modular-machinery-reborn/docs/开发/交接-2026-10-23.md)。

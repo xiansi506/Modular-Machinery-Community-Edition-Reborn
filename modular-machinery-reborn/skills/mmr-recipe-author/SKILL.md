@@ -63,7 +63,7 @@ JSON 数据包根含 `pack.mcmeta` 和 `data/`，1.20.1 的 `pack_format` 为 15
 | 需求字段与 NBT | 上述 `recipe/` 目录内的 `RequirementTypes.java`、`MachineRequirementParser.java`、`IngredientArrayParser.java`、`CatalystParser.java`、`NbtPredicate.java` |
 | typed 方法 | `src/main/java/com/reborn/modularmachinery/kubejs/MachineRecipeJS.java` |
 | 机器字段 | `src/main/java/com/reborn/modularmachinery/machine/MachineSchema.java` |
-| 魔法、气体 | `docs/魔法资源.md`；`magic/MagicRequirements.java`、`magic/MagicRequirement.java`、`compat/mekanism/MekanismModule.java`（后者位于同一 Java 包根） |
-| 脚本回调与高级结构 | `docs/高级脚本指南.md`、`docs/进阶结构示例.md` |
+| 魔法、气体 | `docs/联动/魔法资源.md`；`magic/MagicRequirements.java`、`magic/MagicRequirement.java`、`compat/mekanism/MekanismModule.java`（后者位于同一 Java 包根） |
+| 脚本回调与高级结构 | `docs/进阶/高级脚本指南.md`、`docs/进阶/进阶结构示例.md` |
 
 旧注释可能记录历史限制；以当前解析器、注册逻辑和可复现行为判断支持情况。

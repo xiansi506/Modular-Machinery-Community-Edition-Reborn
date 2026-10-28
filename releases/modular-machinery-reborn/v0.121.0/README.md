@@ -12,4 +12,4 @@ SHA-256：`4F1364AC489697AB50DB6968669D334AE99B88F94DDF4CD613689AB3FB19F8F0`。
 
 Visual recipe editor: existing-machine/resource forms, JEI drops, typed NBT, preserved advanced JSON, server validation and JSON/KubeJS exports. Creative mode and permission level 2 are required. Offline validation passed; real game acceptance remains pending. This source commit includes both creator tools; a binary GitHub Release has not been created.
 
-[中文教程](../../../modular-machinery-reborn/docs/可视化配方编辑器.md)／[English](../../../modular-machinery-reborn/docs/Visual-recipe-editor.md)／[更新记录](../../../modular-machinery-reborn/docs/更新记录-0.121.0.md)。
+[中文教程](../../../modular-machinery-reborn/docs/可视化配方编辑器.md)／[English](../../../modular-machinery-reborn/docs/en/Visual-recipe-editor.md)／[更新记录](../../../modular-machinery-reborn/docs/归档/版本记录/更新记录-0.121.0.md)。
