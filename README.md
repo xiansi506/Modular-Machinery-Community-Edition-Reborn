@@ -76,6 +76,13 @@ cd modular-machinery-reborn
 - 版本索引、SHA-256 与各版本说明见 [releases/modular-machinery-reborn/README.md](releases/modular-machinery-reborn/README.md)。
 - 已有至 0.119.1 的本地构建归档；Git 中保留版本说明和 SHA-256，二进制下载以实际创建的 GitHub Release 为准。
 
+## 项目贡献者
+
+| 贡献者 | 参与内容 |
+|---|---|
+| [xiansi506](https://github.com/xiansi506) | 项目维护、需求设计与发布 |
+| [Codex](https://github.com/codex)（OpenAI AI 开发助手） | AI 辅助功能移植、代码审查与问题修复、回归验证、中英文文档整理 |
+
 ## 致谢
 
 - 感谢 [Modular Machinery: Community Edition（MMCE）](https://github.com/NovaEngineering-Source/ModularMachinery-Community-Edition) 的 **KasumiNova、youyihj、ikexing** 及所有社区贡献者。社区版的开源代码、资源与功能设计，是本项目进行 1.20.1 移植的基础。
